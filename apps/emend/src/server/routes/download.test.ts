@@ -912,6 +912,55 @@ test("does not use another revision's media or a parented doc asset", async () =
   expect(await (await get(reviewId, 2)).text()).not.toContain("data:image/png");
 });
 
+test("writeup downloads omit a verdict stored by an older revision", async () => {
+  const { reviewId } = await publish();
+  const revision = await f.db.read((q) =>
+    q
+      .select()
+      .from(revisions)
+      .where(and(eq(revisions.ownerId, f.ownerId), eq(revisions.reviewId, reviewId), eq(revisions.seq, 1)))
+      .get(),
+  );
+  if (!revision) throw new Error("Missing revision");
+  const view = await revisionView(reviewId);
+  const marker = "StoredDownloadVerdictMarker";
+  const rendered = {
+    ...view.writeup,
+    sections: [
+      ...view.writeup.sections,
+      {
+        key: "review",
+        label: "Review",
+        topic: null,
+        blocks: [
+          {
+            id: "review-12345678",
+            section: "review",
+            kind: "paragraph",
+            text: `Read everything. ${marker}`,
+            html: `<p><strong>Read everything.</strong> ${marker} <script>alert(1)</script><img src=x onerror=alert(1)></p>`,
+          },
+        ],
+      },
+    ],
+  };
+  const renderedBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(rendered)), "application/json");
+  await f.db.query((q) =>
+    q
+      .update(writeups)
+      .set({ renderedBlob })
+      .where(and(eq(writeups.ownerId, f.ownerId), eq(writeups.revisionId, revision.id))),
+  );
+  const response = await get(reviewId);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("Content-Type")).toContain("text/html");
+  const html = await response.text();
+  expect(html).toContain("First revision text");
+  expect(html).not.toContain("<h2>Review</h2>");
+  expect(html).not.toContain(marker);
+  expect(html).not.toContain("Read everything.");
+});
+
 test.each(["not JSON", '{"sections":"invalid"}'])("refuses malformed stored writeup %s", async (content) => {
   const { reviewId } = await publish();
   const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(content), "application/json");

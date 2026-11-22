@@ -877,6 +877,8 @@ export async function buildWriteupDownload(
   };
   const content = await withThreads(input.threads, state, async (ctx) => {
     for (const section of input.writeup.sections) {
+      // Older revisions stored a verdict section; emend shows it nowhere.
+      if (section.key === "review") continue;
       if (section.key === "newInRevision" && input.details.seq < 2) continue;
       if (section.key === "needsYou" && input.writeup.needsYou !== undefined) {
         const blocks = new Map(section.blocks.map((block) => [block.id, block]));
@@ -943,7 +945,6 @@ export async function buildWriteupDownload(
         "whyItMatters",
         "newInRevision",
         "needsYou",
-        "review",
         "checked",
         "notChecked",
         "outOfScope",

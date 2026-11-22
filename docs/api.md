@@ -1044,9 +1044,10 @@ names the entry's first glossary block. Old revisions, empty lists and Markdown 
 Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
-true only when overview, tldr, whyItMatters, every newInRevision and needsYou item's text, the review verdict's reason, checked, notChecked, outOfScope,
+true only when overview, tldr, whyItMatters, every newInRevision and needsYou item's text, checked, notChecked, outOfScope,
 whereToLook, context, deviations, decisions, glossary, and every topic's why, example and body are missing or
-whitespace only. The plain-text area does not make a writeup non-empty. Both fields are stored
+whitespace only. A `review` verdict does not count because it is never shown.
+The plain-text area does not make a writeup non-empty. Both fields are stored
 on the revision; revisions predating these fields read as `main: null`, `writeupEmpty: false` and keep opening on Writeup.
 Without an explicit visible `tab` in the URL, the app opens the main page when set; otherwise
 it opens Writeup if it has text, the first doc in manifest order, Diff if any file has role
@@ -1921,7 +1922,8 @@ There are at most `topicsPerReview` declared topics plus the optional generated 
 topic (importance 100, last); at most `filesPerRevision` files. Base and head are null together.
 `PublishFile = { path, oldPath: FilePath | null, role, status?, topic?, title?, view?: DocView, oldBlob: sha256 | null,
 newBlob: sha256 | null, flag: FileFlag | null, parent?: FilePath, assets?: FilePath[], notes?: AgentNote[] }`. Paths and topic slugs are
-unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup, newInRevision, needsYou and review-verdict topics must be declared.
+unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup,
+newInRevision and needsYou topics must be declared. Verdict topics are not checked against them.
 `assets` is required for rendered HTML docs (including an empty array), optional for rendered Markdown
 docs, and absent on other files, including source-view docs. Lists contain no duplicates, and each
 path names a request asset inside the doc's folder. Markdown lists allow only png, jpg, jpeg, gif,
@@ -2089,7 +2091,7 @@ one line; the refinement errors are `newInRevision quote must not be blank`,
 backtick characters is refused with `newInRevision quote must contain text`.
 After rendering all sections, the renderer searches only `t-<slug>-why`, `-example` and `-body`
 for a topic, only the named section for a section, or every writeup section except
-`newInRevision`, `needsYou` and `review` for a quote alone. Matching makes two passes over the
+`newInRevision` and `needsYou` for a quote alone. Matching makes two passes over the
 same scope and section order. The first normalizes both quote and block text to NFC, collapses
 whitespace runs to one space and trims the ends, preserving all other characters. Both passes
 compare block text as rendered, without removing literal `*`, `_` or backtick characters.
@@ -2122,29 +2124,23 @@ with non-whitespace text, well-formed UTF-16, no control or format characters (`
 no U+2028 or U+2029, and no filler characters U+115F, U+1160, U+3164, U+FFA0 or U+2800.
 These opening fields are optional and additive under `/api/v1`.
 The fields `outOfScope`, `whereToLook`, `context`, `review`, `checked` and `notChecked` are optional, additive fields under `/api/v1`.
-`ReviewVerdict = { level: "skim" | "topics" | "everything", topics?: TopicSlug[], reason }` is the
-agent's advice on how deep to read. `topics` is required for level `topics` and refused for the
-other levels; it holds 1–`topicsPerReview` unique declared topic slugs. `reason` is Markdown with
-non-whitespace text. A verdict must agree with the topics' attention, or the manifest and the
-publish request are refused: any `critical` topic needs level `everything` (`a critical topic needs
-level everything`); level `skim` needs every declared topic at attention `skim` (`level skim needs
-every topic at attention skim`); level `topics` must name every topic at attention `review` (`level
-topics must name every topic at attention review`). The generated `other` topic counts too: a
-request that holds it, because some changed files have no declared topic, cannot take level `skim`
-(`level skim needs every changed file in a declared topic`).
-The renderer composes the Review section: a bold "Skim, then merge.", "Read everything." or
-"Read topic(s) “<title>” …", followed on the same line by `reason`. Each title is escaped, so its
-Markdown and HTML stay literal; a bare URL, `www.` address or email in a title still becomes a
-hardened link, as in other writeup text. A `reason` with blank lines adds paragraphs. `checked` (what the
-agent ran or verified) and `notChecked` (what it did not) are Markdown with non-whitespace text.
+`ReviewVerdict = { level: "skim" | "topics" | "everything", topics?: TopicSlug[], reason }` is
+accepted as `review` from older agents and not shown. Its shape is still checked: `topics` is
+required for level `topics` and refused for the other levels; it holds 1–`topicsPerReview` unique
+topic slugs. `reason` is Markdown with non-whitespace text and counts toward the byte limits.
+emend no longer checks it against the declared topics or their attention, renders no Review
+section for it, and leaves out the Review section an older revision stored, in the app and in
+the writeup download.
+`checked` (what the agent ran or verified) and `notChecked` (what it did not) are Markdown with
+non-whitespace text.
 When any of these fields or `whyItMatters` or `area` is present (`outOfScope`, `whereToLook` and
-`context` count even as an empty string), sections render as TL;DR, Why it matters, Review, Checked,
+`context` count even as an empty string), sections render as TL;DR, Why it matters, Checked,
 Not checked, Overview, Out of scope, Where to look, Context, Decisions and drift, Glossary, then
 topics; absent optional fields emit no section.
 Without them, the existing order stays Overview, TL;DR, Decisions and drift, Glossary, then topics,
 including when an import re-renders stored source.
 Nonempty `newInRevision` and `needsYou` lists add New in this revision and Needs you sections,
-in that order: after Why it matters and before Review in the new order, or after TL;DR and
+in that order: after Why it matters and before Checked in the new order, or after TL;DR and
 before Decisions in the old order. Neither field selects the new layout by itself. Each item's
 text renders separately through the same sanitizer, link hardener and Shiki pipeline, with
 unique block IDs across its list (`-2`, `-3` suffixes for repeats). The download includes New in
@@ -2741,8 +2737,9 @@ that exceed the remaining budget are listed as oversized without uploading their
 - Blob hashes are lowercase 64-character hex SHA-256 digests, addressed per owner.
 - Block ids are `<section>-<hash8>`. `hash8` is the first eight lowercase hex characters of SHA-256
   over block text normalized to NFC, whitespace runs collapsed to one space, and trimmed. Repeats
-  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `whyItMatters`, `newInRevision`, `needsYou`, `review`,
-  `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `deviations`, `decisions`, `glossary`,
+  within a section append `-2`, `-3`, and so on. Section keys are `overview`, `tldr`, `whyItMatters`,
+  `newInRevision`, `needsYou`, `review` (stored by older revisions only), `checked`, `notChecked`,
+  `outOfScope`, `whereToLook`, `context`, `deviations`, `decisions`, `glossary`,
   `t-<slug>-why`, `t-<slug>-example`, `t-<slug>-body`, and
   `doc-<hash8 of the doc path>`. The complete block id is bounded by `pathChars`.
 - Bearer tokens are `em_`, reviewer session secrets `ems_`, and pairing secrets `emp_`, followed

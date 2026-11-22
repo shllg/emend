@@ -8,7 +8,7 @@ import {
   isRenderedHtmlDoc,
   LIMITS,
   PublishRequest,
-  writeupMarkdown,
+  writeupIsEmpty,
 } from "@emend/contract";
 import { decodeText } from "@emend/core";
 import { and, eq } from "drizzle-orm";
@@ -282,10 +282,7 @@ export async function prepareImport(
         sourceBlobs: result.sourceBlobs,
         sourceMetadata: result.sourceMetadata,
       });
-      empty.set(
-        revision.id,
-        writeupMarkdown(input.writeup).every((s) => !s?.trim()),
-      );
+      empty.set(revision.id, writeupIsEmpty(input.writeup));
     }
     // Spend the shared counting budget on the revision the reviewer opens first.
     for (const revision of revisionsToCount.reverse())

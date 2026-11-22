@@ -773,7 +773,6 @@ test.each(["review and checks", "checked only"])("a round trip keeps %s and reco
     expect(revision.writeupEmpty).toBe(false);
     expect(revision.writeup.sections.map(({ key, label }) => [key, label])).toEqual([
       ["tldr", "TL;DR"],
-      ...(withVerdict ? [["review", "Review"]] : []),
       ["checked", "Checked"],
       ...(withVerdict ? [["notChecked", "Not checked"]] : []),
       ["overview", "Overview"],
@@ -784,9 +783,35 @@ test.each(["review and checks", "checked only"])("a round trip keeps %s and reco
       revision.writeup.sections.find((section) => section.key === key)?.blocks.map((block) => block.text);
     expect(text("checked")).toEqual([source.checked]);
     if (withVerdict) {
-      expect(text("review")).toEqual([`Read topic “Synthetic topic”. ${source.review?.reason}`]);
+      expect(text("review")).toBeUndefined();
+      for (const block of revision.writeup.sections.flatMap((section) => section.blocks)) {
+        expect(block.text).not.toContain(source.review?.reason);
+        expect(block.html).not.toContain(source.review?.reason);
+      }
       expect(text("notChecked")).toEqual([source.notChecked]);
     }
+  }
+});
+
+test("a round trip recomputes a verdict-only writeup as empty", async () => {
+  const input = await bundle(f);
+  const source: WriteupInput = {
+    overview: "",
+    tldr: "",
+    decisions: "",
+    glossary: "",
+    topics: {},
+    review: { level: "skim", reason: "Synthetic reason." },
+  };
+  const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(JSON.stringify(source)), "application/json");
+  for (const row of input.writeups) row.sourceBlob = hash;
+  for (const revision of input.revisions) revision.writeupEmpty = false;
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  for (const row of input.revisions) {
+    const response = await f.request(`/reviews/${input.review.id}/revisions/${row.seq}`, "GET");
+    expect(response.status).toBe(200);
+    const revision = RevisionView.parse(await response.json());
+    expect(revision.writeupEmpty).toBe(true);
   }
 });
 

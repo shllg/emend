@@ -6,7 +6,6 @@ import {
   type NewInRevisionSection,
   normalizeGlossaryForm,
   type PublishLinks,
-  type ReviewVerdict,
   type TopicMeta,
   type WriteupInput,
 } from "@emend/contract";
@@ -50,21 +49,6 @@ function normalizeMarkdownQuote(quote: string): string {
     else if ("children" in node) pending.push(...node.children.toReversed());
   }
   return normalizeText(parts.join(""));
-}
-
-function reviewMarkdown(review: ReviewVerdict, topics: TopicMeta[]): string {
-  let verdict = review.level === "skim" ? "Skim, then merge." : "Read everything.";
-  if (review.level === "topics") {
-    const names = (review.topics ?? []).map((slug) => {
-      const title = (topics.find((topic) => topic.slug === slug)?.title ?? slug).replace(/\s+/g, " ").trim();
-      return `“${escapeMarkdown(title)}”`;
-    });
-    verdict =
-      names.length === 1
-        ? `Read topic ${names[0]}.`
-        : `Read topics ${names.slice(0, -1).join(", ")} and ${names.at(-1)}.`;
-  }
-  return `**${verdict}** ${review.reason}`;
 }
 
 /** `meta.media` maps declared media paths to their SHA-256; only those paths resolve as images. */
@@ -164,6 +148,7 @@ export async function renderWriteup(
   if (
     writeup.whyItMatters !== undefined ||
     writeup.area !== undefined ||
+    // review is accepted from older agents and still picks this order, but never renders.
     writeup.review !== undefined ||
     writeup.checked !== undefined ||
     writeup.notChecked !== undefined ||
@@ -174,7 +159,6 @@ export async function renderWriteup(
     await append("tldr", "TL;DR", writeup.tldr);
     await append("whyItMatters", "Why it matters", writeup.whyItMatters);
     await appendOpeningItems();
-    await append("review", "Review", writeup.review ? reviewMarkdown(writeup.review, topics) : undefined);
     await append("checked", "Checked", writeup.checked);
     await append("notChecked", "Not checked", writeup.notChecked);
     await append("overview", "Overview", writeup.overview);
@@ -249,7 +233,7 @@ export async function renderWriteup(
     if (item.quote !== undefined) {
       const candidates = sections
         .filter((section) => {
-          if (["newInRevision", "needsYou", "review"].includes(section.key)) return false;
+          if (["newInRevision", "needsYou"].includes(section.key)) return false;
           if (item.topic !== undefined)
             return [`t-${item.topic}-why`, `t-${item.topic}-example`, `t-${item.topic}-body`].includes(section.key);
           return item.section === undefined || section.key === item.section;

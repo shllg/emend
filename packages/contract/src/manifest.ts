@@ -14,6 +14,7 @@ const markdown = z
   );
 const nonBlankMarkdown = markdown.refine((text) => /\S/.test(text), "must not be blank");
 
+/** Accepted from older agents; shape and size are checked, never topic agreement, and it is never shown. */
 export const ReviewVerdict = z
   .object({
     level: z.enum(["skim", "topics", "everything"]),
@@ -36,38 +37,6 @@ export const ReviewVerdict = z
     }
   });
 export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
-
-export function reviewVerdictIssues(
-  review: ReviewVerdict | undefined,
-  topics: readonly { slug: string; attention?: "critical" | "review" | "skim" }[],
-): { path: (string | number)[]; message: string }[] {
-  if (review === undefined) return [];
-  const issues: { path: (string | number)[]; message: string }[] = [];
-  if (review.level !== "everything" && topics.some((topic) => topic.attention === "critical")) {
-    issues.push({ path: ["writeup", "review", "level"], message: "a critical topic needs level everything" });
-  }
-  if (review.level === "skim") {
-    if (topics.some((topic) => topic.slug === OTHER_TOPIC.slug && topic.attention !== "skim")) {
-      issues.push({
-        path: ["writeup", "review", "level"],
-        message: "level skim needs every changed file in a declared topic",
-      });
-    }
-    if (topics.some((topic) => topic.slug !== OTHER_TOPIC.slug && topic.attention !== "skim")) {
-      issues.push({ path: ["writeup", "review", "level"], message: "level skim needs every topic at attention skim" });
-    }
-  }
-  if (review.level === "topics") {
-    const named = new Set(review.topics);
-    if (topics.some((topic) => topic.attention === "review" && !named.has(topic.slug))) {
-      issues.push({
-        path: ["writeup", "review", "topics"],
-        message: "level topics must name every topic at attention review",
-      });
-    }
-  }
-  return issues;
-}
 
 export const normalizeGlossaryForm = (text: string) => text.normalize("NFC").replace(/\s+/gu, " ").trim();
 const glossaryForm = z
@@ -224,13 +193,21 @@ export const WriteupInput = writeupInput.refine((writeup) => {
 }, "writeup exceeds the total UTF-8 byte limit");
 
 export function writeupMarkdown(writeup: WriteupInput): (string | null | undefined)[] {
+  return [...shownWriteupMarkdown(writeup), writeup.review?.reason];
+}
+
+/** True when no shown writeup text has non-whitespace content; the hidden verdict reason counts only toward byte limits. */
+export function writeupIsEmpty(writeup: WriteupInput): boolean {
+  return shownWriteupMarkdown(writeup).every((section) => !section?.trim());
+}
+
+function shownWriteupMarkdown(writeup: WriteupInput): (string | null | undefined)[] {
   return [
     writeup.overview,
     writeup.tldr,
     ...(writeup.whyItMatters !== undefined ? [writeup.whyItMatters] : []),
     ...(writeup.newInRevision ?? []).map((item) => item.text),
     ...(writeup.needsYou ?? []).map((item) => item.text),
-    writeup.review?.reason,
     writeup.checked,
     writeup.notChecked,
     writeup.outOfScope,
@@ -340,15 +317,6 @@ export const PublishManifest = z
       }
       topics.add(topic.slug);
     }
-    for (const [index, slug] of (manifest.writeup.review?.topics ?? []).entries()) {
-      if (!topics.has(slug)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["writeup", "review", "topics", index],
-          message: "review topic is not declared",
-        });
-      }
-    }
     for (const [index, item] of (manifest.writeup.newInRevision ?? []).entries()) {
       if (item.topic !== undefined && !topics.has(item.topic)) {
         ctx.addIssue({
@@ -366,9 +334,6 @@ export const PublishManifest = z
           message: "needsYou topic is not declared",
         });
       }
-    }
-    for (const { path, message } of reviewVerdictIssues(manifest.writeup.review, manifest.topics)) {
-      ctx.addIssue({ code: "custom", path, message });
     }
     const paths = new Set<string>();
     for (const [index, file] of manifest.files.entries()) {
