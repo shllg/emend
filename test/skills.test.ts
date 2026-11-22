@@ -1194,6 +1194,6 @@ test("revision news guidance writes only fresh changes and keeps process in the 
     expect(manifest).toContain(rule);
   for (const guidance of [feedback, manifest])
     expect(guidance).toContain(
-      "To land on one block, add `quote` with a few words copied from that block's text, without Markdown marks; a quote that matches nothing jumps to the topic or section.",
+      "To land on one block, add `quote` with a few words copied from its text without Markdown marks; an unmatched quote falls back to the line's topic or section if named, otherwise the line has no jump.",
     );
 });

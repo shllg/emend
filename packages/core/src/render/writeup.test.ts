@@ -757,6 +757,60 @@ test("revision quotes resolve different blocks in one topic after all sections r
   for (const item of rendered.newInRevision ?? []) expect(item).not.toHaveProperty("quote");
 });
 
+test("revision quotes prefer literal identifiers across the whole scope before stripping marks", async () => {
+  const rendered = await renderWriteup(
+    {
+      overview: "",
+      tldr: "",
+      decisions: "",
+      topics: { search: { why: "Use maxcount café.", example: "Use `max_count` café." } },
+      newInRevision: [
+        { text: "Corrected the identifier.", topic: "search", quote: "max_count" },
+        { text: "Clarified the example.", topic: "search", quote: "max_count   cafe\u0301" },
+      ],
+    },
+    topics,
+  );
+  const blocks = rendered.sections.filter((section) => section.topic === "search").flatMap((section) => section.blocks);
+  expect(blocks.map((block) => block.text)).toEqual(["Use maxcount café.", "Use max_count café."]);
+  expect(rendered.newInRevision?.map((item) => item.blockId)).toEqual([blocks[1]?.id, blocks[1]?.id]);
+});
+
+test("revision quotes fall back to stripping Markdown marks when the plain pass has no match", async () => {
+  const rendered = await renderWriteup(
+    {
+      overview: "Fix: the loop.",
+      tldr: "**Fix:** the loop again.",
+      decisions: "",
+      topics: {},
+      newInRevision: [{ text: "Fixed the loop.", quote: "**Fix:** the loop" }],
+    },
+    [],
+  );
+  const block = rendered.sections.find((section) => section.key === "overview")?.blocks[0];
+  expect(block?.text).toBe("Fix: the loop.");
+  expect(rendered.newInRevision?.[0]?.blockId).toBe(block?.id);
+});
+
+test.each(["", " \t ", "**", "_", "`", " *\t_ ` ", "\u0085*\u00a0_\ufeff`"])(
+  "stored revision quote %j never matches an empty normalized string",
+  async (quote) => {
+    const rendered = await renderWriteup(
+      {
+        overview: "First eligible block.",
+        tldr: "",
+        decisions: "",
+        topics: {},
+        newInRevision: [{ text: "Updated the opening.", quote }],
+      },
+      [],
+    );
+    expect(rendered.sections.find((section) => section.key === "overview")?.blocks).toHaveLength(1);
+    expect(rendered.newInRevision).toHaveLength(1);
+    expect(rendered.newInRevision?.[0]).not.toHaveProperty("blockId");
+  },
+);
+
 test("revision quote scopes, case and first match follow section order", async () => {
   const rendered = await renderWriteup(
     {

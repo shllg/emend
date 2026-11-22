@@ -674,6 +674,10 @@ describe("newInRevision", () => {
   test.each([
     ["", "newInRevision quote must not be blank"],
     [" \t ", "newInRevision quote must not be blank"],
+    ...["**", "_", "`", " *\t_ ` ", "\u0085*\u00a0_\ufeff`"].map((quote) => [
+      quote,
+      "newInRevision quote must contain text",
+    ]),
     ["\ud800", "newInRevision quote must be well-formed UTF-16"],
     ...["\r", "\n", "\u2028", "\u2029"].map((lineBreak) => [
       `First${lineBreak}second`,
@@ -683,6 +687,10 @@ describe("newInRevision", () => {
     const result = NewInRevisionItem.safeParse({ ...items[0], quote });
     expect(result.success).toBe(false);
     expect(result.error?.issues).toContainEqual(expect.objectContaining({ path: ["quote"], message }));
+  });
+
+  test.each(["max_count", "**Fix:** the loop", "`max_count`"])("accepts quote text with marks %j", (quote) => {
+    expect(NewInRevisionItem.parse({ ...items[0], quote }).quote).toBe(quote);
   });
 
   test("bounds quotes and preserves topic/section exclusivity with a quote", () => {

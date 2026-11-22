@@ -233,16 +233,20 @@ export async function renderWriteup(
   const newInRevision = newsItems.map(({ item, blockIds }) => {
     let blockId: string | undefined;
     if (item.quote !== undefined) {
-      const quote = normalizeQuote(item.quote);
-      const candidates = sections.filter((section) => {
-        if (["newInRevision", "needsYou", "review"].includes(section.key)) return false;
-        if (item.topic !== undefined)
-          return [`t-${item.topic}-why`, `t-${item.topic}-example`, `t-${item.topic}-body`].includes(section.key);
-        return item.section === undefined || section.key === item.section;
-      });
-      blockId = candidates
-        .flatMap((section) => section.blocks)
-        .find((block) => normalizeQuote(block.text).includes(quote))?.id;
+      const candidates = sections
+        .filter((section) => {
+          if (["newInRevision", "needsYou", "review"].includes(section.key)) return false;
+          if (item.topic !== undefined)
+            return [`t-${item.topic}-why`, `t-${item.topic}-example`, `t-${item.topic}-body`].includes(section.key);
+          return item.section === undefined || section.key === item.section;
+        })
+        .flatMap((section) => section.blocks);
+      for (const normalize of [normalizeText, normalizeQuote]) {
+        const quote = normalize(item.quote);
+        if (!quote) continue;
+        blockId = candidates.find((block) => normalize(block.text).includes(quote))?.id;
+        if (blockId !== undefined) break;
+      }
     }
     return {
       ...(item.topic !== undefined ? { topic: item.topic } : {}),

@@ -185,8 +185,8 @@ previous revision, at most 12; the app shows four and folds the rest. Each line 
 comment and what became of it, a code change, or a corrected fact. Give it the `topic` slug or
 writeup `section` it changed so it jumps there. Put process news (a rebase, a rerun gate, a review
 round) in the Trail under `decisions`. Never carry lines from an earlier revision.
-To land on one block, add `quote` with a few words copied from that block's text, without Markdown
-marks; a quote that matches nothing jumps to the topic or section.
+To land on one block, add `quote` with a few words copied from its text without Markdown marks;
+an unmatched quote falls back to the line's topic or section if named, otherwise the line has no jump.
 
 A doc's `source` must be inside the repository's worktree or inside a folder the user listed in
 `docRoots` in emend's global configuration.

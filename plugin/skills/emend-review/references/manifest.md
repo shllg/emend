@@ -163,8 +163,8 @@ an optional `topic` or `section`, not both; a topic must be declared. The sectio
 `tldr`, `whyItMatters`, `checked`, `notChecked`, `outOfScope`, `whereToLook`, `context`, `decisions`
 or `glossary`. A first publish leaves it out; emend-feedback writes it fresh for later revisions.
 From revision 2, the card follows TL;DR, shows four lines and folds the rest. An empty list gives no card.
-To land on one block, add `quote` with a few words copied from that block's text, without Markdown
-marks; a quote that matches nothing jumps to the topic or section.
+To land on one block, add `quote` with a few words copied from its text without Markdown marks;
+an unmatched quote falls back to the line's topic or section if named, otherwise the line has no jump.
 
 `needsYou` is an optional list of `{ "kind": "decide" | "accept" | "confirm-drift" | "answer", "text": "<one line>", "topic": "<slug>" }`.
 Each text is nonblank Markdown, at most 300 characters on one line. The topic is optional and must be declared.

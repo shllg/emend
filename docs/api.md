@@ -2075,15 +2075,18 @@ An optional `quote` names a few words from one block and may stand alone or acco
 or section. It is 1–`newInRevisionQuoteChars` (120) characters, nonblank, well-formed UTF-16 and
 one line; the refinement errors are `newInRevision quote must not be blank`,
 `newInRevision quote must be well-formed UTF-16` and `newInRevision quote must be one line`
-(CR, LF, U+2028 and U+2029 are refused).
+(CR, LF, U+2028 and U+2029 are refused). A quote containing only whitespace, `*`, `_` and
+backtick characters is refused with `newInRevision quote must contain text`.
 After rendering all sections, the renderer searches only `t-<slug>-why`, `-example` and `-body`
 for a topic, only the named section for a section, or every writeup section except
-`newInRevision`, `needsYou` and `review` for a quote alone. Both quote and block text are
-normalized to NFC, stripped of `*`, `_` and backtick characters, then whitespace runs collapse
-to one space and the ends are trimmed. The first block in section order whose normalized text
-contains the normalized quote wins, case-sensitively. No match emits no `blockId`, leaving the
-usual topic or section fallback (and no jump for an unmatched quote alone). Quotes are matching
-hints, not rendered Markdown, and do not contribute to `writeupEmpty` or the Markdown byte sums.
+`newInRevision`, `needsYou` and `review` for a quote alone. Matching makes two passes over the
+same scope and section order. The first normalizes both quote and block text to NFC, collapses
+whitespace runs to one space and trims the ends, preserving all other characters. Only if that
+finds no match, the second pass also strips `*`, `_` and backtick characters before collapsing
+whitespace and trimming. Each pass skips an empty normalized quote; the first block whose
+normalized text contains the normalized quote wins, case-sensitively. No match emits no `blockId`,
+leaving the usual topic or section fallback (and no jump for an unmatched quote alone). Quotes
+are matching hints, not rendered Markdown, and do not contribute to `writeupEmpty` or the Markdown byte sums.
 A thirteenth item is refused with `at most 12 newInRevision items`; the CLI reports
 `invalid publish manifest: writeup.newInRevision (at most 12 items)`.
 For an invalid section the CLI reports `writeup.newInRevision.<index>.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary)`.
