@@ -8,7 +8,6 @@ import {
 import { Link } from "@tanstack/react-router";
 import {
   ChevronDown,
-  CircleCheck,
   CircleDot,
   Code2,
   Compass,
@@ -31,7 +30,7 @@ import { LineTotals } from "../diff/LineTotals.tsx";
 import type { DiffCounts } from "../diff/presentation.ts";
 import { AgentStatus, agentStatusOf } from "../status/AgentStatus.tsx";
 import { OriginBadge } from "../status/OriginBadge.tsx";
-import { SnoozeBadge, StateBadge } from "../status/StateBadge.tsx";
+import { SnoozeBadge, StateBadge, stateLabel } from "../status/StateBadge.tsx";
 import { Banner } from "../ui/Banner.tsx";
 import { Button } from "../ui/Button.tsx";
 import { CopyTextMenu } from "../ui/CopyTextMenu.tsx";
@@ -76,7 +75,7 @@ function LinkChip({ link }: { link: ReturnType<typeof safeLinks>[number] }) {
 
 function RelatedReviewChip({ entry }: { entry: RelatedReview }) {
   const label = entry.role === "intent" ? "Intent review" : "Code review";
-  const name = `${label}, ${entry.state}: ${entry.title}`;
+  const name = `${label}, ${stateLabel(entry.state).toLowerCase()}: ${entry.title}`;
   return (
     <Link
       to="/r/$reviewId"
@@ -87,12 +86,7 @@ function RelatedReviewChip({ entry }: { entry: RelatedReview }) {
     >
       <Icon icon={entry.role === "intent" ? Compass : Code2} size={12} />
       <span className="min-w-0 shrink-[0.2] truncate">{label}</span>
-      {entry.state === "approved" && (
-        <span className="inline-flex shrink-0 items-center gap-1 text-success-fg">
-          <Icon icon={CircleCheck} size={12} />
-          approved
-        </span>
-      )}
+      <StateBadge state={entry.state} variant="inline" />
       <span dir="auto" className="min-w-0 shrink-[3] truncate text-11 text-fg-3">
         {entry.title}
       </span>

@@ -738,6 +738,7 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
                 eq(reviews.originInstanceId, review.originInstanceId),
                 isNull(reviews.binnedAt),
                 isNull(reviews.movedToUrl),
+                ne(reviews.id, reviewId),
               ),
             )
             .get()

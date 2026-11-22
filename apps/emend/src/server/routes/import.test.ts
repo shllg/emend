@@ -2464,6 +2464,23 @@ test("import preserves area and whyItMatters when it re-renders stored writeup s
   }
 });
 
+test("import refuses a review that names itself as its intent without storing it", async () => {
+  const input = ImportBundle.parse(await bundle(f));
+  input.review.intentReviewId = input.review.id;
+  const response = await f.importRequest("/import", input);
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: { code: "invalid_request", message: "The request is invalid." } });
+  expect(
+    await f.db.read((q) =>
+      q
+        .select({ id: tables.reviews.id })
+        .from(tables.reviews)
+        .where(and(eq(tables.reviews.ownerId, f.ownerId), eq(tables.reviews.id, input.review.id)))
+        .get(),
+    ),
+  ).toBeUndefined();
+});
+
 test("import keeps an unresolved intent id and resolves both directions once its review arrives", async () => {
   const intent = ImportBundle.parse(await bundle(f));
   intent.review.title = "Synthetic imported intent";

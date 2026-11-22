@@ -2223,13 +2223,14 @@ has none. The relation belongs to the review, not to one revision.
 then the reviews that name this one (role `code`), newest update first, at most `relatedReviews` (8).
 Id ascending breaks ties. Each entry has `id`, `role`, `title` and `state`. Reviews in the bin, moved
 reviews, reviews of another origin instance and ids that name no review of this owner are left out.
-The relation is never checked against approval; the app shows the state.
+A review never lists itself. The relation is never checked against approval; the app shows the state.
 
 `writeup.deviations` is nonblank Markdown and renders as the section "Deviations from the approved
 intent", right before "Decisions and drift", through the same sanitize pipeline as every writeup
 section. It does not select the new layout by itself.
 
-An import bundle carries `review.intentReviewId`, an optional nullable UUID. An id that names no
+An import bundle carries `review.intentReviewId`, an optional nullable UUID. A bundle whose
+`review.intentReviewId` equals `review.id` is refused with `400 invalid_request`. An id that names no
 review on the receiving server resolves to nothing until that review arrives. Attach copies it the
 same way; an absent field imports as null.
 

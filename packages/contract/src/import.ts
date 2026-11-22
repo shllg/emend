@@ -125,6 +125,7 @@ const BundleRows = ImportRows.extend({
 export type ImportBundle = z.infer<typeof BundleRows>;
 export const ImportBundle = BundleRows.superRefine((bundle, ctx) => {
   const issue = (message: string) => ctx.addIssue({ code: "custom", message });
+  if (bundle.review.intentReviewId === bundle.review.id) issue("a review cannot be its own intent review");
   const all = [
     bundle.review,
     ...bundle.revisions,

@@ -1355,7 +1355,7 @@ test.each([false, true])(
 );
 
 test.each([false, true])(
-  "related intent and code chips open in the same tab and show approval (phone: %s)",
+  "related intent and code chips open in the same tab and show their state (phone: %s)",
   (phone) => {
     const related: ReviewView["related"] = [
       { id: "33333333-3333-4333-8333-333333333333", role: "intent", title: "Synthetic intent", state: "approved" },
@@ -1366,12 +1366,13 @@ test.each([false, true])(
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
     for (const entry of related) {
       const label = entry.role === "intent" ? "Intent review" : "Code review";
-      const name = `${label}, ${entry.state}: ${entry.title}`;
+      const state = { open: "Open", approved: "Approved", settled: "Retired" }[entry.state];
+      const name = `${label}, ${state.toLowerCase()}: ${entry.title}`;
       const link = within(list).getByRole("link", { name });
       expect(link.getAttribute("href")).toBe(`/r/${entry.id}`);
       expect(link.getAttribute("title")).toBe(name);
       expect(link.hasAttribute("target")).toBe(false);
-      expect(link.textContent).toBe(`${label}${entry.state === "approved" ? "approved" : ""}${entry.title}`);
+      expect(link.textContent).toBe(`${label}${state}${entry.title}`);
       expect(link.querySelector("svg")).not.toBeNull();
       const title = within(link).getByText(entry.title);
       expect(title.getAttribute("dir")).toBe("auto");
@@ -1407,38 +1408,47 @@ test.each([false, true])("related titles cannot imitate the approved marker (pho
   const open = within(list).getByRole("link", { name: `Intent review, open: ${title}` });
   expect(open.getAttribute("title")).toBe(`Intent review, open: ${title}`);
   expect(open.querySelector("svg.lucide-circle-check")).toBeNull();
-  expect(within(open).queryByText("approved")).toBeNull();
+  expect(within(open).getByText("Open")).toBeTruthy();
+  expect(within(open).queryByText("Approved")).toBeNull();
 
   const approved = within(list).getByRole("link", { name: `Intent review, approved: ${title}` });
   expect(approved.getAttribute("title")).toBe(`Intent review, approved: ${title}`);
-  const marker = within(approved).getByText("approved");
+  const marker = within(approved).getByText("Approved");
   expect(marker.classList.contains("text-success-fg")).toBe(true);
   const icon = marker.querySelector("svg.lucide-circle-check");
   expect(icon?.getAttribute("aria-hidden")).toBe("true");
-  expect(icon?.getAttribute("width")).toBe("12");
-  expect(icon?.getAttribute("height")).toBe("12");
+  expect(icon?.getAttribute("width")).toBe("11");
+  expect(icon?.getAttribute("height")).toBe("11");
   expect(marker.previousElementSibling?.textContent).toBe("Intent review");
   expect(marker.nextElementSibling).toBe(within(approved).getByText(title));
 });
 
 test.each([
-  ["open", "Intent review, open: approved: Plan"],
-  ["approved", "Intent review, approved: approved: Plan"],
-  ["settled", "Intent review, settled: approved: Plan"],
-] as const)("related chips name the server state even when the title claims approval (%s)", (state, name) => {
-  mount({
-    metadata: {
-      ...review,
-      related: [{ id: "33333333-3333-4333-8333-333333333333", role: "intent", title: "approved: Plan", state }],
-    },
-  });
-  const list = screen.getByRole("list", { name: "Related reviews" });
-  const link = within(list).getByRole("link", { name });
-  expect(link.getAttribute("title")).toBe(name);
-  expect(within(link).getByText("approved: Plan").getAttribute("dir")).toBe("auto");
-  expect(link.querySelector("svg.lucide-circle-check") !== null).toBe(state === "approved");
-  expect(within(link).queryByText("approved") !== null).toBe(state === "approved");
-});
+  ["open", "Intent review, open: approved: Plan", "Open"],
+  ["approved", "Intent review, approved: approved: Plan", "Approved"],
+  ["settled", "Intent review, retired: approved: Plan", "Retired"],
+] as const)(
+  "related chips show and name the app state even when the title claims approval (%s)",
+  (state, name, label) => {
+    mount({
+      metadata: {
+        ...review,
+        related: [{ id: "33333333-3333-4333-8333-333333333333", role: "intent", title: "approved: Plan", state }],
+      },
+    });
+    const list = screen.getByRole("list", { name: "Related reviews" });
+    const link = within(list).getByRole("link", { name });
+    expect(link.getAttribute("title")).toBe(name);
+    expect(link.textContent).toBe(`Intent review${label}approved: Plan`);
+    const title = within(link).getByText("approved: Plan");
+    expect(title.textContent).toBe("approved: Plan");
+    expect(title.getAttribute("dir")).toBe("auto");
+    const badge = within(link).getByText(label);
+    expect(badge.previousElementSibling?.textContent).toBe("Intent review");
+    expect(badge.nextElementSibling).toBe(title);
+    expect(link.querySelector("svg.lucide-circle-check") !== null).toBe(state === "approved");
+  },
+);
 
 test.each([false, true])("related review titles remain literal text (phone: %s)", (phone) => {
   const title = "<img src=x onerror=alert(1)>";
@@ -1451,7 +1461,7 @@ test.each([false, true])("related review titles remain literal text (phone: %s)"
   });
   const list = screen.getByRole("list", { name: "Related reviews" });
   const link = within(list).getByRole("link", { name: `Code review, approved: ${title}` });
-  expect(link.textContent).toBe(`Code reviewapproved${title}`);
+  expect(link.textContent).toBe(`Code reviewApproved${title}`);
   expect(within(link).getByText(title).getAttribute("dir")).toBe("auto");
   expect(list.querySelector("img, script")).toBeNull();
 });

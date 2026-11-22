@@ -7,10 +7,12 @@ import { refreshQueries } from "./query-refresh.ts";
 import { requestThemeSync } from "./theme.ts";
 
 const PublishedRevisions = createContext<ReadonlyMap<string, number>>(new Map());
-// These events can change another review's related list.
+// These events change a review's state, update time or bin state, which another review's related list shows and orders by.
 const relatedReviewEvents = new Set<ReviewEvent["type"]>([
   "publish",
   "send",
+  "claimed",
+  "unsnooze",
   "retire",
   "reopen",
   "bin",

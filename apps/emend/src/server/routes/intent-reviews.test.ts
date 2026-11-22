@@ -77,6 +77,17 @@ test("intent and code reviews link both ways, render deviations and show the cur
   expect((await view(intent.reviewId)).revisions).toHaveLength(1);
 });
 
+test("a stored self-link never lists the review as related to itself", async () => {
+  const review = await publish();
+  await f.db.query((q) =>
+    q
+      .update(reviews)
+      .set({ intentReviewId: review.reviewId })
+      .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, review.reviewId))),
+  );
+  expect((await view(review.reviewId)).related).toEqual([]);
+});
+
 test("stored intent links stay within an origin instance in both directions", async () => {
   const { intent, code } = await pair();
   const response = await f.request(
