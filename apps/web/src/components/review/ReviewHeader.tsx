@@ -8,6 +8,7 @@ import {
 import { Link } from "@tanstack/react-router";
 import {
   ChevronDown,
+  CircleCheck,
   CircleDot,
   Code2,
   Compass,
@@ -75,7 +76,7 @@ function LinkChip({ link }: { link: ReturnType<typeof safeLinks>[number] }) {
 
 function RelatedReviewChip({ entry }: { entry: RelatedReview }) {
   const label = entry.role === "intent" ? "Intent review" : "Code review";
-  const name = `${label}: ${entry.title}${entry.state === "approved" ? " (approved)" : ""}`;
+  const name = `${label}${entry.state === "approved" ? ", approved" : ""}: ${entry.title}`;
   return (
     <Link
       to="/r/$reviewId"
@@ -85,10 +86,13 @@ function RelatedReviewChip({ entry }: { entry: RelatedReview }) {
       className="inline-flex max-w-full items-center gap-1 rounded-sm border border-line-1 px-1.5 py-0.75 text-fg-2 no-underline hover:bg-hover hover:text-fg-1"
     >
       <Icon icon={entry.role === "intent" ? Compass : Code2} size={12} />
-      <span className="min-w-0 shrink-[0.2] truncate">
-        {label}
-        {entry.state === "approved" && <span className="text-fg-3"> · approved</span>}
-      </span>
+      <span className="min-w-0 shrink-[0.2] truncate">{label}</span>
+      {entry.state === "approved" && (
+        <span className="inline-flex shrink-0 items-center gap-1 text-success-fg">
+          <Icon icon={CircleCheck} size={12} />
+          approved
+        </span>
+      )}
       <span dir="auto" className="min-w-0 shrink-[3] truncate text-11 text-fg-3">
         {entry.title}
       </span>

@@ -1,4 +1,4 @@
-import type { ReviewEvent } from "@emend/contract";
+import type { ReviewEvent, ReviewView } from "@emend/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import { subscribeReviewEvents } from "./event-stream.ts";
@@ -38,6 +38,18 @@ export function ReviewEventsProvider({ children, enabled = true }: { children: R
           event.revision > (previous.get(reviewId) ?? 0) ? new Map(previous).set(reviewId, event.revision) : previous,
         );
       const keys = event.type === "viewed" ? [] : [["inbox"], ["review", reviewId]];
+      if (event.type === "publish") keys.push(["review"]);
+      else if (event.type !== "viewed") {
+        for (const [key, data] of client.getQueriesData<ReviewView>({ queryKey: ["review"] })) {
+          if (
+            typeof key[1] === "string" &&
+            data &&
+            Array.isArray(data.related) &&
+            data.related.some((entry) => entry.id === reviewId)
+          )
+            keys.push(["review", key[1]]);
+        }
+      }
       if (["bin", "restore", "delete"].includes(event.type)) keys.push(["bin"]);
       if (["thread", "send", "claimed", "confirmed", "viewed", "retire"].includes(event.type))
         keys.push(["revision", reviewId]);

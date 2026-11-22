@@ -721,12 +721,13 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
         .orderBy(revisions.seq)
         .all();
       const review = await q
-        .select({ intentReviewId: reviews.intentReviewId })
+        .select({ intentReviewId: reviews.intentReviewId, originInstanceId: reviews.originInstanceId })
         .from(reviews)
         .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, reviewId)))
         .get();
+      if (!review) throw new ApiError("unknown_review");
       const relatedFields = { id: reviews.id, title: reviews.title, state: reviews.state };
-      const intent = review?.intentReviewId
+      const intent = review.intentReviewId
         ? await q
             .select(relatedFields)
             .from(reviews)
@@ -734,6 +735,7 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
               and(
                 eq(reviews.ownerId, ownerId),
                 eq(reviews.id, review.intentReviewId),
+                eq(reviews.originInstanceId, review.originInstanceId),
                 isNull(reviews.binnedAt),
                 isNull(reviews.movedToUrl),
               ),
@@ -747,6 +749,7 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
           and(
             eq(reviews.ownerId, ownerId),
             eq(reviews.intentReviewId, reviewId),
+            eq(reviews.originInstanceId, review.originInstanceId),
             isNull(reviews.binnedAt),
             isNull(reviews.movedToUrl),
             ne(reviews.id, reviewId),

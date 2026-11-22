@@ -77,6 +77,32 @@ test("intent and code reviews link both ways, render deviations and show the cur
   expect((await view(intent.reviewId)).revisions).toHaveLength(1);
 });
 
+test("stored intent links stay within an origin instance in both directions", async () => {
+  const { intent, code } = await pair();
+  const response = await f.request(
+    "/publish",
+    "POST",
+    input({ reviewKey: "e".repeat(64), title: "Synthetic code from another instance" }),
+    "otherAgent",
+  );
+  expect(response.status).toBe(200);
+  const otherCode = PublishResponse.parse(await response.json());
+  await f.db.query((q) =>
+    q
+      .update(reviews)
+      .set({ intentReviewId: intent.reviewId })
+      .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, otherCode.reviewId))),
+  );
+
+  expect((await view(otherCode.reviewId)).related).toEqual([]);
+  expect((await view(intent.reviewId)).related).toEqual([
+    { id: code.reviewId, role: "code", title: "Synthetic code review", state: "open" },
+  ]);
+  expect((await view(code.reviewId)).related).toEqual([
+    { id: intent.reviewId, role: "intent", title: "Synthetic intent", state: "open" },
+  ]);
+});
+
 test.each(["missing", "foreign", "other instance", "binned", "moved"])(
   "an unavailable intent (%s) refuses without creating a review or revision",
   async (kind) => {
