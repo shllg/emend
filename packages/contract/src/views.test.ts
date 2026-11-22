@@ -172,3 +172,35 @@ test("rendered writeups omit invalid stored areas instead of refusing the revisi
   for (const changedSince of [undefined, 1, 3]) expect(schema.parse(changedSince)).toBe(changedSince);
   for (const changedSince of [null, 0, -1, 1.5]) expect(schema.safeParse(changedSince).success).toBe(false);
 });
+
+test("rendered needsYou preserves valid and empty lists and drops invalid stored values", () => {
+  const item = { kind: "answer", topic: "routing", blockIds: ["needsYou-0123abcd", "needsYou-0123abcd-2"] };
+  for (const needsYou of [[], [item]]) {
+    expect(contract.RenderedWriteup.parse({ sections: [], needsYou }).needsYou).toEqual(needsYou);
+  }
+  expect(contract.RenderedWriteup.parse({ sections: [] })).not.toHaveProperty("needsYou");
+  for (const needsYou of [
+    null,
+    42,
+    [{ ...item, kind: "unknown" }],
+    [{ ...item, topic: "Bad slug" }],
+    [{ ...item, blockIds: ["overview-0123abcd"] }],
+    [{ ...item, blockIds: ["bad"] }],
+    Array.from({ length: 5 }, () => item),
+  ]) {
+    expect(contract.RenderedWriteup.parse({ sections: [], needsYou }).needsYou).toBeUndefined();
+  }
+  const block = {
+    id: item.blockIds[0],
+    section: "needsYou",
+    kind: "paragraph",
+    html: "<p>Choose.</p>",
+    text: "Choose.",
+  };
+  expect(
+    contract.RenderedWriteup.parse({
+      sections: [{ key: "needsYou", label: "Needs you", topic: null, blocks: [block] }],
+      needsYou: [item],
+    }).needsYou,
+  ).toEqual([item]);
+});

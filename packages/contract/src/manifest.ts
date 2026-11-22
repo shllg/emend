@@ -132,10 +132,30 @@ export const WriteupArea = z
   );
 export type WriteupArea = z.infer<typeof WriteupArea>;
 
+export const NeedsYouKind = z.enum(["decide", "accept", "confirm-drift", "answer"]);
+export type NeedsYouKind = z.infer<typeof NeedsYouKind>;
+
+export const NeedsYouItem = z.object({
+  kind: NeedsYouKind,
+  text: z
+    .string()
+    .min(1)
+    .max(LIMITS.needsYouChars)
+    .refine((text) => /\S/.test(text), "needsYou text must not be blank")
+    .refine((text) => text.isWellFormed(), "needsYou text must be well-formed UTF-16")
+    .refine((text) => !/[\r\n\u2028\u2029]/u.test(text), "needsYou text must be one line"),
+  topic: TopicSlug.optional(),
+});
+export type NeedsYouItem = z.infer<typeof NeedsYouItem>;
+
 const writeupInput = z.object({
   overview: markdown,
   tldr: markdown,
   whyItMatters: nonBlankMarkdown.optional(),
+  needsYou: z
+    .array(NeedsYouItem)
+    .max(LIMITS.needsYouItems, `at most ${LIMITS.needsYouItems} needsYou items`)
+    .optional(),
   area: WriteupArea.optional(),
   review: ReviewVerdict.optional(),
   checked: nonBlankMarkdown.optional(),
@@ -164,6 +184,7 @@ export function writeupMarkdown(writeup: WriteupInput): (string | null | undefin
     writeup.overview,
     writeup.tldr,
     ...(writeup.whyItMatters !== undefined ? [writeup.whyItMatters] : []),
+    ...(writeup.needsYou ?? []).map((item) => item.text),
     writeup.review?.reason,
     writeup.checked,
     writeup.notChecked,
@@ -269,6 +290,15 @@ export const PublishManifest = z
           code: "custom",
           path: ["writeup", "review", "topics", index],
           message: "review topic is not declared",
+        });
+      }
+    }
+    for (const [index, item] of (manifest.writeup.needsYou ?? []).entries()) {
+      if (item.topic !== undefined && !topics.has(item.topic)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["writeup", "needsYou", index, "topic"],
+          message: "needsYou topic is not declared",
         });
       }
     }

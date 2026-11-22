@@ -3694,3 +3694,59 @@ test("adding the pub look keeps the HTML download's hostile-content filtering", 
   for (const forbidden of ["<script", "onerror", "javascript:", "https://example.com", "<iframe"])
     expect(html).not.toContain(forbidden);
 });
+
+test("downloads Needs you with each kind before its blocks and supports missing metadata", async () => {
+  const blocks: RenderedBlock[] = [
+    "Choose the limit.",
+    "Accept the wait.",
+    "Confirm the scope.",
+    "Name the window.",
+  ].map((line, index) => ({
+    id: `needsYou-0123abc${index}`,
+    section: "needsYou",
+    kind: "paragraph",
+    html: `<p>${line}</p>`,
+    text: line,
+  }));
+  const kinds = ["decide", "accept", "confirm-drift", "answer"] as const;
+  const sections: RenderedWriteup["sections"] = [
+    { key: "tldr", label: "TL;DR", topic: null, blocks: [] },
+    { key: "needsYou", label: "Needs you", topic: null, blocks },
+  ];
+  for (const metadata of [false, true]) {
+    const html = await buildWriteupDownload({
+      title: "Synthetic review",
+      details,
+      resolveMedia: async () => null,
+      topics: [{ slug: "search", title: "Search", summary: "Find books.", importance: 10 }],
+      writeup: {
+        sections,
+        ...(metadata ? { needsYou: kinds.map((kind, index) => ({ kind, blockIds: [blocks[index]?.id ?? ""] })) } : {}),
+      },
+    });
+    const nodes = parsed(html);
+    expect(nodes.filter((node) => node.tagName === "h2").map((node) => hastText(node))).toEqual([
+      "TL;DR",
+      "Needs you",
+      "Topics",
+    ]);
+    const section = nodes.find((node) => node.tagName === "section" && hastText(node).startsWith("Needs you"));
+    expect(section).toBeDefined();
+    const children = section?.children.filter((node) => node.type === "element") ?? [];
+    expect(children.map((node) => hastText(node))).toEqual(
+      metadata
+        ? [
+            "Needs you",
+            "Decide",
+            blocks[0]?.text,
+            "Accept",
+            blocks[1]?.text,
+            "Confirm drift",
+            blocks[2]?.text,
+            "Answer",
+            blocks[3]?.text,
+          ]
+        : ["Needs you", ...blocks.map((block) => block.text)],
+    );
+  }
+});

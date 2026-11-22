@@ -214,7 +214,7 @@ A feature flag does not undo writes already made.
 ### No verdict
 
 Leave `review` out of the writeup. The reviewer gives the verdict, not you.
-A choice the reviewer must make opens `decisions` under a **Needs you:** label.
+A choice the reviewer must make goes into `needsYou`.
 
 ### Where to look
 
@@ -237,12 +237,23 @@ Neither is ever empty. If you ran nothing, say so in `checked`.
 The higher the risk, the stronger the proof. A data migration shows row counts and sums before
 and after, plus a few sample rows.
 
+### Needs you
+
+Write one line per item in `needsYou`, at most four:
+
+- Decide (`decide`): a choice only the reviewer can make.
+- Accept (`accept`): a risk or trade-off the reviewer takes on knowingly.
+- Confirm drift (`confirm-drift`): a departure from the request that needs a yes.
+- Answer (`answer`): a question the work waits on.
+
+Name the topic slug when the item belongs to one. Use `[]` when nothing needs the reviewer.
+Write it only with first-hand intent, alongside `decisions`; with `decisions: null`, leave it out.
+
 ### Decisions
 
 Keep a line in `decisions` only if the reviewer might decide, or judge the risk, differently
 because of it. Write it in this order:
 
-- **Needs you:** each choice the reviewer must make. Leave the label out when there is none.
 - **Decided for you:** one line per choice nobody asked for, in the form "Chose X over Y
   because Z. Would change if W."
 - Drift: each departure from the user's latest stated intent, marked as drift, with the short
@@ -294,7 +305,7 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
   48,113,902.17. After: the same rows, summing to 4,811,390,217 cents. Five sample rows match to
   the cent.
 - `notChecked`: the run time on the live table under load; a long lock could block new invoices.
-- `decisions`: "**Needs you:** run it in the nightly window, or now with a short lock?"
+- `needsYou`: `[{ "kind": "decide", "text": "Run it in the nightly window, or now with a short lock?" }]`
 
 ## Glossary
 

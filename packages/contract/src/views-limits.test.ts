@@ -90,11 +90,12 @@ test("topics accept the full publish limit, including Other changes", () => {
     expect(RevisionView.shape.topics.safeParse(topics).success).toBe(size === LIMITS.topicsPerReview);
   }
 });
-test("section count allows eleven fixed sections and three for every writeup topic", () => {
+test("section count allows twelve fixed sections and three for every writeup topic", () => {
   const sections = [
     "overview",
     "tldr",
     "whyItMatters",
+    "needsYou",
     "review",
     "checked",
     "notChecked",
@@ -112,7 +113,7 @@ test("section count allows eleven fixed sections and three for every writeup top
   expect(RenderedWriteup.parse({ sections })).toEqual({ sections });
   expect(RenderedWriteup.shape.sections.safeParse([...sections, section]).success).toBe(false);
 });
-test.each(["whyItMatters", "review", "checked", "notChecked"] as const)(
+test.each(["whyItMatters", "needsYou", "review", "checked", "notChecked"] as const)(
   "accepts rendered %s sections and blocks",
   (key) => {
     const rendered = {

@@ -577,3 +577,74 @@ test("area alone selects the non-legacy branch even with no Markdown", async () 
   expect(rendered.sections.map((section) => section.key)).toEqual(["tldr", "overview", "decisions"]);
   expect(rendered.sections.every((section) => section.blocks.length === 0)).toBe(true);
 });
+
+test.each([false, true])("renders needsYou items after the opening in new layout=%s", async (newLayout) => {
+  const input: WriteupInput = {
+    ...writeup,
+    ...(newLayout ? { whyItMatters: "Readers can find books.", checked: "Search tests." } : {}),
+    needsYou: [
+      { kind: "decide", text: "Choose the **search limit**.", topic: "search" },
+      { kind: "accept", text: "Accept the shorter list." },
+    ],
+  };
+  const rendered = await renderWriteup(input, topics);
+  const index = rendered.sections.findIndex((section) => section.key === "needsYou");
+  expect(rendered.sections[index - 1]?.key).toBe(newLayout ? "whyItMatters" : "tldr");
+  expect(rendered.sections[0]?.key).toBe(newLayout ? "tldr" : "overview");
+  const section = rendered.sections[index];
+  expect(section).toMatchObject({ key: "needsYou", label: "Needs you", topic: null });
+  expect(section?.blocks).toHaveLength(2);
+  expect(section?.blocks[0]?.html).toContain("<strong>search limit</strong>");
+  expect(rendered.needsYou).toEqual([
+    { kind: "decide", topic: "search", blockIds: [section?.blocks[0]?.id] },
+    { kind: "accept", blockIds: [section?.blocks[1]?.id] },
+  ]);
+  for (const block of section?.blocks ?? []) expect(BlockId.parse(block.id)).toMatch(/^needsYou-/);
+});
+
+test("preserves empty needsYou and omits missing needsYou without rendering a section", async () => {
+  const absent = await renderWriteup(writeup, topics);
+  const empty = await renderWriteup({ ...writeup, needsYou: [] }, topics);
+  expect(absent).not.toHaveProperty("needsYou");
+  expect(empty.needsYou).toEqual([]);
+  expect(empty.sections).toEqual(absent.sections);
+  expect(empty.sections.some((section) => section.key === "needsYou")).toBe(false);
+});
+
+test("needsYou repeats get unique ids and glossary marks through the Markdown pipeline", async () => {
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      glossary: [{ term: "Budget", definition: "Attempts allowed." }],
+      needsYou: (["decide", "accept", "answer"] as const).map((kind) => ({
+        kind,
+        text: "Budget budget.",
+      })),
+    },
+    topics,
+  );
+  const blocks = rendered.sections.find((section) => section.key === "needsYou")?.blocks ?? [];
+  expect(blocks).toHaveLength(3);
+  expect(blocks.map((block) => block.id)).toEqual([blocks[0]?.id, `${blocks[0]?.id}-2`, `${blocks[0]?.id}-3`]);
+  expect(rendered.needsYou?.map((item) => item.blockIds)).toEqual(blocks.map((block) => [block.id]));
+  for (const block of blocks) expect(block.html).toContain('data-emend-term="0"');
+});
+
+test.each([
+  "Before <script>bad()</script> after",
+  "Before <img src=x onerror=bad()> after",
+  "[Unsafe link](javascript:bad())",
+  '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
+  'Before <svg onload="bad()"><circle /></svg> after',
+  '<pre><code class="language-mermaid">graph TD; A--&gt;B; click A callback</code></pre>',
+])("sanitizes hostile needsYou text %j", async (text) => {
+  const rendered = await renderWriteup({ ...writeup, needsYou: [{ kind: "answer", text }] }, []);
+  const blocks = rendered.sections.find((section) => section.key === "needsYou")?.blocks ?? [];
+  expect(blocks.length).toBeGreaterThan(0);
+  expect(blocks.map((block) => block.html).join("")).not.toMatch(
+    /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
+  );
+  if (text.includes("language-mermaid"))
+    expect(blocks).toMatchObject([{ kind: "diagram", html: "", source: "graph TD; A-->B; click A callback" }]);
+  expect(rendered.needsYou?.[0]?.blockIds).toEqual(blocks.map((block) => block.id));
+});

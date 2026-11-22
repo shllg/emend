@@ -22,6 +22,7 @@ export const WRITEUP_SECTION_NAMES = {
   overview: "Overview",
   tldr: "TL;DR",
   whyItMatters: "Why it matters",
+  needsYou: "Needs you",
   review: "Review",
   checked: "Checked",
   notChecked: "Not checked",

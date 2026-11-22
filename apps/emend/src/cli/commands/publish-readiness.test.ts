@@ -51,6 +51,29 @@ async function fixture(inGit = true) {
 }
 
 test.each([
+  [
+    {
+      writeup: {
+        ...manifest().writeup,
+        needsYou: Array.from({ length: 5 }, () => ({ kind: "decide", text: "Choose the retry limit." })),
+      },
+    },
+    "writeup.needsYou (at most 4 items)",
+  ],
+  [
+    { writeup: { ...manifest().writeup, needsYou: [{ kind: "received-kind", text: "Choose the retry limit." }] } },
+    "writeup.needsYou.0.kind (decide, accept, confirm-drift or answer)",
+  ],
+  [
+    {
+      writeup: {
+        ...manifest().writeup,
+        needsYou: [{ kind: "decide", text: "Choose the retry limit.", topic: "Received" }],
+      },
+    },
+    "writeup.needsYou.0.topic (topic slug: lowercase letters, digits and -, at most 64); " +
+      "writeup.needsYou.0.topic (needsYou topic is not declared)",
+  ],
   [{ base: "received-base", head: "worktree" }, "base (a full commit hash)"],
   [{ base: "a".repeat(40), head: "received-head" }, "head (a full commit hash or worktree)"],
   [

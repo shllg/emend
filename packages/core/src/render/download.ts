@@ -1,5 +1,6 @@
 import {
   LIMITS,
+  type NeedsYouKind,
   OTHER_TOPIC,
   type PublishLinks,
   pubStylesheetSafe,
@@ -868,8 +869,33 @@ export async function buildWriteupDownload(
   const bySlug = new Map(ranked.map((topic) => [topic.slug, topic]));
   const groups: { key: string; node: Element }[] = [];
   const written = new Map<string, Element>();
+  const needsYouLabels: Record<NeedsYouKind, string> = {
+    decide: "Decide",
+    accept: "Accept",
+    "confirm-drift": "Confirm drift",
+    answer: "Answer",
+  };
   const content = await withThreads(input.threads, state, async (ctx) => {
     for (const section of input.writeup.sections) {
+      if (section.key === "needsYou" && input.writeup.needsYou !== undefined) {
+        const blocks = new Map(section.blocks.map((block) => [block.id, block]));
+        const content: ElementContent[] = [element("h2", [text("Needs you")])];
+        for (const item of input.writeup.needsYou) {
+          content.push(element("strong", [text(needsYouLabels[item.kind])]));
+          content.push(
+            ...(await blocksContent(
+              item.blockIds.flatMap((id) => {
+                const block = blocks.get(id);
+                return block ? [block] : [];
+              }),
+              state,
+              ctx,
+            )),
+          );
+        }
+        groups.push({ key: section.key, node: element("section", content) });
+        continue;
+      }
       const topic = section.topic ? bySlug.get(section.topic) : undefined;
       const content = await blocksContent(section.blocks, state, ctx);
       if (!topic) {
@@ -914,6 +940,7 @@ export async function buildWriteupDownload(
         "overview",
         "tldr",
         "whyItMatters",
+        "needsYou",
         "review",
         "checked",
         "notChecked",

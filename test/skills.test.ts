@@ -218,8 +218,8 @@ test("emend-review gives exact publish-only guidance before the wait loop", () =
     "If you set `decisions` to `null`, add one line for a caller that has the user's request, with",
     "this command filled in:",
     '`emend publish --manifest "<review-folder>/review.json" --review <review-id>`.',
-    "The caller may then write `decisions` into that `review.json` from the user's request in its own",
-    'conversation, as the `decisions` bullet in "Write for the reviewer" says, never from your report,',
+    "The caller may then write `decisions` and `needsYou` into that `review.json` from the user's",
+    'request in its own conversation, as the opening bullets in "Write for the reviewer" say, never from your report,',
     "commits or the diff. It changes nothing else in that file or the worktree, and runs the command",
     "right away in the directory you ran `emend publish` in.",
   ].join("\n");
@@ -606,6 +606,7 @@ test("review guidance lists the opening fields in display order", () => {
   expect([...writing.matchAll(/^- `([^`]+)`:/gm)].map((match) => match[1])).toEqual([
     "tldr",
     "whyItMatters",
+    "needsYou",
     "area",
     "checked",
     "notChecked",
@@ -687,7 +688,22 @@ test("review guidance writes a decision brief with no verdict", () => {
 
   const decisions = reference.split("### Decisions\n")[1]?.split("\n### ")[0]?.replace(/\s+/g, " ");
   expect(decisions).toContain("only if the reviewer might decide, or judge the risk, differently because of it");
-  expect(decisions).toContain("**Needs you:**");
+  expect(decisions).not.toContain("**Needs you:**");
+  expect(noVerdict).toContain("A choice the reviewer must make goes into `needsYou`.");
+  const needsYou = reference.split("### Needs you\n")[1]?.split("\n### ")[0]?.replace(/\s+/g, " ");
+  for (const rule of [
+    "one line per item",
+    "at most four",
+    "Decide (`decide`)",
+    "Accept (`accept`)",
+    "Confirm drift (`confirm-drift`)",
+    "Answer (`answer`)",
+    "Name the topic slug",
+    "Use `[]`",
+    "with `decisions: null`, leave it out",
+  ])
+    expect(needsYou).toContain(rule);
+  expect(text.replace(/\s+/g, " ")).toContain("With `decisions: null`, leave `needsYou` out.");
   expect(decisions).toContain('"Chose X over Y because Z. Would change if W."');
   expect(decisions).toContain("**Trail:**");
 

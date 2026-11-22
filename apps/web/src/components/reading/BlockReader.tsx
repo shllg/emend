@@ -1,4 +1,4 @@
-import type { RenderedBlock, RevisionView, Target, TopicMeta } from "@emend/contract";
+import type { NeedsYouKind, RenderedBlock, RevisionView, Target, TopicMeta } from "@emend/contract";
 import { TextSelect } from "lucide-react";
 import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";
@@ -52,7 +52,17 @@ export type ReaderGroup = {
   topic?: TopicMeta;
   rank?: number;
   commentCount?: number;
-  presentation?: "tldr" | "decisions" | "glossary" | "outOfScope" | "whereToLook" | "context" | "facts" | "pair";
+  presentation?:
+    | "tldr"
+    | "needsYou"
+    | "decisions"
+    | "glossary"
+    | "outOfScope"
+    | "whereToLook"
+    | "context"
+    | "facts"
+    | "pair";
+  needs?: { key: string; kind: NeedsYouKind; label: string; blocks: RenderedBlock[]; jump?: ReactNode }[];
   action?: ReactNode;
   meta?: ReactNode;
   files?: ReactNode;
@@ -67,6 +77,7 @@ export type ReaderGroup = {
 export function groupBlocks(group: ReaderGroup) {
   return [
     ...group.blocks,
+    ...(group.needs?.flatMap((item) => item.blocks) ?? []),
     ...(group.subsections?.flatMap((section) => section.blocks) ?? []),
     ...(group.factGroups?.flatMap((factGroup) => factGroup.facts.flatMap((fact) => fact.blocks ?? [])) ?? []),
   ];
@@ -83,8 +94,10 @@ export function BlockReader({
   threadJump,
   files = emptyFiles,
   onNote,
+  lead,
 }: ReaderProps & {
   groups: ReaderGroup[];
+  lead?: ReactNode;
   files?: RevisionView["files"];
   onNote?: (id: string) => void;
 }) {
@@ -318,6 +331,7 @@ export function BlockReader({
     ));
   return (
     <div ref={root} tabIndex={-1} className="em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]">
+      {lead}
       {groups.map((group, index) => (
         <ReadingGroup
           key={`${reviewId}:${revision}:${group.key}`}
@@ -328,6 +342,19 @@ export function BlockReader({
           discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
         >
           {group.content}
+          {group.needs && (
+            <dl className="em-writeup-facts em-needs-you">
+              {group.needs.map(({ key, kind, label, blocks, jump }) => (
+                <div key={key} className="em-writeup-fact" data-needs-kind={kind}>
+                  <dt>{label}</dt>
+                  <dd>
+                    {renderBlocks(blocks, group.path)}
+                    {jump}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
           {group.tldr ? (
             <>
               {renderBlocks(group.blocks.slice(0, group.tldr.start), group.path)}

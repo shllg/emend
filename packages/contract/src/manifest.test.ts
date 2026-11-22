@@ -2,9 +2,11 @@ import { describe, expect, test } from "vitest";
 import {
   GlossaryEntry,
   LIMITS,
+  NeedsYouItem,
   normalizeGlossaryForm,
   OTHER_TOPIC,
   PublishManifest,
+  PublishRequest,
   ReviewVerdict,
   reviewVerdictIssues,
   WriteupArea,
@@ -501,5 +503,85 @@ describe("writeup opening", () => {
         text?.trim(),
       ),
     ).toBe(false);
+  });
+});
+
+describe("needsYou", () => {
+  const items = [
+    { kind: "decide", text: "Choose the **retry limit**.", topic: "routing" },
+    { kind: "accept", text: "Accept the shorter wait." },
+  ] as const;
+
+  test("preserves two items and an empty list and counts item text as Markdown", () => {
+    expect(
+      PublishManifest.parse({ ...manifest, writeup: { ...manifest.writeup, needsYou: items } }).writeup.needsYou,
+    ).toEqual(items);
+    expect(WriteupInput.parse({ ...manifest.writeup, needsYou: [] }).needsYou).toEqual([]);
+    const input = { overview: "", tldr: "", decisions: "", topics: {}, needsYou: [...items] };
+    expect(writeupMarkdown(input).filter((text) => text?.trim())).toEqual(items.map((item) => item.text));
+    const full = {
+      ...input,
+      overview: "x".repeat(LIMITS.writeupSectionBytes),
+      tldr: "x".repeat(LIMITS.writeupSectionBytes),
+    };
+    expect(WriteupInput.safeParse({ ...full, needsYou: [] }).success).toBe(true);
+    expect(WriteupInput.safeParse(full).success).toBe(false);
+  });
+
+  test("refuses a fifth item with the limit message", () => {
+    const result = PublishManifest.safeParse({
+      ...manifest,
+      writeup: { ...manifest.writeup, needsYou: Array.from({ length: 5 }, () => items[0]) },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({ path: ["writeup", "needsYou"], message: "at most 4 needsYou items" }),
+    );
+    expect(
+      WriteupInput.safeParse({ ...manifest.writeup, needsYou: Array.from({ length: 4 }, () => items[0]) }).success,
+    ).toBe(true);
+  });
+
+  test.each(["\r", "\n", "\u2028", "\u2029"])("refuses line break %j", (breakChar) => {
+    const result = NeedsYouItem.safeParse({ ...items[0], text: `First${breakChar}second` });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({ path: ["text"], message: "needsYou text must be one line" }),
+    );
+  });
+
+  test.each(["", " \t ", "\ud800", "x".repeat(301)])("refuses invalid text %j", (text) => {
+    expect(NeedsYouItem.safeParse({ ...items[0], text }).success).toBe(false);
+  });
+
+  test.each(["decide", "accept", "confirm-drift", "answer"])("accepts kind %s and the exact text limit", (kind) => {
+    expect(NeedsYouItem.parse({ kind, text: "x".repeat(300) }).kind).toBe(kind);
+  });
+
+  test("refuses undeclared topics in both publish schemas", () => {
+    const writeup = { ...manifest.writeup, needsYou: [{ ...items[0], topic: "missing" }] };
+    const results = [
+      PublishManifest.safeParse({ ...manifest, writeup }),
+      PublishRequest.safeParse({
+        reviewKey: "a".repeat(64),
+        repo: null,
+        branch: null,
+        title: manifest.title,
+        base: null,
+        head: null,
+        topics: manifest.topics,
+        files: [],
+        writeup,
+      }),
+    ];
+    for (const result of results) {
+      expect(result.success).toBe(false);
+      expect(result.error?.issues).toContainEqual(
+        expect.objectContaining({
+          path: ["writeup", "needsYou", 0, "topic"],
+          message: "needsYou topic is not declared",
+        }),
+      );
+    }
   });
 });
