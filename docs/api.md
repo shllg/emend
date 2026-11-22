@@ -1261,6 +1261,13 @@ paths in this revision. Bridge links resolve against the existing document base,
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
 
+After ready, before highlights, the parent sends `{ type: "emend:repo", url: RepoUrl }` when a
+repository URL is available. The bridge validates it and accepts only the first valid message;
+it links `#123` text, skipping existing links, code and preformatted text, form controls,
+script/style/template/noscript, non-HTML elements and shadow roots. A click sends
+`{ type: "emend:issue", number }` with only an integer from 1 through 9999999. The parent opens
+its own `repoUrl/issues/<number>` in a new tab with `noopener,noreferrer`.
+
 After ready and whenever an HTML doc's `changes` differs, the parent sends
 `{ type: "emend:changed", parts: number, marks: { index: number, revision: number }[] }`.
 Absent `changes` sends nothing. The bridge accepts only its parent and exactly these keys;
@@ -2101,14 +2108,16 @@ are never counted in `writeupEmpty`, and so a docs-only publish with links stays
 
 `repoUrl?` is exactly `https://host/owner/name`: a lowercase ASCII host with an optional port, and two
 path segments of `A-Za-z0-9._-` (not `.` or `..`), with no userinfo, query or fragment. The CLI derives
-it from the repository's `remote.origin.url` (SSH, scp-style and `git://` remotes become https, a trailing
-`.git` goes away; a path, a `file:` URL, `http:`, a remote with credentials, or a remote host without a
-dot, such as an ssh alias, gives none). A manifest's own `repoUrl` wins when it is valid; an invalid string
-in a manifest is dropped and the derived one is used, but one in a `PublishRequest` is refused. A manifest
+it for code reviews and pubs published from inside a repository, except pubs named with `--project`;
+pubs outside any repository get none. It uses `remote.origin.url` (SSH, scp-style and `git://` remotes
+become https, a trailing `.git` goes away; a path, a `file:` URL, `http:`, a remote with credentials,
+or a remote host without a dot, such as an ssh alias, gives none). A manifest's own `repoUrl` wins
+when it is valid; an invalid string in a manifest is dropped and the derived one is used, but one in a `PublishRequest` is refused. A manifest
 may set `"repoUrl": null` to opt out: the CLI then sends no `repoUrl` and no `#123` links render. With a
 `repoUrl`, the server turns `#123` in rendered writeup and Markdown doc text into a link
 to `<repoUrl>/issues/123`, never inside code, a fence, a diagram or an existing link. A number is 1
-through 7 digits and must follow a non-word character.
+through 7 digits and must follow a non-word character. In HTML docs, the bridge links `#123` text
+after the parent's `emend:repo`; clicks follow the `emend:issue` flow in the HTML frame section.
 
 Both ride in the writeup's source and rendered blobs, so an import or export keeps them; no table
 changes. Every absolute `http:` or `https:` link in rendered Markdown carries `target="_blank"` and

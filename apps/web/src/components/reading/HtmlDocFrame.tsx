@@ -1,4 +1,4 @@
-import type { DocHeading, HtmlDocChanges, HtmlSpanTarget } from "@emend/contract";
+import { type DocHeading, type HtmlDocChanges, type HtmlSpanTarget, RepoUrl } from "@emend/contract";
 import { TextSelect } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
@@ -30,6 +30,7 @@ export type HtmlNavigation = { threadId: string; intent: unknown };
 export function HtmlDocFrame({
   path,
   contentUrl,
+  repoUrl,
   images = [],
   look,
   colorScheme,
@@ -53,6 +54,7 @@ export function HtmlDocFrame({
 }: ReaderProps & {
   path: string;
   contentUrl: string;
+  repoUrl?: string | null;
   changes?: HtmlDocChanges;
   images?: readonly string[];
   look?: "emend" | "custom";
@@ -69,6 +71,8 @@ export function HtmlDocFrame({
   onCommentsOpenChange?: (open: boolean) => void;
   returnFocus?: () => HTMLElement | null;
 }) {
+  const parsedRepo = RepoUrl.safeParse(repoUrl);
+  const checkedRepoUrl = parsedRepo.success ? parsedRepo.data : undefined;
   const readOnly = useReadOnlyReview();
   const phone = useLayout() === "phone";
   const wide = useMedia("(min-width: 768px)");
@@ -110,6 +114,7 @@ export function HtmlDocFrame({
   const [generation, setGeneration] = useState(0);
   const [src, setSrc] = useState(() => frameSrc());
   const readyNow = useRef(false);
+  const repoSent = useRef(false);
   const [ready, setReady] = useState(0);
   const [target, setTarget] = useState<HtmlSpanTarget | null>(null);
   const [composing, setComposing] = useState(false);
@@ -127,6 +132,7 @@ export function HtmlDocFrame({
       loads.current = 0;
       gone.current = false;
       readyNow.current = false;
+      repoSent.current = false;
     }
   }, []);
   useEffect(() => {
@@ -203,6 +209,13 @@ export function HtmlDocFrame({
         }
         readyNow.current = true;
         setReady((value) => value + 1);
+      } else if (parsed.data.type === "emend:issue") {
+        if (readyNow.current && checkedRepoUrl)
+          window.open(
+            String(new URL(`${checkedRepoUrl}/issues/${parsed.data.number}`)),
+            "_blank",
+            "noopener,noreferrer",
+          );
       } else if (parsed.data.type === "emend:position") {
         if (!readyNow.current || (parsed.data.heading !== null && !headings[parsed.data.heading])) return;
         const position = { heading: parsed.data.heading, fraction: parsed.data.fraction };
@@ -242,6 +255,7 @@ export function HtmlDocFrame({
     readOnly,
     path,
     contentUrl,
+    checkedRepoUrl,
     images,
     composing,
     composerOpen,
@@ -260,6 +274,11 @@ export function HtmlDocFrame({
   useEffect(() => {
     if (ready && emendLook) post({ type: "emend:theme", mode, ...JSON.parse(colors) });
   }, [ready, emendLook, mode, colors, post]);
+  useEffect(() => {
+    if (!ready || !readyNow.current || gone.current || repoSent.current || !checkedRepoUrl) return;
+    post({ type: "emend:repo", url: checkedRepoUrl });
+    repoSent.current = true;
+  }, [ready, checkedRepoUrl, post]);
   useEffect(() => {
     if (ready && !gone.current)
       frame.current?.contentWindow?.postMessage({ type: "emend:highlight", anchors: JSON.parse(anchors) }, "*");

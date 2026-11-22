@@ -190,6 +190,7 @@ function Reading({
         visit={visit}
         docs={revision.docs}
         openDoc={openDoc}
+        repoUrl={revision.repoUrl}
         search={search}
         targeted={targeted}
         onHeading={onHeading}

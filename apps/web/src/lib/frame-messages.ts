@@ -6,6 +6,7 @@ import {
   HtmlDocPosition,
   HtmlSpanTarget,
   LIMITS,
+  RepoUrl,
   ThemeBase,
   ThemeValid,
   ThreadView,
@@ -85,6 +86,7 @@ const gallery = empty
 export const FrameToParent = span
   .extend({ type: literal("emend:anchor") })
   .or(empty.extend({ type: literal("emend:ready") }))
+  .or(empty.extend({ type: literal("emend:issue"), number: ThreadView.shape.createdOn.max(9_999_999) }))
   .or(HtmlPosition.safeExtend({ type: literal("emend:position") }))
   .or(gallery)
   .or(diagrams)
@@ -98,6 +100,7 @@ export const FrameToParent = span
 export type DocNavigation = Extract<typeof FrameToParent._output, { type: "emend:navigate" }>;
 export const ParentToFrame = empty
   .extend({ type: literal("emend:highlight"), anchors: span.extend({ threadId }).array() })
+  .or(empty.extend({ type: literal("emend:repo"), url: RepoUrl }))
   .or(HtmlDocChanges.safeExtend({ type: literal("emend:changed") }))
   .or(diagramResult.extend(diagramAddress))
   .or(diagramFailure.extend(diagramAddress))

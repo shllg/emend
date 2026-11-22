@@ -50,6 +50,119 @@ function frameByTitle() {
   return frame;
 }
 
+function mountRepo(repoUrl?: string | null) {
+  const content = (threads: ThreadView[] = []) => (
+    <QueryClientProvider client={client}>
+      <HtmlDocFrame
+        reviewId={id}
+        revision={2}
+        changedBlocks={[]}
+        path={path}
+        contentUrl={doc.contentUrl}
+        repoUrl={repoUrl}
+        threads={threads}
+        changes={{ parts: 1, marks: [] }}
+      />
+    </QueryClientProvider>
+  );
+  const view = render(content());
+  const frame = frameByTitle();
+  const post = vi.fn();
+  Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
+  fireEvent.load(frame);
+  const message = (data: unknown, source = frame.contentWindow) =>
+    fireEvent(window, new MessageEvent("message", { source, data }));
+  return { frame, post, message, update: (threads: ThreadView[]) => view.rerender(content(threads)) };
+}
+
+test.each(["https://github.com/o/r", undefined, null, "javascript:alert(1)"])(
+  "repository URL %s is sent once after ready, before highlights and changed parts",
+  (repoUrl) => {
+    const view = mountRepo(repoUrl);
+    expect(view.post).not.toHaveBeenCalled();
+    view.message({ type: "emend:ready" });
+    const messages = () => view.post.mock.calls.filter(([data]) => data.type === "emend:repo");
+    if (repoUrl === "https://github.com/o/r") {
+      expect(messages()).toEqual([[{ type: "emend:repo", url: repoUrl }, "*"]]);
+      expect(ParentToFrame.parse(messages()[0]?.[0])).toEqual({ type: "emend:repo", url: repoUrl });
+      const types = view.post.mock.calls.map(([data]) => data.type);
+      expect(types.indexOf("emend:repo")).toBeLessThan(types.indexOf("emend:highlight"));
+      expect(types.indexOf("emend:repo")).toBeLessThan(types.indexOf("emend:changed"));
+      view.update([thread]);
+      expect(messages()).toHaveLength(1);
+      fireEvent.load(view.frame);
+      fireEvent.click(screen.getByText(`Reload ${path}`));
+      const next = frameByTitle();
+      const post = vi.fn();
+      Object.defineProperty(next, "contentWindow", { value: { postMessage: post } });
+      fireEvent.load(next);
+      expect(post).not.toHaveBeenCalled();
+      view.message({ type: "emend:ready" }, next.contentWindow);
+      expect(post.mock.calls.filter(([data]) => data.type === "emend:repo")).toEqual([
+        [{ type: "emend:repo", url: repoUrl }, "*"],
+      ]);
+    } else {
+      expect(messages()).toEqual([]);
+    }
+  },
+);
+
+test.each([1, 12, 9999999])(
+  "a ready frame's issue number %s opens the parent's repository URL in a new tab",
+  (number) => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const view = mountRepo("https://github.com/o/r");
+    view.message({ type: "emend:ready" });
+    view.message({ type: "emend:issue", number });
+    expect(open).toHaveBeenCalledExactlyOnceWith(
+      `https://github.com/o/r/issues/${number}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  },
+);
+
+test.each([
+  { name: "no repository URL", repoUrl: undefined },
+  { name: "null repository URL", repoUrl: null },
+  { name: "invalid repository URL", repoUrl: "javascript:alert(1)" },
+])("an issue cannot open a tab with $name", ({ repoUrl }) => {
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  const view = mountRepo(repoUrl);
+  view.message({ type: "emend:ready" });
+  view.message({ type: "emend:issue", number: 12 });
+  expect(open).not.toHaveBeenCalled();
+});
+
+test("issue messages require the current ready frame and stop after navigation away", () => {
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  const view = mountRepo("https://github.com/o/r");
+  view.message({ type: "emend:issue", number: 12 });
+  expect(open).not.toHaveBeenCalled();
+  view.message({ type: "emend:ready" });
+  view.message({ type: "emend:issue", number: 12 }, window);
+  expect(open).not.toHaveBeenCalled();
+  fireEvent.load(view.frame);
+  view.message({ type: "emend:issue", number: 12 });
+  expect(open).not.toHaveBeenCalled();
+});
+
+test.each([
+  { type: "emend:issue", number: 0 },
+  { type: "emend:issue", number: 10000000 },
+  { type: "emend:issue", number: 1.5 },
+  { type: "emend:issue", number: "12" },
+  { type: "emend:issue", number: 12, extra: true },
+  { type: "emend:issue", number: 12, url: "https://example.test/other/repo/issues/12" },
+])("invalid issue message %j cannot open a tab", (data) => {
+  const open = vi.spyOn(window, "open").mockReturnValue(null);
+  const view = mountRepo("https://github.com/o/r");
+  view.message({ type: "emend:ready" });
+  view.message(data);
+  expect(FrameToParent.safeParse(data).success).toBe(false);
+  expect(open).not.toHaveBeenCalled();
+});
+
 test.each([false, true])("HTML changes are posted only when supplied and after ready (supplied=%s)", (supplied) => {
   const changes: HtmlDocChanges = { parts: 3, marks: [{ index: 1, revision: 2 }] };
   const content = (changes?: HtmlDocChanges) => (

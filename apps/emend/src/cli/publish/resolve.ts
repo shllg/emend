@@ -188,7 +188,7 @@ async function resolveWithWorker(
             : basename(identity).replace(/\.git$/, "");
       repo = { key: sha256(identity), name: shortenRepoName(name || basename(root)) };
     }
-    if (code) repoUrl = remote ? (remoteToRepoUrl(remote) ?? undefined) : undefined;
+    repoUrl = remote ? (remoteToRepoUrl(remote) ?? undefined) : undefined;
   }
   const changes = code ? await collectChanges(root, manifest.base ?? "", manifest.head ?? "", git, warn, gitDirs) : [];
   let grouped: ReturnType<typeof withOtherChanges>;
