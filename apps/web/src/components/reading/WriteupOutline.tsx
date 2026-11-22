@@ -1,5 +1,6 @@
 import type { RevisionView } from "@emend/contract";
 import { type RefObject, useEffect, useMemo, useState } from "react";
+import { HIDDEN_COMMENTS_GROUP } from "../../lib/hidden-writeup.ts";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { groupBlocks, type ReaderGroup } from "./BlockReader.tsx";
 
@@ -25,13 +26,14 @@ export function WriteupOutline({
       sections.flatMap((group) => groupBlocks(group).map((block) => [block.id, group.key] as const)),
     );
     const topics = new Map(sections.flatMap((group) => (group.topic ? [[group.topic.slug, group.key]] : [])));
+    const hiddenGroup = sections.find((group) => group.key === HIDDEN_COMMENTS_GROUP)?.key;
     const counts = new Map<string, number>();
     for (const thread of threads) {
       if (thread.placement.status !== "placed") continue;
       const location = thread.placement.location;
       const key =
         location.kind === "writeup-span"
-          ? blocks.get(location.blockId)
+          ? (blocks.get(location.blockId) ?? hiddenGroup)
           : location.kind === "topic"
             ? topics.get(location.slug)
             : undefined;

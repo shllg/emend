@@ -46,6 +46,7 @@ describe("theme sample", () => {
       const all = [...blocks, ...sample.revision.docs.flatMap((doc) => (doc.kind === "markdown" ? doc.blocks : []))];
       const target = thread.target;
       expect("blockId" in target && all.some((block) => block.id === target.blockId)).toBe(true);
+      expect("blockId" in target && target.blockId.startsWith("review-")).toBe(false);
       expect(thread.comments.every((comment) => comment.html?.includes("<"))).toBe(true);
     }
     expect(sample.revision.docs.map((doc) => doc.kind)).toEqual(["markdown", "source", "html"]);

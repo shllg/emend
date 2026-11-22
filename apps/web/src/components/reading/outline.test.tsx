@@ -526,6 +526,29 @@ test("outline has one row per section, topic ranks and placed thread counts", ()
   expect(view.container.querySelector(".em-outline-layout")?.firstElementChild?.contains(nav)).toBe(true);
 });
 
+test("outline counts placed threads on hidden writeup text", () => {
+  const review: RenderedBlock = { ...block, id: "review-12345678", section: "review" };
+  const hiddenThread: ThreadView = {
+    ...thread,
+    target: { kind: "writeup-span", blockId: review.id, quote: "seed", prefix: "Plant a ", suffix: "." },
+    placement: { status: "placed", location: { kind: "writeup-span", blockId: review.id, start: 8, end: 12 } },
+  };
+  mount({
+    writeup: {
+      sections: [
+        { key: "overview", label: "Overview", topic: null, blocks: [block] },
+        { key: "review", label: "Review", topic: null, blocks: [review] },
+      ],
+    },
+    topics: [],
+    threads: [hiddenThread],
+  });
+  const outline = within(screen.getByRole("navigation", { name: "Writeup outline" }));
+  const hiddenComments = outline.getByRole("button", { name: "Comments on hidden text 1 comment" });
+  expect(hiddenComments.querySelector(".em-dash-outline__count")?.textContent).toBe("1 comment");
+  expect(outline.getByRole("button", { name: "Overview" }).querySelector(".em-dash-outline__count")).toBeNull();
+});
+
 test("outline reveals folded topics and the glossary before scrolling their existing sections", () => {
   mount();
   const outline = within(screen.getByRole("navigation", { name: "Writeup outline" }));

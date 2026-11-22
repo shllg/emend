@@ -494,6 +494,44 @@ test("Comments groups follow place order, retain state badges, hide empties and 
   expect(screen.queryByText("Select text to comment.")).toBeNull();
   expect(screen.getByText("Select text in the writeup or a doc, or click a line in the diff.")).toBeTruthy();
 });
+test.each(["review-12345678", "overview-12345678"])(
+  "Comments change markers link to the visible target for %s",
+  (blockId) => {
+    const thread: ThreadView = {
+      ...base,
+      state: "answered",
+      target: { ...target, blockId },
+      placement: { status: "placed", location: { kind: "writeup-span", blockId, start: 0, end: 4 } },
+      comments: [
+        ...base.comments,
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          author: "agent",
+          body: "A synthetic reply",
+          sent: false,
+          sentOn: null,
+        },
+      ],
+    };
+    mount(
+      <ThreadList
+        reviewId={id}
+        revision={3}
+        threads={[thread]}
+        changedBlocks={[{ blockId, revision: 3 }]}
+        search={{ rev: 3, tab: "comments" }}
+        onResume={() => {}}
+      />,
+    );
+    const href = screen.getByRole("link", { name: "Changed in revision 3" }).getAttribute("href");
+    expect(href).toContain("tab=writeup");
+    if (blockId === "review-12345678") expect(href?.endsWith(`#thread-${thread.id}`)).toBe(true);
+    else expect(href).toBe(`/r/${id}?rev=3&tab=writeup#block-${blockId}`);
+    expect(document.querySelector('a[href*="#block-review-"]')).toBeNull();
+    expect(screen.queryByRole("link", { name: "Show in place" })).toBeNull();
+  },
+);
+
 test("Hide resolved persists and keeps unsent and directly linked resolved threads visible", () => {
   const threads: ThreadView[] = [
     { ...base, id: "hidden", state: "resolved" },

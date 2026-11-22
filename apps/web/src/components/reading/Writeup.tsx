@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
+import { HIDDEN_COMMENTS_GROUP, HIDDEN_WRITEUP_SECTIONS } from "../../lib/hidden-writeup.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { rankedTopics } from "../../lib/topics.ts";
 import {
@@ -15,7 +16,8 @@ import {
   usesOpeningCard,
 } from "../../lib/writeup-facts.ts";
 import type { ReviewSearch } from "../../router.tsx";
-import { BlockReader, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
+import { ThreadCard } from "../threads/ThreadCard.tsx";
+import { BlockReader, groupBlocks, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
 import { undoSentence } from "./TopicChips.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
@@ -149,7 +151,7 @@ export function Writeup({
       computed(frame, "topics", "Topics", topicsFact(topics));
     }
     for (const section of writeup.sections) {
-      if (section.key === "review") continue;
+      if (HIDDEN_WRITEUP_SECTIONS.has(section.key)) continue;
       if (newLayout && ["tldr", "whyItMatters", "checked", "notChecked"].includes(section.key)) continue;
       const blocks = section.blocks.filter((block) => !lifted.has(block.id));
       if (section.blocks.length && !blocks.length) continue;
@@ -360,6 +362,36 @@ export function Writeup({
         ),
       });
     }
+    const shownBlocks = new Set(groups.flatMap((group) => groupBlocks(group).map((block) => block.id)));
+    const hiddenThreads = props.threads.filter(
+      (thread) =>
+        thread.placement.status === "placed" &&
+        thread.placement.location.kind === "writeup-span" &&
+        !shownBlocks.has(thread.placement.location.blockId),
+    );
+    if (hiddenThreads.length) {
+      groups.push({
+        key: HIDDEN_COMMENTS_GROUP,
+        heading: "Comments on hidden text",
+        blocks: [],
+        content: (
+          <div className="space-y-3">
+            {hiddenThreads.map((thread) => (
+              <ThreadCard
+                key={thread.id}
+                surface="reading"
+                reviewId={props.reviewId}
+                revision={props.revision}
+                thread={thread}
+                changedBlocks={props.changedBlocks}
+                topics={topics}
+                note="The writeup no longer shows the text this comment is on."
+              />
+            ))}
+          </div>
+        ),
+      });
+    }
     return groups;
   }, [
     writeup.sections,
@@ -371,6 +403,7 @@ export function Writeup({
     code,
     link,
     props.threads,
+    props.reviewId,
     props.revision,
     props.changedBlocks,
   ]);
