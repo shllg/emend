@@ -40,7 +40,8 @@ const orderedPins = async (who: "reviewer" | "foreign" = "reviewer") =>
         a.id.localeCompare(b.id),
     );
 const view = async (id: string) => ReviewView.parse(await (await f.request(`/reviews/${id}`, "GET")).json());
-const pins = () => f.db.read((q) => q.select().from(t.reviewPins).where(eq(t.reviewPins.ownerId, f.ownerId)).all());
+const pins = (ownerId = f.ownerId) =>
+  f.db.read((q) => q.select().from(t.reviewPins).where(eq(t.reviewPins.ownerId, ownerId)).all());
 const post = (id: string, action: string, body?: unknown) => f.request(`/reviews/${id}/${action}`, "POST", body);
 const createGroup = async () => {
   const response = await f.request("/groups", "POST", { name: "Synthetic group" });
@@ -670,8 +671,10 @@ test("placement refuses malformed, missing, foreign, binned, moved and unpinned 
       [foreign, 404, "unknown_review"],
       [binned, 409, "review_in_bin"],
       [moved, 409, "review_moved"],
-    ] as const)
-      await error(await place(id, { before: anchor }), status, code);
+    ] as const) {
+      for (const anchorId of [anchor, randomUUID(), foreign])
+        await error(await place(id, { before: anchorId }), status, code);
+    }
     for (const body of [{ before: anchor }, { after: f.reviewId }]) {
       const response = await place(f.reviewId, body);
       expect(response.status).toBe(409);
@@ -686,30 +689,63 @@ test("placement refuses malformed, missing, foreign, binned, moved and unpinned 
   }
 });
 
-test("missing, foreign, unpinned, binned and moved anchors give the same pin_changed response", async () => {
+test("missing and foreign pinned anchors give identical not_found responses before checking the target pin", async () => {
   const unpinned = await seed();
   const foreign = await seed({ ownerId: f.otherOwnerId });
+  expect((await pin(foreign, true, "foreign")).status).toBe(204);
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const before = await pins();
+  const foreignBefore = await pins(f.otherOwnerId);
+  const seen: ReviewEvent[] = [];
+  const stop = f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
+  const bodies: string[] = [];
+  try {
+    for (const target of [f.reviewId, unpinned]) {
+      for (const anchor of [randomUUID(), foreign]) {
+        for (const body of [{ before: anchor }, { after: anchor }]) {
+          const response = await place(target, body);
+          expect(response.status).toBe(404);
+          const text = await response.text();
+          expect(JSON.parse(text)).toEqual({ error: { code: "not_found", message: "The resource was not found." } });
+          bodies.push(text);
+          expect(await pins()).toEqual(before);
+          expect(await pins(f.otherOwnerId)).toEqual(foreignBefore);
+          expect(seen).toEqual([]);
+        }
+      }
+    }
+    expect(new Set(bodies).size).toBe(1);
+  } finally {
+    stop?.();
+  }
+});
+
+test("owned unpinned, binned and moved anchors give identical pin_changed responses without writes or events", async () => {
+  const unpinned = await seed();
   const binned = await seed();
   const moved = await seed();
-  expect((await pin(foreign, true, "foreign")).status).toBe(204);
   for (const id of [f.reviewId, binned, moved]) expect((await pin(id)).status).toBe(204);
   expect((await post(binned, "bin")).status).toBe(204);
   await markMoved(moved);
   const before = await pins();
   const seen: ReviewEvent[] = [];
   const stop = f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
+  const bodies: string[] = [];
   try {
-    for (const anchor of [unpinned, randomUUID(), foreign, binned, moved]) {
+    for (const anchor of [unpinned, binned, moved]) {
       for (const body of [{ before: anchor }, { after: anchor }]) {
         const response = await place(f.reviewId, body);
         expect(response.status).toBe(409);
-        expect(await response.json()).toEqual({
+        const text = await response.text();
+        expect(JSON.parse(text)).toEqual({
           error: { code: "invalid_state", message: "The pins changed. Check them and try again." },
         });
+        bodies.push(text);
+        expect(await pins()).toEqual(before);
+        expect(seen).toEqual([]);
       }
     }
-    expect(await pins()).toEqual(before);
-    expect(seen).toEqual([]);
+    expect(new Set(bodies).size).toBe(1);
   } finally {
     stop?.();
   }

@@ -35,6 +35,13 @@ export function setReviewPin(ownerId: string, db: Db, reviewId: string, pinned: 
 export function placeReviewPin(ownerId: string, db: Db, reviewId: string, place: ReviewPinPlaceRequest) {
   return db.transaction(async (q) => {
     await requireReview(ownerId, q, reviewId);
+    const anchorId = "before" in place ? place.before : place.after;
+    const anchorReview = await q
+      .select({ id: reviews.id })
+      .from(reviews)
+      .where(and(eq(reviews.ownerId, ownerId), eq(reviews.id, anchorId)))
+      .get();
+    if (!anchorReview) throw new ApiError("not_found");
     const rows = await q
       .select({
         reviewId: reviewPins.reviewId,
@@ -47,7 +54,7 @@ export function placeReviewPin(ownerId: string, db: Db, reviewId: string, place:
       .where(eq(reviewPins.ownerId, ownerId))
       .orderBy(asc(reviewPins.position), asc(reviewPins.createdAt), asc(reviewPins.reviewId))
       .all();
-    const anchorId = "before" in place ? place.before : place.after;
+    if (!rows.some((row) => row.reviewId === reviewId)) throw new ApiError("invalid_state", "pin_changed");
     const anchor = rows.find((row) => row.reviewId === anchorId);
     if (!anchor || anchor.binnedAt !== null || anchor.movedToUrl !== null)
       throw new ApiError("invalid_state", "pin_changed");

@@ -2320,9 +2320,9 @@ A malformed path UUID is `404 not_found`.
 A missing or foreign review is `404 unknown_review`.
 A binned review is `409 review_in_bin`.
 A moved review is `409 review_moved`.
-A review that is not pinned, or an anchor that is not one of the owner's live pins, gives `409 invalid_state`
+A missing or foreign anchor gives `404 not_found`, with the same response for both.
+A review that is not pinned, or an owned anchor that is unpinned, binned or moved, gives `409 invalid_state`
 with the message "The pins changed. Check them and try again.".
-A missing, foreign, unpinned, binned or moved anchor gives that same error.
 Each move runs in one transaction and emits a `pins` event `{ reviewId }` after commit.
 A move changes neither `pinnedAt` nor anything on the review, including its state and `updatedAt`.
 
