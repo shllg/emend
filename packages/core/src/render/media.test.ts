@@ -328,6 +328,7 @@ describe("Markdown doc images", () => {
 });
 
 const pairMarkdown = "![Before](media/a.png) ![After](media/b.png)";
+const diffPairMarkdown = `${pairMarkdown} ![Diff](media/x.png)`;
 
 test.each([
   ["", ""],
@@ -341,9 +342,70 @@ test.each([
 ])("pairs screenshots and preserves the effect after %j", async (suffix, effect) => {
   const [block] = await render(pairMarkdown + suffix);
   expect(block?.html).toContain('class="emend-media-row emend-media-pair"');
+  expect(block?.html).not.toMatch(/emend-media-pair-diff|emend-media-diff/);
   if (effect) expect(block?.html).toContain(`<span class="emend-media-effect">${effect}`);
   else expect(block?.html).not.toContain("emend-media-effect");
   expect(blockText(block?.html ?? "")).toBe(block?.text);
+});
+
+test("two-image pair markup stays unchanged", async () => {
+  expect(await html(`${pairMarkdown}\nThe seed bed fits.`)).toBe(
+    `<p class="emend-media-row emend-media-pair"><span class="emend-media"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${shaB}" alt="After" loading="lazy" decoding="async"><span class="emend-media-caption">After</span></span>\n<span class="emend-media-effect">The seed bed fits.</span></p>`,
+  );
+});
+
+test.each([
+  ["", ""],
+  ["\nThe seed bed fits.", "The seed bed fits."],
+  ["  \nThe seed bed fits.", "The seed bed fits."],
+  [
+    "\n  The `seed` **fits** [here](https://example.com).",
+    'The <code>seed</code> <strong>fits</strong> <a href="https://example.com"',
+  ],
+  ["<br> \nThe seed bed fits.", "The seed bed fits."],
+])("pairs three screenshots and preserves the effect after %j", async (suffix, effect) => {
+  const [block] = await render(diffPairMarkdown + suffix);
+  const out = block?.html ?? "";
+  expect(out).toContain('<p class="emend-media-row emend-media-pair emend-media-pair-diff">');
+  expect(out).toContain(`<span class="emend-media emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}"`);
+  const paragraph = fromHtml(out, { fragment: true }).children[0];
+  if (paragraph?.type !== "element") throw new Error("Missing screenshot paragraph");
+  expect(
+    paragraph.children
+      .filter((node) => node.type === "element" && node.tagName === "span")
+      .map((node) => node.type === "element" && node.properties.className),
+  ).toEqual([
+    ["emend-media"],
+    ["emend-media"],
+    ["emend-media", "emend-media-diff"],
+    ...(effect ? [["emend-media-effect"]] : []),
+  ]);
+  if (effect) expect(out).toContain(`<span class="emend-media-effect">${effect}`);
+  else expect(out).not.toContain("emend-media-effect");
+  expect(blockText(out)).toBe(block?.text);
+});
+
+test("matches trimmed Before/After/Diff alts with extra words case-insensitively", async () => {
+  expect(
+    await html("![ before change ](media/a.png) ![ AFTER change ](media/b.png) ![ dIfF of the header ](media/x.png)"),
+  ).toContain('class="emend-media-row emend-media-pair emend-media-pair-diff"');
+});
+
+test("a diff image keeps its server-provided sized marker", async () => {
+  const [block] = await renderMarkdownWithBudget(
+    diffPairMarkdown,
+    "overview",
+    { highlightedBytes: 0 },
+    undefined,
+    media,
+    undefined,
+    "",
+    undefined,
+    new Map([["c".repeat(64), { width: 640, height: 480 }]]),
+  );
+  expect(block?.html).toContain(
+    `<span class="emend-media emend-media-sized emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff" loading="lazy" decoding="async" width="640" height="480">`,
+  );
 });
 
 test.each([
@@ -354,9 +416,21 @@ test.each([
   ["![Before](media/a.png) text ![After](media/b.png)", false],
   ["![Beforehand](media/a.png) ![After](media/b.png)", true],
   ["![Before](media/a.png)<br>![After](media/b.png)", false],
+  [`${pairMarkdown} ![Other](media/x.png)`, true],
+  ["![Before](media/a.png) ![Diff](media/x.png)", true],
+  [`![Diff](media/x.png) ${pairMarkdown}`, true],
+  ["![After](media/b.png) ![Before](media/a.png) ![Diff](media/x.png)", true],
+  [`${diffPairMarkdown} ![Diff](media/x.png)`, true],
+  [`${pairMarkdown} text ![Diff](media/x.png)`, false],
+  [`${diffPairMarkdown} Same line.\nLater line.`, false],
+  [`See ${diffPairMarkdown}`, false],
+  ["![Before](media/a.png) text ![After](media/b.png) ![Diff](media/x.png)", false],
+  [`${pairMarkdown}<br>![Diff](media/x.png)`, false],
+  [`${pairMarkdown} ![Diffusion](media/x.png)`, true],
 ])("keeps non-pair behavior for %s", async (md, row) => {
   const out = await html(md);
   expect(out).not.toContain("emend-media-pair");
+  expect(out).not.toContain("emend-media-diff");
   expect(out).not.toContain("emend-media-effect");
   expect(out.includes("emend-media-row")).toBe(row);
 });
@@ -380,20 +454,46 @@ test.each([
   expect(blockText(block?.html ?? "")).toBe(expectedText);
 });
 
-test("effect markup stays sanitized and author classes cannot forge a pair", async () => {
-  const out = await html(
-    `${pairMarkdown}\nEffect: <script>bad()</script><img src=x onerror=bad()> <svg onload=bad()></svg> [bad](javascript:bad()) <strong>safe</strong>\n\n<p class="emend-media-pair">Plain</p>\n\n<span class="emend-media-effect">Plain</span>`,
-  );
-  expect(out).toContain('<span class="emend-media-effect">Effect: ');
-  expect(out).toContain('class="user-content-emend-media-pair"');
-  expect(out).toContain('class="user-content-emend-media-effect"');
-  expect(out).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
-  expect(out).toContain("<strong>safe</strong>");
+test.each([
+  ["", ""],
+  ["\nThe `seed` **fits**.", "\nThe seed fits."],
+  ["  \nThe seed fits.", "\nThe seed fits."],
+])("diff pair wrappers preserve legacy block text and identity for %j", async (suffix, effectText) => {
+  const identity = `\u0000media${JSON.stringify(["Before", "media/a.png", shaA])} \u0000media${JSON.stringify(["After", "media/b.png", shaB])} \u0000media${JSON.stringify(["Diff", "media/x.png", "c".repeat(64)])}${effectText}`;
+  const expectedId = `overview-${await blockHash(normalizeText(identity))}`;
+  const expectedText = `Before After Diff${effectText}`;
+  const [block] = await render(diffPairMarkdown + suffix);
+  expect(block?.text).toBe(expectedText);
+  expect(block?.id).toBe(expectedId);
+  expect(blockText(block?.html ?? "")).toBe(expectedText);
 });
 
-test.each(["string", "array"] as const)("hostile pair effects stay inert in a %s glossary", async (kind) => {
+test.each([pairMarkdown, diffPairMarkdown])(
+  "effect markup stays sanitized and author classes cannot forge %s",
+  async (md) => {
+    const out = await html(
+      `${md}\nEffect: <script>bad()</script><img src=x onerror=bad()> <svg onload=bad()></svg> [bad](javascript:bad()) <strong>safe</strong>\n\n<p class="emend-media-pair">Plain</p>\n\n<span class="emend-media-effect">Plain</span>\n\n<p class="emend-media-pair-diff">Plain</p>\n\n<span class="emend-media-diff">Plain</span>`,
+    );
+    expect(out).toContain('<span class="emend-media-effect">Effect: ');
+    expect(out).toContain('class="user-content-emend-media-pair"');
+    expect(out).toContain('class="user-content-emend-media-effect"');
+    expect(out).toContain('<p class="user-content-emend-media-pair-diff">Plain</p>');
+    expect(out).toContain('<span class="user-content-emend-media-diff">Plain</span>');
+    expect(out.match(/(?<![-\w])emend-media-pair-diff/g) ?? []).toHaveLength(md === diffPairMarkdown ? 1 : 0);
+    expect(out.match(/(?<![-\w])emend-media-diff/g) ?? []).toHaveLength(md === diffPairMarkdown ? 1 : 0);
+    expect(out).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
+    expect(out).toContain("<strong>safe</strong>");
+  },
+);
+
+test.each([
+  ["string", pairMarkdown, 2],
+  ["array", pairMarkdown, 2],
+  ["string", diffPairMarkdown, 3],
+  ["array", diffPairMarkdown, 3],
+] as const)("hostile effects stay inert in a %s glossary with %s", async (kind, md, count) => {
   const source = 'graph TD; A-->B\nclick A "javascript:bad()"';
-  const markdown = `A synthetic comparison.\n\n${pairMarkdown}\nEffect: <script>bad()</script><img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()><circle/></svg> <strong>safe</strong>\n\n<p class="emend-media-pair">A forged pair.</p>\n\n\`\`\`mermaid\n${source}\n\`\`\``;
+  const markdown = `A synthetic comparison.\n\n${md}\nEffect: <script>bad()</script><img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()><circle/></svg> <strong>safe</strong>\n\n<p class="emend-media-pair">A forged pair.</p>\n\n<p class="emend-media-pair-diff">A forged diff pair.</p>\n\n<span class="emend-media-diff">A forged diff.</span>\n\n\`\`\`mermaid\n${source}\n\`\`\``;
   const writeup = await renderWriteup(
     {
       overview: "",
@@ -419,11 +519,19 @@ test.each(["string", "array"] as const)("hostile pair effects stay inert in a %s
   expect(pairs[0]?.tagName).toBe("p");
   expect(
     pairs[0]?.children.filter((node) => node.type === "element" && node.properties.className?.includes("emend-media")),
-  ).toHaveLength(2);
+  ).toHaveLength(count);
+  expect(pairs[0]?.properties.className?.includes("emend-media-pair-diff")).toBe(count === 3);
+  expect(
+    pairs[0]?.children.filter(
+      (node) => node.type === "element" && node.properties.className?.includes("emend-media-diff"),
+    ),
+  ).toHaveLength(count === 3 ? 1 : 0);
   expect(
     pairs[0]?.children.some(
       (node) => node.type === "element" && node.properties.className?.includes("emend-media-effect"),
     ),
   ).toBe(true);
   expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-emend-media-pair"');
+  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-emend-media-pair-diff"');
+  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-emend-media-diff"');
 });

@@ -27,6 +27,17 @@ const pair: RenderedBlock = {
   text: "Before After\nMore room for seeds.",
   html: `<p class="emend-media-row emend-media-pair">${imageHtml("a", "Before")} ${imageHtml("b", "After")}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
 };
+const diffPair: RenderedBlock = {
+  ...pair,
+  text: "Before After Diff\nMore room for seeds.",
+  html: `<p class="emend-media-row emend-media-pair emend-media-pair-diff">${imageHtml("a", "Before")} ${imageHtml("b", "After")} ${imageHtml("c", "Diff").replace('class="emend-media"', 'class="emend-media emend-media-diff"')}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+};
+const mixedPairs: RenderedBlock = {
+  ...diffPair,
+  kind: "quote",
+  text: `${diffPair.text}\n${pair.text}`,
+  html: `<blockquote>${diffPair.html}${pair.html}</blockquote>`,
+};
 function mountPairStyles() {
   // Load the production hide rules directly without needing the app stylesheet bundle.
   const css = readFileSync(resolve(import.meta.dirname, "../../styles/prose.css"), "utf8");
@@ -1136,6 +1147,12 @@ test("a pair keeps both lightbox images and its complete comment anchor after ch
   mountPairStyles();
   const { container } = mount([{ key: "overview", blocks: [pair] }]);
   const control = screen.getByRole("group", { name: "Compare screenshots" });
+  expect(
+    within(control)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Before", "After", "Side by side"]);
+  expect(within(control).queryByRole("button", { name: "Diff" })).toBeNull();
   const before = screen.getByRole("button", { name: "Open screenshot: Before" });
   fireEvent.click(within(control).getByRole("button", { name: "Before" }));
   expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("before");
@@ -1159,6 +1176,66 @@ test("a pair keeps both lightbox images and its complete comment anchor after ch
   fireEvent.click(button("Save comment"));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).target).toEqual({ kind: "writeup-span", ...blockAnchor(pair) });
+});
+
+test("a diff pair offers four modes and keeps all three images mounted", () => {
+  mountPairStyles();
+  const { container } = mount([{ key: "overview", blocks: [diffPair] }]);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  expect(
+    within(control)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Before", "After", "Side by side", "Diff"]);
+  const prose = container.querySelector(".em-prose");
+  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
+  const mounted = [...container.querySelectorAll(".emend-media > img")];
+  expect(mounted).toHaveLength(3);
+  expect(prose?.getAttribute("data-pair-mode")).toBe("side");
+  expect(images.map((image) => mediaDisplay(image) === "none")).toEqual([false, false, true]);
+  for (const [mode, label, hidden] of [
+    ["before", "Before", [false, true, true]],
+    ["after", "After", [true, false, true]],
+    ["diff", "Diff", [true, true, false]],
+    ["side", "Side by side", [false, false, true]],
+  ] as const) {
+    const selected = within(control).getByRole("button", { name: label });
+    fireEvent.click(selected);
+    expect(prose?.getAttribute("data-pair-mode")).toBe(mode);
+    expect(selected.getAttribute("aria-pressed")).toBe("true");
+    expect(images.map((image) => mediaDisplay(image) === "none")).toEqual(hidden);
+    expect([...container.querySelectorAll(".emend-media > img")]).toEqual(mounted);
+    for (const image of mounted) expect(image.isConnected).toBe(true);
+  }
+});
+
+test("Diff mode keeps both images visible in pairs without a diff in the same block", () => {
+  mountPairStyles();
+  const { container } = mount([{ key: "overview", blocks: [mixedPairs] }]);
+  expect(screen.getAllByRole("group", { name: "Compare screenshots" })).toHaveLength(1);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  fireEvent.click(within(control).getByRole("button", { name: "Diff" }));
+  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
+  expect(images).toHaveLength(5);
+  expect(images.map((image) => mediaDisplay(image) === "none")).toEqual([true, true, false, false, false]);
+  for (const image of images) expect(image.isConnected).toBe(true);
+});
+
+test("replacing a diff pair with a plain pair resets Diff mode to side by side", () => {
+  mountPairStyles();
+  const { container, replace } = mount([{ key: "overview", blocks: [diffPair] }]);
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Compare screenshots" })).getByRole("button", { name: "Diff" }),
+  );
+  expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("diff");
+  replace([{ key: "overview", blocks: [pair] }]);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  expect(within(control).queryByRole("button", { name: "Diff" })).toBeNull();
+  expect(within(control).getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
+  expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("side");
+  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
+  expect(images).toHaveLength(2);
+  for (const image of images) expect(mediaDisplay(image)).not.toBe("none");
 });
 
 test.each([
@@ -1234,5 +1311,74 @@ test.each([false, true])(
     await waitFor(() => expect(document.activeElement).toBe(after));
     expect(document.activeElement).not.toBe(document.body);
     expect(mediaDisplay(after.parentElement)).not.toBe("none");
+  },
+);
+
+test.each([
+  ["Side by side", "Diff", "diff"],
+  ["Before", "Diff", "diff"],
+  ["After", "Diff", "diff"],
+  ["Diff", "Before", "before"],
+  ["Diff", "After", "after"],
+  ["Diff", "Diff", "diff"],
+  ["Side by side", "Before", "side"],
+  ["Side by side", "After", "side"],
+] as const)("revealing %s mode's %s image in a diff pair selects %s", (initial, target, expected) => {
+  mountPairStyles();
+  const { container } = mount([{ key: "overview", blocks: [diffPair] }]);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  fireEvent.click(within(control).getByRole("button", { name: initial }));
+  const image = container.querySelector<HTMLImageElement>(`img[alt="${target}"]`);
+  const wrapper = image?.parentElement;
+  if (!image || !wrapper) throw new Error("Missing diff pair image");
+  act(() => {
+    revealReadingTarget(image);
+    expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe(expected);
+    expect(mediaDisplay(wrapper)).not.toBe("none");
+  });
+  expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe(expected);
+  expect(mediaDisplay(wrapper)).not.toBe("none");
+});
+
+test.each(["Before", "After"])("revealing %s in a plain pair keeps a mixed block in Diff mode", (target) => {
+  mountPairStyles();
+  const { container } = mount([{ key: "overview", blocks: [mixedPairs] }]);
+  const control = screen.getByRole("group", { name: "Compare screenshots" });
+  fireEvent.click(within(control).getByRole("button", { name: "Diff" }));
+  const image = container.querySelector<HTMLImageElement>(
+    `p.emend-media-pair:not(.emend-media-pair-diff) img[alt="${target}"]`,
+  );
+  if (!image?.parentElement) throw new Error("Missing plain pair image");
+  expect(mediaDisplay(image.parentElement)).not.toBe("none");
+  act(() => revealReadingTarget(image));
+  expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("diff");
+  expect(mediaDisplay(image.parentElement)).not.toBe("none");
+});
+
+test.each([false, true])(
+  "cancel after commenting on the hidden Diff image focuses it visibly (phone=%s)",
+  async (phone) => {
+    viewport(phone);
+    mountPairStyles();
+    const { container } = mount([{ key: "overview", blocks: [diffPair] }]);
+    const diff = container.querySelector<HTMLImageElement>('img[alt="Diff"]');
+    if (!diff?.parentElement) throw new Error("Missing Diff image");
+    expect(mediaDisplay(diff.parentElement)).toBe("none");
+    open("Before");
+    expect(within(dialog()).getByText("1 of 3")).toBeTruthy();
+    fireEvent.click(button("Next screenshot"));
+    expect(within(dialog()).getByRole("heading", { name: "After" })).toBeTruthy();
+    expect(within(dialog()).getByText("2 of 3")).toBeTruthy();
+    fireEvent.click(button("Next screenshot"));
+    expect(within(dialog()).getByRole("heading", { name: "Diff" })).toBeTruthy();
+    expect(within(dialog()).getByText("3 of 3")).toBeTruthy();
+    fireEvent.click(button("Comment on screenshot"));
+    expect(screen.getByRole("textbox", { name: "Comment" })).toBeTruthy();
+    expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("diff");
+    expect(mediaDisplay(diff.parentElement)).not.toBe("none");
+    fireEvent.click(button("Cancel"));
+    await waitFor(() => expect(document.activeElement).toBe(diff));
+    expect(document.activeElement).not.toBe(document.body);
+    expect(mediaDisplay(diff.parentElement)).not.toBe("none");
   },
 );

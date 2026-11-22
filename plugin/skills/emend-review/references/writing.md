@@ -334,6 +334,12 @@ In a review writeup:
   `![Before](media/before.png) ![After](media/after.png)`.
   On the next line of that paragraph, state the effect in one line.
   emend shows Before, After and Side by side controls, with the effect line underneath.
+- A third image with alt text "Diff" may follow the pair in the same paragraph:
+  `![Before](media/before.png) ![After](media/after.png) ![Diff](media/diff.png)`.
+  emend then adds a Diff control that shows that image alone.
+  Make the diff from the two shots on your machine, with an image diff tool the project or the
+  user already provides. Never add a dependency to the repo under review for it.
+  Without such a tool, leave the Diff image out.
 - Every image path in the writeup must be listed under `media`.
 - Publish refuses an image path that is not listed, such as a typo in the file name.
 - `emend publish` names the path, so you can fix the link or list the file.
@@ -342,7 +348,7 @@ In a review writeup:
 
 In a Markdown document, put the image beside it and reference it with a relative path,
 `![Alt](shots/before.png)`. PNG, JPEG, GIF, WebP and AVIF show; remote image URLs do not.
-A Before and After pair shows the same way.
+A Before and After pair, with or without a Diff image, shows the same way.
 
 ## Tables
 
