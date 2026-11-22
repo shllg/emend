@@ -145,7 +145,7 @@ If no related docs are found, write "No design doc is cited." in the writeup's `
 
 Read [the writing reference](references/writing.md) before you write the writeup. It holds the
 writing rules: sentences, titles and paragraphs, the TL;DR, Why and Example, state diagrams,
-risk and proof, the glossary, pictures and tables.
+change graphs, risk and proof, the glossary, pictures and tables.
 
 Author Markdown in `writeup`, except the plain-text `area`.
 
@@ -183,6 +183,8 @@ Write the opening fields below. The app groups them for the reviewer.
 - `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
   trade-offs and checks. A request to explain something in the writeup belongs here.
   A topic that changes a state flow shows a state diagram in its `why`, as the writing reference says.
+  A change that crosses two or more parts, or adds a flow, shows a change graph with a legend in a
+  topic's `why`, as the writing reference says.
   Show what you claim, as the writing reference says under "Pictures" and "Tables": a screenshot
   for a visible change, a table for a config, schema, number or query-plan change.
 

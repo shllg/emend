@@ -73,6 +73,9 @@ export function statechartClassColors(dark: boolean, surface: string, text: stri
   if (!hex.test(surface) || !hex.test(text)) return [];
   const mode = dark ? 1 : 0;
   const red = dark ? "#fa695e" : "#d33b36";
+  // sRGB anchors from colors.css: green-600/400 and ochre-600/400.
+  const green = dark ? "#53be70" : "#218041";
+  const amber = dark ? "#f5af2e" : "#ba7419";
   const orange = anchors.orange[mode];
   const markAmount = dark ? 0.4 : 0.28;
   return [
@@ -91,6 +94,25 @@ export function statechartClassColors(dark: boolean, surface: string, text: stri
       ...readablePair(surface, text, orange, markAmount, 0.6),
       stroke: orange,
       strokeWidth: "1.5px",
+    },
+    {
+      name: "added",
+      ...readablePair(surface, text, green, markAmount, 0.6),
+      stroke: green,
+      strokeWidth: "1.5px",
+    },
+    {
+      name: "changed",
+      ...readablePair(surface, text, amber, markAmount, 0.6),
+      stroke: amber,
+      strokeWidth: "1.5px",
+    },
+    {
+      name: "removed",
+      ...readablePair(surface, text, red, markAmount, 0.6),
+      stroke: red,
+      strokeWidth: "1.5px",
+      dasharray: "5 3",
     },
     { name: "bugPath", stroke: anchors.blue[mode], strokeWidth: "2.5px" },
     { name: "repeats", stroke: anchors.purple[mode], strokeWidth: "2.5px", dasharray: "6 3" },

@@ -292,6 +292,17 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
   class S01b bugPath
   class S01c purple
   class S01e teal`,
+    `flowchart LR
+  D01a[Command line] --> D01b[Search cache]
+  D01a --> D01c[Review store]
+  D01a -.->|removed| D01d[Poller]
+  class D01b added
+  class D01c changed
+  class D01d removed
+  subgraph Legend
+    direction LR
+    L01a[Added]:::added ~~~ L01b[Changed]:::changed ~~~ L01c[Removed]:::removed
+  end`,
     // Hand-drawn diagrams cannot render in happy-dom; mermaid-classes.test.ts checks emend's rules skip them.
     "flowchart LR\n  subgraph G01 [G01]\n    G01a --> G01b\n  end\n  G01 --> G01c\n  class G01 teal\n  class G01b breaks",
     '%%{init: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
@@ -365,6 +376,32 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
       const tealClassDef = /(?:^|\s)\.teal\s+rect\s*\{[^{}]*\bfill\s*:\s*#ffd6e7\s*!important\b[^{}]*\}/.exec(css);
       expect(tealDefault).toBeGreaterThanOrEqual(0);
       expect(tealClassDef?.index).toBeGreaterThan(tealDefault);
+    }
+    if (source.includes("class D01b added")) {
+      const legend = [...root.querySelectorAll("g.cluster")].find((cluster) => cluster.textContent.includes("Legend"));
+      expect(legend).toBeDefined();
+      // Mermaid draws cluster shapes and their nodes in separate SVG groups.
+      for (const [name, label, legendLabel] of [
+        ["added", "Search cache", "Added"],
+        ["changed", "Review store", "Changed"],
+        ["removed", "Poller", "Removed"],
+      ] as const) {
+        const nodes = [...root.querySelectorAll(`g.node.${name}`)];
+        expect(nodes.find((node) => node.textContent.includes(label))?.textContent).toContain(label);
+        expect(nodes.find((node) => node.textContent.includes(legendLabel))?.textContent).toContain(legendLabel);
+      }
+      expect(css).toMatch(
+        /\.node\.removed:not\(\[data-look=handDrawn\]\)\s+rect\b[^{}]*\{[^{}]*\bstroke-dasharray\s*:\s*5 3\s*(?:;|\})/,
+      );
+      const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      const colors = statechartClassColors(dark, dark ? "#111213" : "#fdfdfe", dark ? "#f4f4f6" : "#111213");
+      const addedFill = colors.find((color) => color.name === "added")?.fill;
+      expect(addedFill).toBeDefined();
+      expect(css).toMatch(
+        new RegExp(
+          `\\.node\\.added:not\\(\\[data-look=handDrawn\\]\\)\\s+rect\\b[^{}]*\\{[^{}]*\\bfill\\s*:\\s*${addedFill}\\s*(?:;|\\})`,
+        ),
+      );
     }
     if (source.includes("class G01 teal")) {
       const cluster = root.querySelector("g.cluster.teal");
