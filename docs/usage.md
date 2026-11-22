@@ -280,6 +280,8 @@ Add emend to my Claude Code status line. In my ~/.claude/settings.json, add a st
 Keep any existing status line by printing both: the existing command's output, a separator, then emend's line. Show me the change before saving it.
 ```
 
+Settings → Integrations shows the same prompt, with a Copy button.
+
 Without an existing status line, the setting should look like this:
 
 ```json
