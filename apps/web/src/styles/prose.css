@@ -312,7 +312,7 @@
   }
   .em-prose[data-pair-mode="before"] p.emend-media-pair > .emend-media + .emend-media,
   .em-prose[data-pair-mode="after"] p.emend-media-pair > .emend-media:first-child,
-  .em-prose:not([data-pair-mode="diff"]) p.emend-media-pair > .emend-media-diff,
+  .em-prose[data-pair-mode="after"] p.emend-media-pair > .emend-media-diff,
   .em-prose[data-pair-mode="diff"] p.emend-media-pair-diff > .emend-media:not(.emend-media-diff) {
     display: none;
   }

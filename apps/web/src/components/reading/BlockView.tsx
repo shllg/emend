@@ -12,6 +12,14 @@ export function CommentHtml({ html }: { html: string }) {
 const SIDE = /^[1-9][0-9]{0,4}$/;
 const MAX_SIDE = 65535;
 
+type PairMode = "before" | "after" | "side" | "diff";
+
+function pairModeForReveal(mode: PairMode, view: "before" | "after" | "diff", pairHasDiff: boolean): PairMode {
+  if (mode === "side" || mode === view) return mode;
+  if (mode === "diff" && !pairHasDiff) return mode;
+  return view;
+}
+
 /**
  * A prose block. Only an image whose wrapper is `span.emend-media.emend-media-sized` carries the
  * server's pixel size in `width` and `height`; any other media image may hold an author's numbers
@@ -21,7 +29,7 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
   const ref = useRef<HTMLDivElement>(null);
   const [pair, setPair] = useState(false);
   const [pairDiff, setPairDiff] = useState(false);
-  const [mode, setMode] = useState<"before" | "after" | "side" | "diff">("side");
+  const [mode, setMode] = useState<PairMode>("side");
   // CSS cannot read attribute numbers in every browser yet, so the app copies them into custom properties.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the images change only when the block's HTML does.
   useLayoutEffect(() => {
@@ -68,13 +76,14 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
             ? "after"
             : undefined;
       if (next) {
-        const current = prose.getAttribute("data-pair-mode") ?? "side";
-        const mode =
-          current === "side" && next !== "diff"
-            ? "side"
-            : current === "diff" && !media.parentElement?.classList.contains("emend-media-pair-diff")
-              ? "diff"
-              : next;
+        const attribute = prose.getAttribute("data-pair-mode");
+        const current: PairMode =
+          attribute === "before" || attribute === "after" || attribute === "diff" ? attribute : "side";
+        const mode = pairModeForReveal(
+          current,
+          next,
+          !!media.parentElement?.classList.contains("emend-media-pair-diff"),
+        );
         prose.setAttribute("data-pair-mode", mode);
         setMode(mode);
       }

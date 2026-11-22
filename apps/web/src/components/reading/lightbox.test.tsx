@@ -1192,12 +1192,12 @@ test("a diff pair offers four modes and keeps all three images mounted", () => {
   const mounted = [...container.querySelectorAll(".emend-media > img")];
   expect(mounted).toHaveLength(3);
   expect(prose?.getAttribute("data-pair-mode")).toBe("side");
-  expect(images.map((image) => mediaDisplay(image) === "none")).toEqual([false, false, true]);
+  expect(images.map((image) => mediaDisplay(image) === "none")).toEqual([false, false, false]);
   for (const [mode, label, hidden] of [
     ["before", "Before", [false, true, true]],
     ["after", "After", [true, false, true]],
     ["diff", "Diff", [true, true, false]],
-    ["side", "Side by side", [false, false, true]],
+    ["side", "Side by side", [false, false, false]],
   ] as const) {
     const selected = within(control).getByRole("button", { name: label });
     fireEvent.click(selected);
@@ -1207,6 +1207,8 @@ test("a diff pair offers four modes and keeps all three images mounted", () => {
     expect([...container.querySelectorAll(".emend-media > img")]).toEqual(mounted);
     for (const image of mounted) expect(image.isConnected).toBe(true);
   }
+  prose?.removeAttribute("data-pair-mode");
+  expect(images.map((image) => mediaDisplay(image) === "none")).toEqual([false, false, false]);
 });
 
 test("Diff mode keeps both images visible in pairs without a diff in the same block", () => {
@@ -1315,7 +1317,7 @@ test.each([false, true])(
 );
 
 test.each([
-  ["Side by side", "Diff", "diff"],
+  ["Side by side", "Diff", "side"],
   ["Before", "Diff", "diff"],
   ["After", "Diff", "diff"],
   ["Diff", "Before", "before"],
@@ -1361,6 +1363,8 @@ test.each([false, true])(
     viewport(phone);
     mountPairStyles();
     const { container } = mount([{ key: "overview", blocks: [diffPair] }]);
+    const control = screen.getByRole("group", { name: "Compare screenshots" });
+    fireEvent.click(within(control).getByRole("button", { name: "Before" }));
     const diff = container.querySelector<HTMLImageElement>('img[alt="Diff"]');
     if (!diff?.parentElement) throw new Error("Missing Diff image");
     expect(mediaDisplay(diff.parentElement)).toBe("none");
