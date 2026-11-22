@@ -157,6 +157,7 @@ Write the opening fields below. The app groups them for the reviewer.
 - `tldr`: the TL;DR, as the writing reference says.
 - `whyItMatters`: what the change gives the product, or what it prepares for, in one or two sentences.
   It shows inside the TL;DR card.
+- `newInRevision`: leave it out on a first publish; emend-feedback writes it for each later revision.
 - `needsYou`: at most four items `{ "kind": "decide" | "accept" | "confirm-drift" | "answer", "text": "<one line>", "topic": "<slug>" }`.
   The topic is optional. The card sits under the TL;DR; the status line counts the items.
   `[]` says nothing needs a decision. Write it only when you write `decisions` from first-hand intent.

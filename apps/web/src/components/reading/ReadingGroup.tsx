@@ -19,6 +19,7 @@ import { TopicChips } from "./TopicChips.tsx";
 
 const presentationClasses = {
   tldr: " em-writeup-card",
+  newInRevision: " em-writeup-card em-writeup-news",
   needsYou: " em-writeup-card em-writeup-needs",
   facts: " em-writeup-facts-group",
   pair: " em-writeup-pair",

@@ -2,12 +2,17 @@ import {
   type GlossaryTerm,
   LIMITS,
   type NeedsYouKind,
+  type NewInRevisionItem,
+  type NewInRevisionSection,
   normalizeGlossaryForm,
   type PublishLinks,
   type ReviewVerdict,
   type TopicMeta,
   type WriteupInput,
 } from "@emend/contract";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
 import type { Block } from "./blocks.ts";
 import { type RenderEffects, renderMarkdownWithBudget } from "./markdown.ts";
@@ -19,6 +24,7 @@ export type RenderedWriteup = {
   sections: { key: string; label: string; topic: string | null; blocks: Block[] }[];
   terms?: GlossaryTerm[];
   area?: string;
+  newInRevision?: { topic?: string; section?: NewInRevisionSection; blockId?: string; blockIds: string[] }[];
   needsYou?: { kind: NeedsYouKind; topic?: string; blockIds: string[] }[];
   /** Publish-level links and the repo base, kept beside the sections in the stored blob. */
   links?: PublishLinks;
@@ -29,6 +35,22 @@ const unwrittenDecisions =
   "Decisions and drift: not written. Only the session where the change was asked for can tell what drifted from it.";
 
 const escapeMarkdown = (text: string) => text.replace(/[!-/:-@[-`{-~]/g, "\\$&");
+
+const quoteParser = unified().use(remarkParse).use(remarkGfm);
+
+function normalizeMarkdownQuote(quote: string): string {
+  const tree = quoteParser.parse(quote);
+  const parts: string[] = [];
+  const pending: (typeof tree | (typeof tree.children)[number])[] = [tree];
+  while (pending.length) {
+    const node = pending.pop();
+    if (!node) break;
+    if (node.type === "text" || node.type === "inlineCode") parts.push(node.value);
+    else if (node.type === "break") parts.push(" ");
+    else if ("children" in node) pending.push(...node.children.toReversed());
+  }
+  return normalizeText(parts.join(""));
+}
 
 function reviewMarkdown(review: ReviewVerdict, topics: TopicMeta[]): string {
   let verdict = review.level === "skim" ? "Skim, then merge." : "Read everything.";
@@ -64,15 +86,22 @@ export async function renderWriteup(
   const entries = Array.isArray(writeup.glossary) ? writeup.glossary : undefined;
   const terms: GlossaryTerm[] = [];
   const matcher = entries ? termMatcher(entries) : undefined;
-  const needsYou: NonNullable<RenderedWriteup["needsYou"]> = [];
-  const appendNeedsYou = async () => {
-    if (!writeup.needsYou?.length) return;
+  let newsItems: { item: NewInRevisionItem; blockIds: string[] }[] = [];
+  let needsYou: NonNullable<RenderedWriteup["needsYou"]> = [];
+  const appendItems = async <T extends { text: string }, M>(
+    key: string,
+    label: string,
+    items: T[] | undefined,
+    metadata: (item: T, blockIds: string[]) => M,
+  ): Promise<M[]> => {
+    if (!items?.length) return [];
     const blocks: Block[] = [];
+    const result: M[] = [];
     const occurrences = new Map<string, number>();
-    for (const item of writeup.needsYou) {
+    for (const item of items) {
       const rendered = await renderMarkdownWithBudget(
         item.text,
-        "needsYou",
+        key,
         highlightBudget,
         meta.repoUrl,
         meta.media,
@@ -82,20 +111,34 @@ export async function renderWriteup(
         meta.mediaSizes,
         matcher,
       );
+      if (key === "newInRevision" && !rendered.length) continue;
       for (const block of rendered) {
-        const base = block.id.slice(0, "needsYou-".length + 8);
+        const base = block.id.slice(0, key.length + 1 + 8);
         const count = (occurrences.get(base) ?? 0) + 1;
         occurrences.set(base, count);
         block.id = count === 1 ? base : `${base}-${count}`;
         blocks.push(block);
       }
-      needsYou.push({
-        kind: item.kind,
-        ...(item.topic !== undefined ? { topic: item.topic } : {}),
-        blockIds: rendered.map((block) => block.id),
-      });
+      result.push(
+        metadata(
+          item,
+          rendered.map((block) => block.id),
+        ),
+      );
     }
-    sections.push({ key: "needsYou", label: "Needs you", topic: null, blocks });
+    if (result.length) sections.push({ key, label, topic: null, blocks });
+    return result;
+  };
+  const appendOpeningItems = async () => {
+    newsItems = await appendItems("newInRevision", "New in this revision", writeup.newInRevision, (item, blockIds) => ({
+      item,
+      blockIds,
+    }));
+    needsYou = await appendItems("needsYou", "Needs you", writeup.needsYou, (item, blockIds) => ({
+      kind: item.kind,
+      ...(item.topic !== undefined ? { topic: item.topic } : {}),
+      blockIds,
+    }));
   };
   const append = async (key: string, label: string, markdown: string | undefined, topic: string | null = null) => {
     if (markdown === undefined) return;
@@ -130,7 +173,7 @@ export async function renderWriteup(
   ) {
     await append("tldr", "TL;DR", writeup.tldr);
     await append("whyItMatters", "Why it matters", writeup.whyItMatters);
-    await appendNeedsYou();
+    await appendOpeningItems();
     await append("review", "Review", writeup.review ? reviewMarkdown(writeup.review, topics) : undefined);
     await append("checked", "Checked", writeup.checked);
     await append("notChecked", "Not checked", writeup.notChecked);
@@ -142,7 +185,7 @@ export async function renderWriteup(
     // Keep old manifests unchanged, including imports that re-render their source.
     await append("overview", "Overview", writeup.overview);
     await append("tldr", "TL;DR", writeup.tldr);
-    await appendNeedsYou();
+    await appendOpeningItems();
   }
   await append("decisions", "Decisions and drift", writeup.decisions ?? unwrittenDecisions);
   if (entries) {
@@ -200,8 +243,34 @@ export async function renderWriteup(
     await append(`t-${topic.slug}-example`, `${topic.title} — Example`, content.example, topic.slug);
     await append(`t-${topic.slug}-body`, `${topic.title} — Details`, content.body, topic.slug);
   }
+  const newInRevision = newsItems.map(({ item, blockIds }) => {
+    let blockId: string | undefined;
+    if (item.quote !== undefined) {
+      const candidates = sections
+        .filter((section) => {
+          if (["newInRevision", "needsYou", "review"].includes(section.key)) return false;
+          if (item.topic !== undefined)
+            return [`t-${item.topic}-why`, `t-${item.topic}-example`, `t-${item.topic}-body`].includes(section.key);
+          return item.section === undefined || section.key === item.section;
+        })
+        .flatMap((section) => section.blocks);
+      for (const normalize of [normalizeText, normalizeMarkdownQuote]) {
+        const quote = normalize(item.quote);
+        if (!quote) continue;
+        blockId = candidates.find((block) => normalizeText(block.text).includes(quote))?.id;
+        if (blockId !== undefined) break;
+      }
+    }
+    return {
+      ...(item.topic !== undefined ? { topic: item.topic } : {}),
+      ...(item.section !== undefined ? { section: item.section } : {}),
+      ...(blockId !== undefined ? { blockId } : {}),
+      blockIds,
+    };
+  });
   return {
     sections,
+    ...(newInRevision.length ? { newInRevision } : {}),
     ...(writeup.needsYou !== undefined ? { needsYou } : {}),
     ...(writeup.area !== undefined ? { area: writeup.area.replace(/\s+/gu, " ").trim() } : {}),
     ...(terms.length ? { terms } : {}),

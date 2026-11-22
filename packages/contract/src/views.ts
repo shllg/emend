@@ -4,7 +4,7 @@ import { DocHeadings, DocTitle, SourceContent } from "./doc.ts";
 import { InboxListGroup } from "./groups.ts";
 import { LIMITS } from "./limits.ts";
 import { PublishLinks, RepoUrl } from "./links.ts";
-import { NeedsYouKind, WriteupArea } from "./manifest.ts";
+import { NeedsYouKind, NewInRevisionSection, WriteupArea } from "./manifest.ts";
 import { Placement } from "./placement.ts";
 import { PublishRequest, Sha256 } from "./publish.ts";
 import { FileFlag, FilePath, FileRole, FileStatus, TopicMeta, TopicSlug } from "./review.ts";
@@ -129,6 +129,7 @@ const sectionKey = z.union([
     "overview",
     "tldr",
     "whyItMatters",
+    "newInRevision",
     "needsYou",
     "review",
     "checked",
@@ -161,6 +162,19 @@ export type GlossaryTerm = z.infer<typeof GlossaryTerm>;
 export const RenderedWriteup = z
   .object({
     area: WriteupArea.optional().catch(undefined),
+    newInRevision: z
+      .array(
+        z.object({
+          topic: TopicSlug.optional(),
+          section: NewInRevisionSection.optional(),
+          blockId: BlockId.refine((id) => !id.startsWith("newInRevision-") && !id.startsWith("doc-")).optional(),
+          blockIds: z.array(BlockId.refine((id) => id.startsWith("newInRevision-"))).max(LIMITS.blocksPerRevision),
+        }),
+      )
+      .min(1)
+      .max(LIMITS.newInRevisionItems)
+      .optional()
+      .catch(undefined),
     needsYou: z
       .array(
         z.object({
@@ -182,7 +196,7 @@ export const RenderedWriteup = z
           blocks: z.array(RenderedBlock).max(LIMITS.blocksPerRevision),
         }),
       )
-      .max(12 + 3 * LIMITS.topicsPerReview),
+      .max(13 + 3 * LIMITS.topicsPerReview),
   })
   .refine(
     (writeup) =>

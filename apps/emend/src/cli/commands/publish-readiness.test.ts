@@ -55,6 +55,34 @@ test.each([
     {
       writeup: {
         ...manifest().writeup,
+        newInRevision: Array.from({ length: 13 }, () => ({ text: "Raised the retry limit." })),
+      },
+    },
+    "writeup.newInRevision (at most 12 items)",
+  ],
+  [
+    {
+      writeup: {
+        ...manifest().writeup,
+        newInRevision: [{ section: "received-section", text: "Raised the retry limit." }],
+      },
+    },
+    "writeup.newInRevision.0.section (overview, tldr, whyItMatters, checked, notChecked, outOfScope, whereToLook, context, decisions or glossary)",
+  ],
+  [
+    {
+      writeup: {
+        ...manifest().writeup,
+        newInRevision: [{ text: "Raised the retry limit.", topic: "Received" }],
+      },
+    },
+    "writeup.newInRevision.0.topic (topic slug: lowercase letters, digits and -, at most 64); " +
+      "writeup.newInRevision.0.topic (newInRevision topic is not declared)",
+  ],
+  [
+    {
+      writeup: {
+        ...manifest().writeup,
         needsYou: Array.from({ length: 5 }, () => ({ kind: "decide", text: "Choose the retry limit." })),
       },
     },

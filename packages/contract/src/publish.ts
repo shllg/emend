@@ -149,6 +149,13 @@ export const PublishRequest = z
       if (!topics.has(slug)) issue("writeup topic is not declared");
     for (const slug of request.writeup.review?.topics ?? [])
       if (!topics.has(slug)) issue("review topic is not declared");
+    for (const [index, item] of (request.writeup.newInRevision ?? []).entries())
+      if (item.topic !== undefined && !topics.has(item.topic))
+        ctx.addIssue({
+          code: "custom",
+          path: ["writeup", "newInRevision", index, "topic"],
+          message: "newInRevision topic is not declared",
+        });
     for (const [index, item] of (request.writeup.needsYou ?? []).entries())
       if (item.topic !== undefined && !topics.has(item.topic))
         ctx.addIssue({

@@ -182,7 +182,7 @@ async function revisionDownload(
   const details = {
     project: review.project ?? (repoName !== ".git" ? repoName : null),
     branch: review.branch,
-    seq,
+    seq: revision.seq,
     publishedAt: new Date(revision.createdAt).toISOString(),
   };
   let total = 0;

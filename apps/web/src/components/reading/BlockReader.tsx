@@ -54,6 +54,7 @@ export type ReaderGroup = {
   commentCount?: number;
   presentation?:
     | "tldr"
+    | "newInRevision"
     | "needsYou"
     | "decisions"
     | "glossary"
@@ -62,6 +63,7 @@ export type ReaderGroup = {
     | "context"
     | "facts"
     | "pair";
+  news?: { key: string; blocks: RenderedBlock[]; jump?: ReactNode }[];
   needs?: { key: string; kind: NeedsYouKind; label: string; blocks: RenderedBlock[]; jump?: ReactNode }[];
   action?: ReactNode;
   meta?: ReactNode;
@@ -77,6 +79,7 @@ export type ReaderGroup = {
 export function groupBlocks(group: ReaderGroup) {
   return [
     ...group.blocks,
+    ...(group.news?.flatMap((item) => item.blocks) ?? []),
     ...(group.needs?.flatMap((item) => item.blocks) ?? []),
     ...(group.subsections?.flatMap((section) => section.blocks) ?? []),
     ...(group.factGroups?.flatMap((factGroup) => factGroup.facts.flatMap((fact) => fact.blocks ?? [])) ?? []),
@@ -307,13 +310,13 @@ export function BlockReader({
       wrap={(editor) => <div className="mt-3">{editor}</div>}
     />
   );
-  const renderBlocks = (blocks: RenderedBlock[], path?: string, decisions = false) =>
+  const renderBlocks = (blocks: RenderedBlock[], path?: string, presentation?: ReaderGroup["presentation"]) =>
     blocks.map((block, index) => (
       <Block
         key={block.id}
         block={block}
-        drift={decisions && /^drift:/i.test(block.text.trimStart())}
-        changedIn={changes.get(block.id)}
+        drift={presentation === "decisions" && /^drift:/i.test(block.text.trimStart())}
+        changedIn={presentation === "newInRevision" ? undefined : changes.get(block.id)}
         continuesChange={index > 0 && changes.get(blocks[index - 1]?.id ?? "") === changes.get(block.id)}
         commenting={
           resumedBlockId === block.id || (composing && !!target && "blockId" in target && target.blockId === block.id)
@@ -329,6 +332,16 @@ export function BlockReader({
         {target && "blockId" in target && target.blockId === block.id && composer}
       </Block>
     ));
+  const renderNews = (news: NonNullable<ReaderGroup["news"]>, path?: string) => (
+    <ul className="em-revision-news">
+      {news.map(({ key, blocks, jump }) => (
+        <li key={key}>
+          {renderBlocks(blocks, path, "newInRevision")}
+          {jump}
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <div ref={root} tabIndex={-1} className="em-reading-column pt-4 pb-8 md:pt-7 md:pb-[72px]">
       {lead}
@@ -337,11 +350,26 @@ export function BlockReader({
           key={`${reviewId}:${revision}:${group.key}`}
           group={group}
           headingId={`${headingBase}-${index}`}
-          changedIn={latestChange(groupBlocks(group))}
+          changedIn={group.presentation === "newInRevision" ? undefined : latestChange(groupBlocks(group))}
           onCommentTopic={(slug, from) => openComposer({ kind: "topic", slug }, from)}
           discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
         >
           {group.content}
+          {group.news && (
+            <>
+              {renderNews(group.news.slice(0, 4), group.path)}
+              {group.news.length > 4 && (
+                <WriteupDetails
+                  reviewId={reviewId}
+                  revision={revision}
+                  sectionKey="newInRevision-more"
+                  summary={`and ${group.news.length - 4} more`}
+                >
+                  {renderNews(group.news.slice(4), group.path)}
+                </WriteupDetails>
+              )}
+            </>
+          )}
           {group.needs && (
             <dl className="em-writeup-facts em-needs-you">
               {group.needs.map(({ key, kind, label, blocks, jump }) => (
@@ -364,7 +392,7 @@ export function BlockReader({
               {renderBlocks(group.blocks.slice(group.tldr.end), group.path)}
             </>
           ) : (
-            renderBlocks(group.blocks, group.path, group.presentation === "decisions")
+            renderBlocks(group.blocks, group.path, group.presentation)
           )}
           {group.factGroups?.map((factGroup) => (
             <div key={factGroup.key} className="em-writeup-fact-group" data-fact-group={factGroup.key}>

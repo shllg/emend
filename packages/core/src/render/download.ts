@@ -877,6 +877,7 @@ export async function buildWriteupDownload(
   };
   const content = await withThreads(input.threads, state, async (ctx) => {
     for (const section of input.writeup.sections) {
+      if (section.key === "newInRevision" && input.details.seq < 2) continue;
       if (section.key === "needsYou" && input.writeup.needsYou !== undefined) {
         const blocks = new Map(section.blocks.map((block) => [block.id, block]));
         const content: ElementContent[] = [element("h2", [text("Needs you")])];
@@ -940,6 +941,7 @@ export async function buildWriteupDownload(
         "overview",
         "tldr",
         "whyItMatters",
+        "newInRevision",
         "needsYou",
         "review",
         "checked",

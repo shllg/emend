@@ -1,16 +1,23 @@
 import { describe, expect, test } from "vitest";
 import { BlockId, Target, TopicPart, TopicTarget } from "./index.ts";
 
-test.each(["needsYou", "whyItMatters", "review", "checked", "notChecked", "outOfScope", "whereToLook", "context"])(
-  "accepts block ids for %s",
-  (section) => {
-    for (const suffix of ["", "-2", "-10"]) {
-      const id = `${section}-0123abcd${suffix}`;
-      expect(BlockId.parse(id)).toBe(id);
-    }
-    expect(BlockId.safeParse(`${section}-not-a-hash`).success).toBe(false);
-  },
-);
+test.each([
+  "newInRevision",
+  "needsYou",
+  "whyItMatters",
+  "review",
+  "checked",
+  "notChecked",
+  "outOfScope",
+  "whereToLook",
+  "context",
+])("accepts block ids for %s", (section) => {
+  for (const suffix of ["", "-2", "-10"]) {
+    const id = `${section}-0123abcd${suffix}`;
+    expect(BlockId.parse(id)).toBe(id);
+  }
+  expect(BlockId.safeParse(`${section}-not-a-hash`).success).toBe(false);
+});
 
 const span = { blockId: "overview-1234abcd", quote: "route", prefix: "", suffix: "" };
 test("topic quote fields must be all present or all absent", () => {
