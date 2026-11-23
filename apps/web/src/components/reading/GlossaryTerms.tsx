@@ -1,7 +1,7 @@
 import type { GlossaryTerm } from "@emend/contract";
 import type { RefObject } from "react";
 import { createPortal } from "react-dom";
-import { type HoverTarget, useHoverCard } from "./useHoverCard.ts";
+import { type HoverTarget, useHoverCard } from "../../lib/use-hover-card.ts";
 
 const TERM = "span.emend-term[data-emend-term]";
 

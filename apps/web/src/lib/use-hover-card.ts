@@ -1,5 +1,5 @@
 import { type RefObject, useId, useLayoutEffect, useRef, useState } from "react";
-import { focusReadingTarget } from "../../lib/reading-focus.ts";
+import { focusReadingTarget } from "./reading-focus.ts";
 
 export type HoverTarget = { element: HTMLElement; key: number };
 
@@ -29,31 +29,45 @@ const pointerTypeOf = (event: MouseEvent, lastDown: string) => {
   return typeof own === "string" && own !== "" ? own : lastDown;
 };
 
+// One pair of document listeners serves every hover card instance; a count adds them for the first
+// mount and removes them after the last unmount.
+const tracker = { element: null as Element | null, users: 0 };
+const trackOver = (event: PointerEvent) => {
+  if (event.pointerType === "mouse" || event.pointerType === "pen")
+    tracker.element = event.target instanceof Element ? event.target : null;
+};
+const trackOut = (event: PointerEvent) => {
+  if ((event.pointerType === "mouse" || event.pointerType === "pen") && event.relatedTarget === null)
+    tracker.element = null;
+};
+function joinTracker() {
+  if (tracker.users++ === 0) {
+    document.addEventListener("pointerover", trackOver, true);
+    document.addEventListener("pointerout", trackOut, true);
+  }
+  return () => {
+    if (--tracker.users === 0) {
+      document.removeEventListener("pointerover", trackOver, true);
+      document.removeEventListener("pointerout", trackOut, true);
+      tracker.element = null;
+    }
+  };
+}
+
 export function useHoverCard({ root, find, selector, mode, enabled }: HoverCardOptions) {
   const id = useId();
   const card = useRef<HTMLDivElement>(null);
   const link = useRef<HTMLAnchorElement>(null);
   const focusLink = useRef(false);
-  const pointer = useRef<Element | null>(null);
   const lastDown = useRef("");
   const opening = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const closing = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [open, setOpen] = useState<HoverTarget | null>(null);
 
   useLayoutEffect(() => {
-    const track = (event: PointerEvent) => {
-      if (event.pointerType === "mouse" || event.pointerType === "pen")
-        pointer.current = event.target instanceof Element ? event.target : null;
-    };
-    const leaveWindow = (event: PointerEvent) => {
-      if ((event.pointerType === "mouse" || event.pointerType === "pen") && event.relatedTarget === null)
-        pointer.current = null;
-    };
-    document.addEventListener("pointerover", track, true);
-    document.addEventListener("pointerout", leaveWindow, true);
+    const leaveTracker = joinTracker();
     return () => {
-      document.removeEventListener("pointerover", track, true);
-      document.removeEventListener("pointerout", leaveWindow, true);
+      leaveTracker();
       clearTimeout(opening.current);
       clearTimeout(closing.current);
     };
@@ -79,7 +93,7 @@ export function useHoverCard({ root, find, selector, mode, enabled }: HoverCardO
     };
     const inside = (target: EventTarget | null) =>
       !!open && target instanceof Node && (open.element.contains(target) || panel?.contains(target));
-    const hovered = () => pointer.current?.isConnected && inside(pointer.current);
+    const hovered = () => tracker.element?.isConnected && inside(tracker.element);
     const focused = (target: EventTarget | null = document.activeElement) => inside(target);
     const close = (restore = false) => {
       clear();

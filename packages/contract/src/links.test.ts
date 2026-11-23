@@ -141,6 +141,26 @@ describe("issueRefs", () => {
     expect(parsed.issueRefs).toEqual([{ ...ref, title: "<img src=x onerror=alert(1)> <b>Fix</b>" }]);
   });
 
+  test("a title refuses characters that render as nothing", () => {
+    const request = { reviewKey: "a".repeat(64), repo: null, branch: null, title: "T", base: null, head: null };
+    const base = { ...request, topics: [], writeup: manifest.writeup, files: [] };
+    for (const title of ["ㅤ", "Fix️ bug", "\u{E0041}x", "͏"])
+      expect(PublishRequest.safeParse({ ...base, issueRefs: [{ ...ref, title }] }).success).toBe(false);
+  });
+
+  test("the manifest cleaner drops characters that render as nothing", () => {
+    expect(plainIssueTitle("Fixㅤ bug️")).toBe("Fix bug");
+    expect(plainIssueTitle("ㅤᅟᅠﾠ")).toBe("");
+    const parsed = PublishManifest.parse({ ...manifest, issueRefs: [{ ...ref, title: "Fixㅤ bug️" }] });
+    expect(parsed.issueRefs).toEqual([{ ...ref, title: "Fix bug" }]);
+    expect(PublishManifest.safeParse({ ...manifest, issueRefs: [{ ...ref, title: "ㅤㅤ" }] }).success).toBe(false);
+  });
+
+  test("labels keep their rule for these characters", () => {
+    expect(PublishLinks.safeParse([{ ...link, label: "PRㅤ 7" }]).success).toBe(true);
+    expect(PublishLinks.safeParse([{ ...link, label: "PR​ 7" }]).success).toBe(false);
+  });
+
   test("a manifest still fails on an entry invalid after cleaning", () => {
     for (const issueRefs of [
       [{ ...ref, title: "\u0007\u200b " }],

@@ -2307,9 +2307,11 @@ after the parent's `emend:repo`; clicks follow the `emend:issue` flow in the HTM
 `issueRefs?: IssueRef[]` holds at most 64 entries `{ number, title, state: "open" | "closed" | "merged" }`,
 one for each issue or pull request number the writeup names as `#123`. `number` is an integer from 1
 through 9999999, and each number appears at most once. `title` is 1 through 256 characters of visible
-text, without control or format characters, and not blank. An invalid entry in a `PublishRequest`
+text, without control, format or other characters that render as nothing (such as U+3164, variation
+selectors and tag characters), and not blank. An invalid entry in a `PublishRequest`
 refuses it (`400 invalid_request`). A manifest cleans each title first: each run of whitespace and
-control characters becomes one space, format characters go, and the result is trimmed and cut to at
+control characters becomes one space, format characters and characters that render as nothing go,
+spaces collapse, and the result is trimmed and cut to at
 most 256 UTF-16 code units without splitting a surrogate pair. An entry still invalid after that (a
 blank title, a bad number or state, a repeated number) fails the manifest, like an invalid link.
 Markup in a title stays literal text. The server never calls GitHub: the agent reads titles and

@@ -237,3 +237,13 @@ test("a title with markup and control characters shows as plain text", () => {
   expect(card.textContent).toContain("<img src=x onerror=alert(1)>");
   expect(card.textContent).toContain("Closed");
 });
+
+test("a writeup with glossary terms and issue refs shares one pair of document pointer listeners", async () => {
+  const spy = vi.spyOn(document, "addEventListener");
+  const removed = vi.spyOn(document, "removeEventListener");
+  const count = (calls: typeof spy) => calls.mock.calls.filter(([type]) => type === "pointerover").length;
+  const view = await mount();
+  expect(count(spy)).toBe(1);
+  view.unmount();
+  expect(count(removed)).toBe(1);
+});

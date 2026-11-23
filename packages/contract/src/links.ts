@@ -35,7 +35,38 @@ export const RepoUrl = z.string().refine((value) => {
 }, "expected https://host/owner/name");
 export type RepoUrl = z.infer<typeof RepoUrl>;
 
+/**
+ * Terminal and bidi controls, and characters that render as nothing or reorder text.
+ * It matches the CLI's terminal escape set (apps/emend/src/cli/escape.ts), except U+2028 and U+2029,
+ * which a whitespace step turns into spaces first.
+ */
+export const INVISIBLE_CHAR_RANGES: readonly (readonly [number, number])[] = [
+  [0, 0x1f],
+  [0x7f, 0x9f],
+  [0x34f, 0x34f],
+  [0x61c, 0x61c],
+  [0x115f, 0x1160],
+  [0x200b, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x206f],
+  [0x3164, 0x3164],
+  [0xfe00, 0xfe0f],
+  [0xfeff, 0xfeff],
+  [0xffa0, 0xffa0],
+  [0xfff9, 0xfffb],
+  [0xe0000, 0xe007f],
+  [0xe0100, 0xe01ef],
+];
+
+export const isInvisibleChar = (codePoint: number): boolean =>
+  INVISIBLE_CHAR_RANGES.some(([from, to]) => codePoint >= from && codePoint <= to);
+
+const hasInvisibleChar = (value: string): boolean =>
+  Array.from(value).some((char) => isInvisibleChar(char.codePointAt(0) ?? 0));
+
 const isPlainVisible = (value: string): boolean => value.trim() !== "" && !/[\p{Cc}\p{Cf}]/u.test(value);
+
+const isPlainIssueTitle = (value: string): boolean => isPlainVisible(value) && !hasInvisibleChar(value);
 
 export const PublishLink = z.object({
   url: HttpsUrl,
@@ -56,7 +87,7 @@ const issueTitle = z
   .string()
   .min(1)
   .max(ISSUE_REFS.titleChars)
-  .refine(isPlainVisible, "title must be plain visible text");
+  .refine(isPlainIssueTitle, "title must be plain visible text");
 
 const issueNumber = z.int().min(1).max(ISSUE_REFS.maxNumber);
 
@@ -74,11 +105,15 @@ export type IssueRef = z.infer<typeof IssueRef>;
 export const IssueRefs = issueRefsOf(IssueRef);
 export type IssueRefs = z.infer<typeof IssueRefs>;
 
-/** Control and whitespace runs become one space, format characters go, then trim and cut to the limit. */
+/**
+ * Control and whitespace runs become one space, format characters and characters that render as nothing go,
+ * then spaces collapse, and the result is trimmed and cut to the limit.
+ */
 export function plainIssueTitle(value: string): string {
-  const flat = value
-    .replace(/[\s\p{Cc}]+/gu, " ")
-    .replace(/\p{Cf}/gu, "")
+  const flat = Array.from(value.replace(/[\s\p{Cc}]+/gu, " ").replace(/\p{Cf}/gu, ""))
+    .filter((char) => !isInvisibleChar(char.codePointAt(0) ?? 0))
+    .join("")
+    .replace(/ +/g, " ")
     .trim();
   if (flat.length <= ISSUE_REFS.titleChars) return flat;
   let end = ISSUE_REFS.titleChars;

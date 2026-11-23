@@ -1,7 +1,7 @@
 import { type IssueRef, type IssueState, RepoUrl } from "@emend/contract";
 import type { RefObject } from "react";
 import { createPortal } from "react-dom";
-import { type HoverTarget, useHoverCard } from "./useHoverCard.ts";
+import { type HoverTarget, useHoverCard } from "../../lib/use-hover-card.ts";
 
 const ISSUE = "a[data-emend-issue]";
 const STATE_WORDS: Record<IssueState, string> = { open: "Open", closed: "Closed", merged: "Merged" };
