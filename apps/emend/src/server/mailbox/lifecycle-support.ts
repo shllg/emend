@@ -18,6 +18,7 @@ export async function publishReview(
     /** Add one changed source file with a synthetic base and head commit. */
     diff?: boolean;
     links?: unknown;
+    issueRefs?: unknown;
     repoUrl?: string;
     repo?: PublishRequest["repo"];
   } = {},
@@ -46,6 +47,7 @@ export async function publishReview(
       topics: [],
       writeup: options.writeup ?? blank,
       links: options.links,
+      issueRefs: options.issueRefs,
       repoUrl: options.repoUrl,
       files,
     },

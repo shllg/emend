@@ -155,6 +155,9 @@
   .em-term-card a {
     text-decoration: underline;
   }
+  .em-issue-state {
+    color: var(--fg-2);
+  }
   .em-reading-column {
     position: relative;
     --reading-inset: 0px;

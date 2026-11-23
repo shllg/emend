@@ -986,7 +986,7 @@ Both are reviewer-only, as is the revision endpoint below.
 
 `GET /api/v1/reviews/:id/revisions/:seq` returns `RevisionView = { seq, base, head, main, writeupEmpty,
 topics: TopicMeta[], files: FileView[], writeup: RenderedWriteup, links: PublishLink[],
-repoUrl: string | null, docs, threads: ThreadView[],
+repoUrl: string | null, issueRefs: IssueRef[], docs, threads: ThreadView[],
 changedBlocks: { blockId: BlockId, revision: number }[], changedSince?: number }`.
 An HTML doc optionally includes `changes: { parts: number, marks: { index: number, revision: number }[] }`.
 `parts` is the number of parts found by the server, at most `htmlPartsPerDoc` (10000).
@@ -1008,8 +1008,8 @@ Across an import, at most `htmlPartsPerImport` (1000000) parts are stored, count
 in revision order. The first HTML doc that would exceed this cap and every later HTML doc in
 that or later revisions store no parts; they still render, show no marks, and their null parts
 suppress marks in the next comparison.
-`links` and `repoUrl` are the revision's publish-level links (see "Links and repoUrl" below);
-both fields are optional in the view, and revisions published before they existed omit them.
+`links`, `repoUrl` and `issueRefs` are the revision's publish-level fields (see "Links and repoUrl" below);
+all three are optional in the view, and revisions published before they existed omit them.
 `RenderedWriteup.area?: WriteupArea` is the plain-text area, with whitespace collapsed and trimmed.
 An invalid stored area is omitted.
 `RenderedWriteup.newInRevision?` holds 1–12 entries `{ topic?: TopicSlug, section?: NewInRevisionSection, blockId?: BlockId, blockIds: BlockId[] }`.
@@ -1912,8 +1912,8 @@ and sign-out; loopback HTTP on the same server receives cookies without `Secure`
 ### Manifest and topics
 
 `PublishRequest = { reviewId?, reviewKey, repo: { key, name } | null, branch: string | null,
-title, base: commit | null, head: commit | "worktree" | null, main?, topics, writeup, links?, repoUrl?, intentReview?,
-files }`.
+title, base: commit | null, head: commit | "worktree" | null, main?, topics, writeup, links?, repoUrl?, issueRefs?,
+intentReview?, files }`.
 The CLI sends `repo` for pubs too: the repository holding the working directory, or the
 `--project` name. A publish with a non-null `repo` sets the review's project to `repo.name`;
 a null `repo` keeps its current project. The repository row is linked once when the review
@@ -1978,7 +1978,7 @@ Other placement failures return 400 `invalid_request` with "The comments could n
 These failures never leave a partial revision.
 
 `PublishManifest = { version: 1, title, base?, head?, main?, topics: TopicMeta[], files, media?, writeup,
-links?, intentReview?, repoUrl? }`. `links` and `repoUrl` are described under "Links and repoUrl" at the end of
+links?, issueRefs?, intentReview?, repoUrl? }`. `links`, `repoUrl` and `issueRefs` are described under "Links and repoUrl" at the end of
 this section.
 
 `main?: "writeup" | FilePath` declares the opening page. A path must name a file of this
@@ -2304,7 +2304,24 @@ to `<repoUrl>/issues/123`, never inside code, a fence, a diagram or an existing 
 through 7 digits and must follow a non-word character. In HTML docs, the bridge links `#123` text
 after the parent's `emend:repo`; clicks follow the `emend:issue` flow in the HTML frame section.
 
-Both ride in the writeup's source and rendered blobs, so an import or export keeps them; no table
+`issueRefs?: IssueRef[]` holds at most 64 entries `{ number, title, state: "open" | "closed" | "merged" }`,
+one for each issue or pull request number the writeup names as `#123`. `number` is an integer from 1
+through 9999999, and each number appears at most once. `title` is 1 through 256 characters of visible
+text, not blank and without control characters (`Cc`), format characters (`Cf`), default-ignorable
+code points (Unicode `Default_Ignorable_Code_Point`: fillers such as U+3164, variation selectors, tag
+characters) or U+2800. An invalid entry in a `PublishRequest`
+refuses it (`400 invalid_request`). A manifest cleans each title first: each run of whitespace and
+control characters becomes one space, format characters, default-ignorable code points and U+2800 go,
+spaces collapse, and the result is trimmed and cut to at
+most 256 UTF-16 code units without splitting a surrogate pair. An entry still invalid after that (a
+blank title, a bad number or state, a repeated number) fails the manifest, like an invalid link.
+Markup in a title stays literal text. The server never calls GitHub: the agent reads titles and
+states and sends them. A revision view returns `issueRefs`, empty when none were sent. The server's
+`#123` anchors carry `data-emend-issue="<number>"`; sanitize drops author `data-*` first, so only
+server-made anchors have it. The CLI sends `issueRefs` only with a `repoUrl`. A number without an entry stays a plain link. Clients show a title as
+plain text, never as HTML. Downloads show no title.
+
+`links`, `repoUrl` and `issueRefs` ride in the writeup's source and rendered blobs, so an import or export keeps them; no table
 changes. Every absolute `http:` or `https:` link in rendered Markdown carries `target="_blank"` and
 `rel="noopener noreferrer nofollow"`, including an absolute link back to the same emend review. Clients
 open `links` the same way, after checking again that each URL is https, and show each link's host

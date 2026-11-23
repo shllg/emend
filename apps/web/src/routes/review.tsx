@@ -211,6 +211,8 @@ function Reading({
       docs={revision.docs}
       changedSince={revision.changedSince}
       files={revision.files}
+      issueRefs={revision.issueRefs}
+      repoUrl={revision.repoUrl}
       search={search}
       phone={phone}
       visible={visible}

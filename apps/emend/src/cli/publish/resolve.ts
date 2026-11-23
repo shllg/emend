@@ -527,6 +527,9 @@ async function resolveWithWorker(
     const name = typeof options.key === "function" ? options.key(id) : options.key;
     return name || !code || !branch ? docsKey(id, name ?? options.review ?? "") : reviewKey(id, root, branch);
   };
+  // The manifest's own repoUrl wins only when it is valid, and null opts out of the derived one.
+  // The schema drops an invalid string, which falls back to the derived value.
+  const requestRepoUrl = manifest.repoUrl === null ? undefined : (manifest.repoUrl ?? repoUrl);
   const request = PublishRequest.safeParse({
     reviewId: options.review,
     reviewKey: keyFor(instanceId ?? ""),
@@ -539,10 +542,10 @@ async function resolveWithWorker(
     topics,
     writeup: manifest.writeup,
     links: manifest.links,
+    // Titles show only beside a repoUrl, so none is sent without one.
+    ...(requestRepoUrl && manifest.issueRefs ? { issueRefs: manifest.issueRefs } : {}),
     ...(manifest.intentReview !== undefined ? { intentReview: manifest.intentReview } : {}),
-    // The manifest's own repoUrl wins only when it is valid, and null opts out of the derived one.
-    // The schema drops an invalid string, which falls back to the derived value.
-    repoUrl: manifest.repoUrl === null ? undefined : (manifest.repoUrl ?? repoUrl),
+    repoUrl: requestRepoUrl,
     files,
   });
   if (!request.success) throw new CliError("invalid resolved publish request");

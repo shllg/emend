@@ -207,6 +207,7 @@ export async function renderRevision(
       topics: input.topics,
       links: input.links,
       repoUrl: input.repoUrl,
+      issueRefs: input.issueRefs,
       media,
       mediaHeads,
       docs,
@@ -241,6 +242,7 @@ export async function renderRevision(
         ...input.writeup,
         ...(input.links?.length ? { links: input.links } : {}),
         ...(input.repoUrl ? { repoUrl: input.repoUrl } : {}),
+        ...(input.issueRefs?.length ? { issueRefs: input.issueRefs } : {}),
       }),
     ),
   );

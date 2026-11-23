@@ -1,6 +1,7 @@
 import {
   type DocHeading,
   type GlossaryTerm,
+  type IssueRefs,
   type Placement,
   type PlacementLocation,
   type PublishLinks,
@@ -83,6 +84,7 @@ export type Work =
       topics: TopicMeta[];
       links?: PublishLinks;
       repoUrl?: string;
+      issueRefs?: IssueRefs;
       media: [string, string][];
       /** Each distinct media blob's SHA-256 and its first bytes, for reading image sizes in the worker. */
       mediaHeads?: [string, ArrayBuffer][];
@@ -139,7 +141,7 @@ export type WorkResult =
   | { kind: "image-sizes"; sizes: [string, ImageSize][] }
   | ({ kind: "doc-metadata" } & DocMetadata)
   | { kind: "line-count"; count: number }
-  | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string }
+  | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string; issueRefs?: IssueRefs }
   | ({ kind: "placement-doc" } & EncodedPlacementDoc)
   | ({ kind: "writeup"; unlistedMedia?: string[]; unlistedMediaCount?: number } & RenderedBytes)
   | ({ kind: "doc" | "source" } & RenderedBytes)
@@ -258,6 +260,7 @@ export const executeWork: Executor = async (work) => {
       source: WriteupInput.parse(json),
       ...(meta.links ? { links: meta.links } : {}),
       ...(meta.repoUrl ? { repoUrl: meta.repoUrl } : {}),
+      ...(meta.issueRefs ? { issueRefs: meta.issueRefs } : {}),
     };
   }
   if (work.kind === "placement-doc") {
@@ -279,6 +282,7 @@ export const executeWork: Executor = async (work) => {
     const rendered = await renderWriteup(work.source, work.topics, {
       links: work.links,
       repoUrl: work.repoUrl,
+      issueRefs: work.issueRefs,
       media: new Map(work.media),
       mediaSizes,
       docs: work.docs,
