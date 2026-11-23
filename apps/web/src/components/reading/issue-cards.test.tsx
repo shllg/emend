@@ -27,13 +27,24 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-type MountOptions = { repoUrl?: string | null; issueRefs?: IssueRef[]; phone?: boolean };
+type MountOptions = {
+  repoUrl?: string | null;
+  issueRefs?: IssueRef[];
+  phone?: boolean;
+  glossary?: { term: string; definition: string }[];
+};
 async function mount(options: MountOptions = {}) {
   const { issueRefs = refs, phone = false } = options;
   const url = "repoUrl" in options ? options.repoUrl : repoUrl;
   const writeup = RenderedWriteup.parse(
     await renderWriteup(
-      { overview: "Fixes #412 and follows #9, not #7.", tldr: "Done.", decisions: "", topics: {} },
+      {
+        overview: "Fixes #412 and follows #9, not #7.",
+        tldr: "Done.",
+        decisions: "",
+        topics: {},
+        ...(options.glossary ? { glossary: options.glossary } : {}),
+      },
       [],
       { repoUrl, issueRefs },
     ),
@@ -241,9 +252,15 @@ test("a title with markup and control characters shows as plain text", () => {
 test("a writeup with glossary terms and issue refs shares one pair of document pointer listeners", async () => {
   const spy = vi.spyOn(document, "addEventListener");
   const removed = vi.spyOn(document, "removeEventListener");
-  const count = (calls: typeof spy) => calls.mock.calls.filter(([type]) => type === "pointerover").length;
-  const view = await mount();
-  expect(count(spy)).toBe(1);
+  const count = (calls: typeof spy, name: string) =>
+    calls.mock.calls.filter(([type, , capture]) => type === name && capture === true).length;
+  // "Fixes" is a glossary term, so GlossaryTerms mounts its own hover card beside IssueCards.
+  const view = await mount({ glossary: [{ term: "Fixes", definition: "Closes the named issue." }] });
+  expect(view.container.querySelector("span.emend-term")).not.toBeNull();
+  // Per-instance listeners would register two of each here.
+  expect(count(spy, "pointerover")).toBe(1);
+  expect(count(spy, "pointerout")).toBe(1);
   view.unmount();
-  expect(count(removed)).toBe(1);
+  expect(count(removed, "pointerover")).toBe(1);
+  expect(count(removed, "pointerout")).toBe(1);
 });

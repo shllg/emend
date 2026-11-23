@@ -13,7 +13,7 @@ function issueAt(
   target: EventTarget | null,
   root: HTMLElement,
   repoUrl: string,
-  refs: IssueRef[],
+  refs: Map<number, IssueRef>,
 ): HoverTarget | undefined {
   if (!(target instanceof Element)) return;
   const element = target.closest<HTMLElement>(ISSUE);
@@ -30,7 +30,7 @@ function issueAt(
   )
     return;
   const number = Number(value);
-  if (!refs.some((ref) => ref.number === number)) return;
+  if (!refs.has(number)) return;
   if (element.getAttribute("href") !== issueUrl(repoUrl, number)) return;
   return { element, key: number };
 }
@@ -47,14 +47,15 @@ export function IssueCards({ repoUrl, refs, ...props }: IssueCardsProps) {
 }
 
 function Cards({ root, repoUrl, refs }: IssueCardsProps & { repoUrl: string; refs: IssueRef[] }) {
+  const byNumber = new Map(refs.map((ref) => [ref.number, ref]));
   const { id, card, link, open } = useHoverCard({
     root,
-    find: (target) => (root.current ? issueAt(target, root.current, repoUrl, refs) : undefined),
+    find: (target) => (root.current ? issueAt(target, root.current, repoUrl, byNumber) : undefined),
     selector: ISSUE,
     mode: "link",
     enabled: true,
   });
-  const issue = open && refs.find((ref) => ref.number === open.key);
+  const issue = open && byNumber.get(open.key);
   if (!issue) return null;
   return createPortal(
     <div ref={card} id={id} className="em-term-card" role="dialog" aria-labelledby={`${id}-number ${id}-title`}>

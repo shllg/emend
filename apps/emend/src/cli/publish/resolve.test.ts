@@ -384,10 +384,14 @@ test("links and a valid manifest repoUrl reach the request; no remote derives no
     // A manifest's issueRefs arrive with cleaned titles.
     const refs = PublishManifest.parse({
       ...manifest(),
+      repoUrl: "https://github.com/o/r",
       issueRefs: [{ number: 12, title: "  Fix\u0007 <b>it</b>\n\u202e ", state: "merged" }],
     });
     expect((await resolve(refs)).request.issueRefs).toEqual([{ number: 12, title: "Fix <b>it</b>", state: "merged" }]);
     expect(plain.request.issueRefs).toBeUndefined();
+    // Without a repoUrl (null opt-out, or no remote to derive one) no issueRefs are sent.
+    expect((await resolve({ ...refs, repoUrl: null })).request.issueRefs).toBeUndefined();
+    expect((await resolve({ ...refs, repoUrl: undefined })).request.issueRefs).toBeUndefined();
     // null opts out, and an invalid string is dropped; neither sends a repoUrl here (no remote to derive).
     expect((await resolve({ repoUrl: null })).request.repoUrl).toBeUndefined();
     const parsed = PublishManifest.parse({ ...manifest(), repoUrl: "http://github.com/o/r" });

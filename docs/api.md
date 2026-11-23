@@ -2318,7 +2318,7 @@ blank title, a bad number or state, a repeated number) fails the manifest, like 
 Markup in a title stays literal text. The server never calls GitHub: the agent reads titles and
 states and sends them. A revision view returns `issueRefs`, empty when none were sent. The server's
 `#123` anchors carry `data-emend-issue="<number>"`; sanitize drops author `data-*` first, so only
-server-made anchors have it. A number without an entry stays a plain link. Clients show a title as
+server-made anchors have it. The CLI sends `issueRefs` only with a `repoUrl`. A number without an entry stays a plain link. Clients show a title as
 plain text, never as HTML. Downloads show no title.
 
 `links`, `repoUrl` and `issueRefs` ride in the writeup's source and rendered blobs, so an import or export keeps them; no table
