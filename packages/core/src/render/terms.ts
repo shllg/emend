@@ -97,10 +97,12 @@ export const TERM_MATCH_WORK_BUDGET = 400_000_000;
 // 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of about 1,000 characters that each
 // hold a candidate with a non-ASCII edge costs about 33 steps per character (about 300,000 characters).
 // Not counted, each linear in the text: building the tree (3 to 6 ms for 450 forms), the check for a run of
-// more than 30 combining marks (about 20 ns per byte on the worst inputs built for it: 21 ms for a 1 MiB doc
-// and 0.17 s for 8 MiB) and the NFC normalization of each text node (about 50 ns per byte on the worst
-// inputs built for it: 52 ms and 0.42 s; the 30-mark rule keeps each reordered run to about 63 marks after
-// decomposition, which keeps it linear). A text node with a longer run of marks gets no marks.
+// more than 30 combining marks (about 20 ns per byte on one two-byte mark after each ASCII character, the
+// most matches per byte: 21 ms for a 1 MiB doc and 0.17 s for 8 MiB) and the NFC normalization of each text
+// node. The 30-mark rule keeps every reordered run to at most 63 non-starters (3 from a starter plus 2 from
+// each of 30 marks), so the cost stays linear. An input built to need the most reordering (U+1F82, then
+// 13 x U+0344, 9 x U+0F75 and 8 x U+0F73, repeated) takes about 55 ns per byte: 58 ms and 0.46 s.
+// A text node with a longer run of marks gets no marks.
 export const DOC_TERM_MATCH_STEP_BUDGET = 10_000_000;
 
 export function termMatcher(entries: { term: string; aliases?: string[] }[], budget = TERM_MATCH_WORK_BUDGET) {
@@ -200,8 +202,8 @@ export function markTerms() {
           continue;
         stack.push({ parent: node, index: 0 });
       } else if (node.type === "text") {
-        // A doc: text with a run of more than 30 combining marks costs quadratic time to normalize, so it
-        // gets no marks and is not normalized. The writeup's regex path does not check.
+        // A doc: text with a run of more than 30 combining marks can take quadratic time to normalize (when its
+        // marks are out of order), so it gets no marks and is not normalized. The writeup's regex path does not check.
         if ("trie" in matcher && longMarkRun(node.value)) continue;
         let view = node.value.normalize("NFC");
         let offsets: Map<number, number> | undefined;

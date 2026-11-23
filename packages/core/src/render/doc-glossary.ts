@@ -85,8 +85,9 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
       .map((alias) => alias.trim())
       .filter((alias) => alias !== "");
   }
-  // A run of more than 30 combining marks costs quadratic time to normalize, so a term or definition with
-  // one skips the item and an alias with one is dropped, as an invalid form is. The bridge reads the same.
+  // A run of more than 30 combining marks can take quadratic time to normalize (when its marks are out of
+  // order), so a term or definition with one skips the item and an alias with one is dropped, as an invalid
+  // form is. The bridge reads the same.
   if (longMarkRun(term)) return;
   aliases = aliases.filter((alias) => !longMarkRun(alias));
   const raw = `${lead}${textOf(definition)} ${textOf(rest)}`;
@@ -102,8 +103,9 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
 export function extractDocGlossary(tree: HtmlRoot): { entries: DocGlossaryEntry[]; items: HtmlElement[] } | undefined {
   const at = tree.children.findIndex((node) => {
     if (node.type !== "element" || !headingTags.has(node.tagName)) return false;
-    // NFC keeps each mark or composes it into a letter that is not ASCII, so a heading with a run of more than
-    // 30 marks cannot read "glossary". The check runs first because normalizing such a run takes quadratic time.
+    // NFC never turns a mark into ASCII, so a heading with a run of more than 30 marks cannot read "glossary".
+    // The check runs first because normalizing such a run can take quadratic time (when its marks are out of
+    // order).
     const text = textOf(node.children);
     return !longMarkRun(text) && normalizeText(text).toLowerCase() === "glossary";
   });

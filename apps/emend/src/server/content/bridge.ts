@@ -579,8 +579,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   let glossary = [], glossaryList;
   const termMarks = new WeakMap();
   // Kept in parity with normalizeGlossaryForm and GlossaryForm (packages/contract/src/manifest.ts), except
-  // that text with a run of more than 30 combining marks is not normalized (that takes quadratic time) and
-  // reads as empty, so validForm refuses it: the entry, or the alias, is skipped.
+  // that text with a run of more than 30 combining marks is not normalized (that can take quadratic time when
+  // its marks are out of order) and reads as empty, so validForm refuses it: the entry, or the alias, is skipped.
   const glossaryForm = text => longMarkRun(text) ? "" : text.normalize("NFC").replace(/\s+/gu, " ").trim();
   const validForm = text => text.length > 0 && text.length <= GLOSSARY_FORM_MAX && text.isWellFormed() &&
     !Array.from(text).some(char => {
@@ -702,9 +702,11 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   // in paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33
   // steps per character (about 300,000 characters). Not counted, each linear in the text: building the tree
   // (3 to 6 ms for 450 forms), the check for a run of more than 30 combining marks (about 20 ns per byte on
-  // the worst inputs built for it: 21 ms for 1 MiB, 0.17 s for 8 MiB) and the NFC normalization of each text
-  // node (about 50 ns per byte likewise: 52 ms and 0.42 s; the 30-mark rule keeps each reordered run to about
-  // 63 marks). A text node with a longer run gets no marks; a glossary item with one is skipped.
+  // one two-byte mark after each ASCII character: 21 ms for 1 MiB, 0.17 s for 8 MiB) and the NFC
+  // normalization of each text node. The 30-mark rule keeps every reordered run to at most 63 non-starters,
+  // so the cost stays linear; the input built to need the most reordering (see doc-terms.ts) takes about
+  // 55 ns per byte: 58 ms and 0.46 s. A text node with a longer run gets no marks; a glossary item with
+  // one is skipped.
   // The parity tests evaluate the slice between "term matcher: start" and "term matcher: end" against core's
   // doc matcher, charge by charge, so the slice uses only glossaryForm and the GLOSSARY_* constants.
   // term matcher: start

@@ -2220,10 +2220,11 @@ about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of 
 that each hold a match with a non-ASCII edge costs about 33 steps per character, so the budget covers
 about 300,000 characters of it. Spending the budget takes about 0.25 s or less on every shape measured
 (median of five runs). Not charged, each linear in the text: building the tree (3 to 6 ms for 450
-forms), the check for a run of more than 30 combining marks (about 20 ns per byte on the worst inputs
-built for it, so 21 ms for a 1 MiB doc and 0.17 s for 8 MiB) and normalizing each text node to NFC
-(about 50 ns per byte on the worst inputs built for it, 52 ms at 1 MiB and 0.42 s at 8 MiB; the
-30-mark rule keeps each reordered run to about 63 marks after decomposition, which keeps it linear).
+forms), the check for a run of more than 30 combining marks (about 20 ns per byte on one two-byte
+mark after each ASCII character, so 21 ms for a 1 MiB doc and 0.17 s for 8 MiB) and normalizing each
+text node to NFC. The 30-mark rule keeps every reordered run to at most 63 non-starters, so that cost
+stays linear: an input built to need the most reordering (U+1F82, then 13 × U+0344, 9 × U+0F75 and
+8 × U+0F73, repeated) takes about 55 ns per byte, which is 58 ms at 1 MiB and 0.46 s at 8 MiB.
 A text node with a run of more than 30 combining marks in a row gets no marks, and a glossary item
 whose term or definition has such a run is skipped (an alias with one is dropped): normalizing a
 longer run in the wrong order takes quadratic time, and real text never has one. When the budget
@@ -2268,8 +2269,8 @@ with more headings before its Glossary heading gets no glossary. Its other limit
   characters before the word gets no glossary, and text after those 800 characters is ignored.
 - Each `dt` and each `dd` yields at most 20,000 characters of text, read from at most 20,000 nodes.
 - The same 10,000,000-step marking budget as a Markdown doc, with the same charges. The checks that are
-  not charged cost about 0.17 s (mark runs) and 0.42 s (NFC) at the 8 MiB HTML limit, from about 20 and
-  50 ns per byte on the worst inputs built for them.
+  not charged cost about 0.17 s (mark runs) and 0.46 s (NFC) at the 8 MiB HTML limit, from about 20 and
+  55 ns per byte on the inputs named in the Markdown section above.
 - A text node with a run of more than 30 combining marks in a row gets no marks, and a `dt` or `dd`
   with such a run makes its entry invalid (an alias with one is dropped), as in a Markdown doc.
 
