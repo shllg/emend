@@ -102,7 +102,8 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
 export function extractDocGlossary(tree: HtmlRoot): { entries: DocGlossaryEntry[]; items: HtmlElement[] } | undefined {
   const at = tree.children.findIndex((node) => {
     if (node.type !== "element" || !headingTags.has(node.tagName)) return false;
-    // Normalizing never removes a mark, so a heading with a run of more than 30 of them is not "Glossary".
+    // NFC keeps each mark or composes it into a letter that is not ASCII, so a heading with a run of more than
+    // 30 marks cannot read "glossary". The check runs first because normalizing such a run takes quadratic time.
     const text = textOf(node.children);
     return !longMarkRun(text) && normalizeText(text).toLowerCase() === "glossary";
   });

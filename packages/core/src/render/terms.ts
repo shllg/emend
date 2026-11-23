@@ -97,9 +97,10 @@ export const TERM_MATCH_WORK_BUDGET = 400_000_000;
 // 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of about 1,000 characters that each
 // hold a candidate with a non-ASCII edge costs about 33 steps per character (about 300,000 characters).
 // Not counted, each linear in the text: building the tree (3 to 6 ms for 450 forms), the check for a run of
-// more than 30 combining marks (at most 23 ns per character: 24 ms for a 1 MiB doc and 0.19 s for 8 MiB) and
-// the NFC normalization of each text node (at most 25 ns per character, on runs of 30 marks in the worst
-// order: 26 ms and 0.21 s). A text node with a longer run of marks gets no marks.
+// more than 30 combining marks (about 20 ns per byte on the worst inputs built for it: 21 ms for a 1 MiB doc
+// and 0.17 s for 8 MiB) and the NFC normalization of each text node (about 50 ns per byte on the worst
+// inputs built for it: 52 ms and 0.42 s; the 30-mark rule keeps each reordered run to about 63 marks after
+// decomposition, which keeps it linear). A text node with a longer run of marks gets no marks.
 export const DOC_TERM_MATCH_STEP_BUDGET = 10_000_000;
 
 export function termMatcher(entries: { term: string; aliases?: string[] }[], budget = TERM_MATCH_WORK_BUDGET) {

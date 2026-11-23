@@ -685,10 +685,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   // none, and a word boundary is not checked across inline elements. The bridge tests hold the
   // single-text-node cases in parity with core's doc matcher, which the regex matcher of the writeup (the
   // reference) agrees with.
-  // The forms live in a prefix tree keyed by a case fold. A position costs the characters the walk compares
-  // (at most 100, the longest form), one step for each form that ends on the way (up to 450 when every form
-  // ends on one path) with the suffix check of each, and, once per text node, a split into graphemes when a
-  // candidate has an uncertain edge. Nothing is compiled. The steps counted: 1 per code point compared (each
+  // The forms live in a prefix tree keyed by a case fold. A position costs the characters the walk compares,
+  // including every whitespace character a space in a form consumes; one step for each form that ends on
+  // the way, with its suffix check and an acronym's exact check; and, once per text node, a split into
+  // graphemes when a candidate has an uncertain edge. The steps counted: 1 per code point compared (each
   // tree lookup), per whitespace character a space consumes, per start position tried, per form that ends on
   // the way, per character of the s/es suffix check and per character of an acronym's exact check;
   // GLOSSARY_LOOKUP_STEPS for the first fold and the first word lookup of a character;
@@ -701,10 +701,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   // made of common words), so the budget covers about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose
   // in paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33
   // steps per character (about 300,000 characters). Not counted, each linear in the text: building the tree
-  // (3 to 6 ms for 450 forms), the check for a run of more than 30 combining marks (at most 23 ns per
-  // character: 24 ms for a 1 MiB doc and 0.19 s for 8 MiB) and the NFC normalization of each text node (at
-  // most 25 ns per character, on runs of 30 marks in the worst order: 26 ms and 0.21 s). A text node with a
-  // longer run of marks gets no marks, and a glossary item with one is skipped.
+  // (3 to 6 ms for 450 forms), the check for a run of more than 30 combining marks (about 20 ns per byte on
+  // the worst inputs built for it: 21 ms for 1 MiB, 0.17 s for 8 MiB) and the NFC normalization of each text
+  // node (about 50 ns per byte likewise: 52 ms and 0.42 s; the 30-mark rule keeps each reordered run to about
+  // 63 marks). A text node with a longer run gets no marks; a glossary item with one is skipped.
   // The parity tests evaluate the slice between "term matcher: start" and "term matcher: end" against core's
   // doc matcher, charge by charge, so the slice uses only glossaryForm and the GLOSSARY_* constants.
   // term matcher: start

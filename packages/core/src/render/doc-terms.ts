@@ -5,10 +5,10 @@ import { normalizeGlossaryForm } from "@emend/contract";
 //
 // A regex alternation of up to 450 forms costs, at each position, up to the summed length of all forms, and
 // compiling it can take seconds. This matcher walks a prefix tree of the forms instead. A position costs the
-// characters the walk compares (at most 100, the longest form), one step for each form that ends on the way
-// (up to 450 when every form ends on one path) with the suffix check of each, and, once per text node, a
-// split into graphemes when a candidate has an uncertain edge. Nothing is compiled, and every step is
-// counted against the budget as it is taken.
+// characters the walk compares, including every whitespace character a space in a form consumes; one step
+// for each form that ends on the way, with its suffix check and, for an acronym, its exact check; and, once
+// per text node, a split into graphemes when a candidate has an uncertain edge. Nothing is compiled, and
+// every step is counted against the budget as it is taken.
 //
 // Rules, the same as the regex path's (terms.ts):
 // - A match starts only where the code point before is not a letter, mark, digit or _.
@@ -201,9 +201,10 @@ export function docTermMatcher(entries: { term: string; aliases?: string[] }[], 
  * covers about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of about 1,000
  * characters that each hold a candidate with a non-ASCII edge costs about 33 steps per character (about
  * 300,000 characters). Not counted, each linear in the text: building the tree (3 to 6 ms for 450 forms), the
- * check for a run of more than 30 combining marks (at most 23 ns per character: 24 ms for a 1 MiB doc and
- * 0.19 s for 8 MiB) and the NFC normalization of each text node (at most 25 ns per character, on runs of 30
- * marks in the worst order: 26 ms and 0.21 s). A text node with a longer run of marks gets no marks.
+ * check for a run of more than 30 combining marks (about 20 ns per byte on the worst inputs built for it: 21 ms
+ * for a 1 MiB doc and 0.17 s for 8 MiB) and the NFC normalization of each text node (about 50 ns per byte on
+ * the worst inputs built for it: 52 ms and 0.42 s; the 30-mark rule keeps each reordered run to about 63
+ * marks after decomposition, which keeps it linear). A text node with a longer run of marks gets no marks.
  */
 export function scanDocTerms(
   matcher: DocTermMatcher,
