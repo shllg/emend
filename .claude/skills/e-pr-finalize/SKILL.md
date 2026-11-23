@@ -334,12 +334,9 @@ for CI and threads; back here, the list above picks the next round.
    `review.json` in that folder from that conversation, as `emend-review` says, then run its
    republish command from the directory it named. Otherwise leave it `null`. Never infer intent from
    commits or the diff.
-5. Keep a record in the review folder, in `heads.txt`, one line per publish:
-   `<reviewId> <revision> <head commit>`. Append the line with the Edit tool (the Write tool when the file is
-   new), not with a shell command. Write the first line now, and one line for every later publish.
-6. Run `<main>/bin/wt notify review-ready`. Give the owner the review URL on its own line and say how
+5. Run `<main>/bin/wt notify review-ready`. Give the owner the review URL on its own line and say how
    to answer: comments, then Send with a mode, or approve. The page opens only while emend runs.
-7. Wait as the `emend-review` skill, "Wait for the reviewer", and the `emend-feedback` skill say:
+6. Wait as the `emend-review` skill, "Wait for the reviewer", and the `emend-feedback` skill say:
    folder checks, saved results, the handled record. Do not restate them here.
 
 While the loop is open there is no rebase of this branch (the review is pinned to its base). If a
@@ -351,18 +348,18 @@ stop the loop.
 - `go`: handle it with `emend-feedback`. Fixes go back through steps 1 to 7 (commit, push, CI,
   threads, and one `owner-check` round over these fixes in step 7). Then publish the next revision
   with `head` at the new head commit, carrying the bundle summary and reasons for that head as
-  step 8.3 says, from a `.wt/bundle-diff.json` whose `head` equals that commit. Append its line to `heads.txt`, run
-  `<main>/bin/wt notify review-ready`, and wait again.
-- `approve`: the result names a review id and a revision. Find the line in `heads.txt` that matches
-  both.
-  - Its head equals the PR's current `headRefOid` (read it again with `gh pr view --repo github.com/<owner>/<name> <n> --json headRefOid`), the PR
-    is not a draft, and the mode in `.wt/worktree.json` is `github`: run `/e-pr-merge`, passing the
-    literal review folder `<top>/.wt/review` as a locator. `/e-pr-merge` checks the approval itself and
-    does not take it from this call. Do not ask. Approval does not authorize anything else.
-  - The heads differ: say so, and republish the current head as a new revision for a new approval.
+  step 8.3 says, from a `.wt/bundle-diff.json` whose `head` equals that commit. Run
+  `<main>/bin/wt notify review-ready` and wait again.
+- `approve`: read the PR again with `gh pr view --repo github.com/<owner>/<name> <n> --json headRefOid,isDraft`.
+  Run `<main>/bin/wt approval --head <headRefOid>` in its worktree.
+  - Exit 0, the PR is not a draft, and the mode in `.wt/worktree.json` is `github`: run
+    `/e-pr-merge`, passing the literal review folder `<top>/.wt/review` as a locator.
+    `/e-pr-merge` checks the approval itself. Do not ask. Approval does not authorize anything else.
+  - Exit 0 on a draft PR: report the approval and stop. Marking it ready is the owner's step.
+  - Exit 1: report the reason and republish the current head as a new revision for a new approval.
     Carry the bundle summary and reasons for that head as step 8.3 says, from a
     `.wt/bundle-diff.json` whose `head` equals that head.
-  - A draft PR: report the approval and stop. Marking it ready is the owner's step.
+  - Exit 2 or 69: run `<main>/bin/wt notify blocked`, report the message and stop.
 - `closed` or a non-zero exit: report as `emend-feedback` says and stop. Silence is not approval.
 
 Mode `local` in `.wt/worktree.json` does not belong in this skill; use `/e-merge-local`.

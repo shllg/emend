@@ -29,10 +29,12 @@ import {
   resolveRepo,
 } from "./repo.ts";
 import {
+  approvedReview,
   type Fixture,
   fakeCalls,
   gitIn,
   installFake,
+  installFakeEmend,
   makeFixture,
   makeTestEnv,
   runLauncher,
@@ -461,15 +463,20 @@ for (const supported of [true, false])
   ]) {
     test(`R3.3/R4.11: ${failure} diagnostics use protected Git command sequences (lazy-fetch pin ${supported})`, (t) => {
       t.mock.method(gitRuntime, "supportsNoLazyFetch", () => supported);
-      const repo = { mainRoot: "/synthetic-unused", commonDir: "/synthetic-unused/.git" } as Repo;
+      const env = failure === "commit-tree" ? makeTestEnv({ ports: false }) : undefined;
+      const mainRoot = env?.home ?? "/synthetic-unused";
+      const repo = { mainRoot, commonDir: join(mainRoot, ".git") } as Repo;
       const old = "a".repeat(40),
         target = "b".repeat(40);
+      if (env) installFakeEmend(env, old, [approvedReview("emend-fixture", old)]);
+      const spawnSync = childProcess.spawnSync;
       const token = ["gh", "p_", "Ab01".repeat(9)].join("");
       const calls: { command: string; env: NodeJS.ProcessEnv; args: string[] }[] = [];
       const child = t.mock.method(
         childProcess,
         "spawnSync",
-        (_cmd: string, args: string[], options: { env: NodeJS.ProcessEnv; encoding?: string }) => {
+        (cmd: string, args: string[], options: { env: NodeJS.ProcessEnv; encoding?: string }) => {
+          if (env && cmd === join(env.fakeBin, "emend")) return spawnSync(cmd, args, { ...options, encoding: "utf8" });
           const command = args.find((arg) =>
             [
               "config",
@@ -565,6 +572,7 @@ for (const supported of [true, false])
         reader.mock.restore();
         exists.mock.restore();
         syncBuiltinESMExports();
+        env?.cleanup();
       }
     });
   }

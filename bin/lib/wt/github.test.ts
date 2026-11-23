@@ -15,6 +15,7 @@ import {
 } from "./github.ts";
 import { type Repo, resolveRepo } from "./repo.ts";
 import {
+  approvedReview,
   branchPrPage,
   commitFile,
   type FakeRule,
@@ -23,6 +24,7 @@ import {
   fakeGithubOrigin,
   gitIn,
   installFake,
+  installFakeEmend,
   issueRules,
   makeFixture,
   makeTestEnv,
@@ -886,6 +888,7 @@ let headSha = SHA;
 function publishHead(ctx: Ctx): void {
   headSha = gitIn(ctx.fx.main, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "pr head");
   gitIn(ctx.fx.main, "push", "--quiet", "--force", "origin", `${headSha}:refs/pull/7/head`);
+  installFakeEmend(ctx.env, headSha, [approvedReview(BRANCH, headSha)]);
 }
 
 /** A scenario whose HEAD already has a published PR head. */
@@ -995,6 +998,76 @@ test("pr merge happy path squashes with the reviewed head", () =>
     ]);
     assert.deepEqual(capturedBodies(bodies), ["Squash body"]);
   }));
+
+test("pr merge refuses an unapproved head before the GitHub merge call", () =>
+  mscenario((ctx) => {
+    installFake(ctx.env, "gh", mergeOkRules());
+    installFakeEmend(ctx.env, headSha, [approvedReview("another-branch", headSha)]);
+    assert.throws(() => prMerge(ctx.repo, MERGE_ARGS), {
+      code: 1,
+      message: `emend shows no approval of ${headSha} on ${BRANCH}: the review of this commit names another branch. Nothing was merged.`,
+    });
+    assert.deepEqual(mergeCalls(ctx.env), []);
+  }));
+
+test("pr merge needs the original approved commit locally to compare the change", () =>
+  mscenario((ctx) => {
+    installFake(ctx.env, "gh", mergeOkRules());
+    installFakeEmend(ctx.env, OTHER_SHA, [approvedReview(BRANCH, OTHER_SHA)]);
+    assert.throws(() => prMerge(ctx.repo, { ...MERGE_ARGS, approvedHead: OTHER_SHA }), {
+      code: 1,
+      message: "The approved head commit is not available locally. Nothing was merged.",
+    });
+    assert.deepEqual(mergeCalls(ctx.env), []);
+  }));
+
+for (const changed of [false, true]) {
+  test(`pr merge checks the approved change after a rebase (changed: ${changed})`, () =>
+    scenario(async (ctx) => {
+      const { main } = ctx.fx;
+      const approved = commitFile(main, "feature.txt", "reviewed\n");
+      gitIn(main, "checkout", "-q", "main");
+      commitFile(main, "other.txt", "main advanced\n");
+      gitIn(main, "push", "-q", "origin", "main");
+      gitIn(main, "checkout", "-q", BRANCH);
+      gitIn(main, "rebase", "main");
+      if (changed) commitFile(main, "extra.txt", "extra change\n");
+      headSha = gitIn(main, "rev-parse", "HEAD");
+      assert.notEqual(headSha, approved);
+      gitIn(main, "push", "-q", "origin", `${headSha}:refs/pull/7/head`);
+      installFake(ctx.env, "gh", mergeOkRules());
+      installFakeEmend(ctx.env, approved, [approvedReview(BRANCH, approved)]);
+      const invoke = () =>
+        commands.pr?.({
+          repo: ctx.repo,
+          args: [
+            "merge",
+            "--pr",
+            "7",
+            "--match-head",
+            headSha,
+            "--approved-head",
+            approved,
+            "--subject",
+            "Reviewed",
+            "--body",
+            "",
+          ],
+        });
+      if (changed) {
+        await assert.rejects(async () => invoke(), {
+          code: 1,
+          message: "The pull request head changes the approved change. Nothing was merged.",
+        });
+        assert.deepEqual(mergeCalls(ctx.env), []);
+      } else {
+        await invoke();
+        const [call] = mergeCalls(ctx.env);
+        assert.ok(call);
+        assert.equal(call[call.indexOf("--match-head-commit") + 1], headSha);
+      }
+    }));
+}
 
 function remoteHas(ctx: Ctx): boolean {
   return gitIn(ctx.fx.origin, "for-each-ref", `refs/heads/${BRANCH}`) !== "";
@@ -1128,6 +1201,7 @@ test("pr merge --pr works from a matching linked worktree", () =>
   mscenario(
     (ctx) => {
       const wt = setup(ctx.repo, { branch: "feat-b", busy: new Set<number>() }).path;
+      installFakeEmend(ctx.env, headSha, [approvedReview("feat-b", headSha)]);
       installFake(
         ctx.env,
         "gh",

@@ -11,7 +11,7 @@ import { commands as historyCommands } from "./history.ts";
 import { checkIssue, commands, evaluateIssue, issueSnapshotText, pickIssue, scanIssues, sha256 } from "./issues.ts";
 import { registryPath } from "./registry.ts";
 import { GIT_BASE, type Repo } from "./repo.ts";
-import { githubPage, issueEvent, prPage, READY_AT, READY_LABEL, readyIssue } from "./test-support.ts";
+import { approvedReview, githubPage, issueEvent, prPage, READY_AT, READY_LABEL, readyIssue } from "./test-support.ts";
 import { WtError } from "./validate.ts";
 import { setup, commands as worktreeCommands } from "./worktree.ts";
 
@@ -96,6 +96,12 @@ async function boundary(
     lookupFailure: null as Reply | null,
   };
   const reply = (command: string, args: string[]): Reply => {
+    if (command === process.execPath) {
+      const sha = "a".repeat(40);
+      assert.deepEqual(args, ["ls", "--json", "--head", sha]);
+      const branch = String(state.mergeView.headRefName ?? state.prBranch);
+      return { stdout: JSON.stringify({ items: [approvedReview(branch, sha)] }) };
+    }
     if (command === "git") {
       if (args.includes("config") && args.includes("--show-scope")) return { stdout: "global\tSynthetic User" };
       if (args.includes("symbolic-ref")) return { stdout: repo.callerBranch ?? "" };
@@ -246,9 +252,14 @@ async function boundary(
     },
   );
   syncBuiltinESMExports();
+  // A real executable outside the fixture. The subprocess stub above answers every approval lookup.
+  const previousEmend = process.env.EMEND_BIN;
+  process.env.EMEND_BIN = process.execPath;
   try {
     await fn({ repo, calls, state });
   } finally {
+    if (previousEmend === undefined) delete process.env.EMEND_BIN;
+    else process.env.EMEND_BIN = previousEmend;
     stub.mock.restore();
     syncBuiltinESMExports();
     rmSync(top, { recursive: true, force: true });

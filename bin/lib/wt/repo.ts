@@ -176,6 +176,13 @@ export function resolveRepo(cwd: string): Repo {
   return { mainRoot, commonDir, worktreesDir: join(mainRoot, ".claude", "worktrees"), callerTop, callerBranch };
 }
 
+export function linkedTop(repo: Repo): string {
+  if (repo.callerTop === null || repo.callerTop === repo.mainRoot) {
+    throw new WtError(2, "Run this from inside a linked worktree.");
+  }
+  return repo.callerTop;
+}
+
 // These commands must be able to fetch missing blobs in partial clones; filter their diagnostics.
 const BLOB_COMMANDS = new Set(["worktree", "checkout", "switch", "reset", "restore", "rebase", "merge", "cherry-pick"]);
 // An unknown option or subcommand must also take the filtered diagnostic path.

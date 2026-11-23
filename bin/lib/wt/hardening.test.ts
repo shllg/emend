@@ -10,6 +10,7 @@ import { scanIssues } from "./issues.ts";
 import { run, runBytes } from "./proc.ts";
 import { GIT_BASE, gitTry, type Repo, resolveRepo } from "./repo.ts";
 import {
+  approvedReview,
   branchPrPage,
   branchPrRules,
   commitFile,
@@ -20,6 +21,7 @@ import {
   githubPage,
   gitIn,
   installFake,
+  installFakeEmend,
   issueRules,
   makeFixture,
   makeTestEnv,
@@ -110,6 +112,7 @@ function mscenario(fn: Scenario): Promise<void> {
   return scenario((ctx) => {
     headSha = gitIn(ctx.fx.main, "rev-parse", "HEAD");
     gitIn(ctx.fx.main, "push", "--quiet", "origin", `${headSha}:refs/pull/7/head`);
+    installFakeEmend(ctx.env, headSha, [approvedReview(BRANCH, headSha)]);
     return fn(ctx);
   });
 }

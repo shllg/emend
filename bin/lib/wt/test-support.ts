@@ -44,7 +44,8 @@ export interface TestEnv {
   cleanup(): void;
 }
 
-const PATCHED = ["HOME", "PATH", "TERM"] as const;
+const APPROVAL_ENV = ["EMEND_BIN", "EMEND_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"] as const;
+const PATCHED = ["HOME", "PATH", "TERM", ...APPROVAL_ENV] as const;
 const SCRUBBED_PREFIXES = [
   "GIT_",
   "HERDR_",
@@ -220,6 +221,7 @@ export function makeTestEnv(o: { ports?: boolean } = {}): TestEnv {
         delete process.env[key2];
       }
     }
+    for (const name of APPROVAL_ENV) delete process.env[name];
     process.env.HOME = home;
     process.env.PATH = fakeBin;
     process.env.TERM = "dumb";
@@ -297,6 +299,21 @@ export function installFake(env: TestEnv, name: string, rules: FakeRule[]): void
   writeFileSync(join(env.fakeBin, `.${name}.rules.json`), JSON.stringify(rules));
   writeFileSync(join(env.fakeBin, `.${name}.log`), "");
   writeFileSync(join(env.fakeBin, `.${name}.state.json`), "{}");
+}
+
+export function approvedReview(branch: string, head: string) {
+  const revision = { revision: 1, head };
+  return {
+    id: "face0000-0000-4000-8000-000000000001",
+    branch,
+    state: "approved",
+    newest: revision,
+    approved: revision,
+  };
+}
+
+export function installFakeEmend(env: TestEnv, sha: string, items: unknown[]): void {
+  installFake(env, "emend", [{ match: ["ls", "--json", "--head", sha], stdout: JSON.stringify({ items }) }]);
 }
 
 /** Replaces the canned rules of an installed fake and resets its use counts. */

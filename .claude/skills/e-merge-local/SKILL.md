@@ -34,7 +34,7 @@ local `main` as one signed commit. The owner pushes `main` later.
 1. Run `git status --short` and `git symbolic-ref --quiet --short HEAD`. The branch is not `main`, the
    session runs in a worktree under `<main>/.claude/worktrees/`, and the tree is clean. When
    `.wt/worktree.json` names an issue, stop: issue branches land only through a PR (`/e-pr`).
-   `git ls-files -- .wt` must print nothing: tracked files under `.wt` must never count as approval.
+   `git ls-files -- .wt` must print nothing: the review folder holds local feedback files.
 2. `pnpm verify` must be green at exactly this HEAD. Run it unless a green run on this HEAD is on record.
 3. Get the commit: `git rev-parse HEAD`.
 
@@ -50,10 +50,7 @@ local `main` as one signed commit. The owner pushes `main` later.
 3. The subagent set `decisions` to `null`. If this session holds the conversation in which the owner
    asked for the change, write `decisions` into `review.json` in that folder from that conversation,
    then run the republish command from the directory it named. Otherwise leave it `null`.
-4. Record a line in `heads.txt` in the review folder for every publish:
-   `<reviewId> <revision> <head>`. Append the line with the Edit tool (the Write tool when the file is new), not
-   with a shell command.
-5. Run `<main>/bin/wt notify review-ready`. Give the owner the URL on its own line.
+4. Run `<main>/bin/wt notify review-ready`. Give the owner the URL on its own line.
 
 ## 3. Wait
 
@@ -61,12 +58,12 @@ Wait as the `emend-review` skill, "Wait for the reviewer", and the `emend-feedba
 restate them here.
 
 - `go`: handle it with `emend-feedback`. Commit the fixes, run `pnpm verify`,
-  publish the next revision with `head` at the new commit, append its line to `heads.txt`, run
+  publish the next revision with `head` at the new commit, run
   `<main>/bin/wt notify review-ready`, and wait again.
-- `approve`: the result names a review id and a revision. Find the line in `heads.txt` that matches
-  both. If its head differs from
-  `git rev-parse HEAD`, say so and republish for a new approval. If it matches, that head is the
-  approved head. Go on.
+- `approve`: run `<main>/bin/wt approval` in the worktree.
+  - Exit 0: HEAD is approved. Keep the head from the output and go on.
+  - Exit 1: report the reason and republish the current head for a new approval.
+  - Exit 2 or 69: run `<main>/bin/wt notify blocked`, report the message and stop.
 - `closed` or a non-zero exit: report as `emend-feedback` says and stop.
 
 ## 4. Land
@@ -80,18 +77,20 @@ restate them here.
       that error holds the old tip. Report it and stop.
    3. Run `<main>/bin/wt digest --base main` again.
    4. Digests equal and the result was `rebased`: the change itself is unchanged and the approval
-      still covers it. The new head (`git rev-parse HEAD`) replaces the approved head for this
-      landing, and only that head. Run `pnpm verify` on it. Go on.
+      still covers it. Keep the new head from `git rev-parse HEAD` and run `pnpm verify` on it.
+      Step 4.3 uses `land --match-head <new head> --approved-head <approved head>`.
    5. Otherwise (`restacked`, or different digests): the content changed. Resolve it as `/e-rebase`
       says (without its push step; this path has no remote), commit, run `pnpm verify`, publish a new
-      revision with `head` at the new commit, record it, and wait for a new approval before you go on.
+      revision with `head` at the new commit, and wait for a new approval before you go on.
 2. Write `<top>/.wt/land-body.md`. The subject is a Conventional Commits line of at most 72
    characters. The body has `## Summary` with one to three bullets, then every distinct `Sync:`
    trailer from the branch's commits. No attribution.
-3. Run
-   `<main>/bin/wt land --match-head <approved head> --subject-file <top>/.wt/land-subject.txt --body-file <top>/.wt/land-body.md`,
-   with the subject written to `<top>/.wt/land-subject.txt` by the Write tool.
-   It refuses with "HEAD is not the approved head commit." when HEAD differs. Otherwise it makes one
+3. Write the subject to `<top>/.wt/land-subject.txt` with the Write tool.
+   For the approved head, run
+   `<main>/bin/wt land --match-head <approved head> --subject-file <top>/.wt/land-subject.txt --body-file <top>/.wt/land-body.md`.
+   When step 4.1 carried approval over, run
+   `<main>/bin/wt land --match-head <new head> --approved-head <approved head> --subject-file <top>/.wt/land-subject.txt --body-file <top>/.wt/land-body.md`.
+   bin/wt checks HEAD, the emend approval and, for the rebased head, both change digests. It makes one
    signed commit on `main` with the branch's tree, prints `backup:` lines, and prints `landed <sha>`
    last. It never pushes. `land` signs through git's configured signer with piped stdio, so a signer that
    needs a tty pinentry fails. If it refuses, or says "git did not make the commit", report the
