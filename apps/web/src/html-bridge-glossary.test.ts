@@ -5,7 +5,7 @@ import { LIMITS } from "@emend/contract";
 import { type Element, type Node, type ShadowRoot, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { HtmlRoot } from "../../../packages/core/src/render/blocks.ts";
-import { markTerms, termMatcher } from "../../../packages/core/src/render/terms.ts";
+import { DOC_TERM_MATCH_WORK_BUDGET, markTerms, termMatcher } from "../../../packages/core/src/render/terms.ts";
 
 const bridgeSource = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
 const windows: Window[] = [];
@@ -119,6 +119,21 @@ test("bridge glossary limits stay in parity with the contract", () => {
     GLOSSARY_DEFINITION_MAX: LIMITS.glossaryDefinitionChars,
   }))
     expect(bridgeSource).toContain(`const ${name} = ${value};`);
+});
+
+test("the bridge's marking budget stays in parity with core's doc budget", () => {
+  expect(bridgeSource).toContain(`const GLOSSARY_WORK_MAX = ${DOC_TERM_MATCH_WORK_BUDGET};`);
+});
+
+test("a glossary whose forms share a long prefix cannot stall the doc: ready is posted and nothing is marked", () => {
+  const prefix = "a ".repeat(48).trim();
+  const items = Array.from({ length: 50 }, (_, term) => {
+    const form = (alias: number) => `${prefix} ${String(term * 9 + alias).padStart(3, "0")}`;
+    return entry(form(0), "Defined.", ...Array.from({ length: 8 }, (_, alias) => form(alias + 1)));
+  });
+  const b = bridge(page("a ".repeat(4489), entries(...items)));
+  expect(b.marks()).toEqual([]);
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
 });
 
 test("a doc without a glossary does not change at all", () => {

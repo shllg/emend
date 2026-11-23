@@ -2206,7 +2206,9 @@ space; duplicates compared case-insensitively after normalization). At most
 `glossaryTerms` entries and `glossaryAliases` aliases per entry count; later ones are ignored.
 
 The renderer marks the first use of each term and alias elsewhere in the doc, with the same rules
-as the writeup, and never inside the glossary list or headings. `RevisionView.docs[].terms` lists
+as the writeup, and never inside the glossary list or headings. Marking in a doc has its own work
+budget of 20,000,000 units. Each text node is charged its length times the total length of all terms
+and aliases. Once the budget is spent, later first uses stay unmarked. `RevisionView.docs[].terms` lists
 the entries in marking order; the app opens the same card as the writeup's, whose "Glossary" link
 jumps to the entry's block. A doc without such a section has no `terms` and no marks. Terms are
 stored beside the doc row, are not part of the export bundle, and the import re-renders them from
@@ -2237,8 +2239,14 @@ or an invalid or repeated term is skipped; an invalid or repeated alias is dropp
 `glossaryTerms` entries and `glossaryAliases` aliases per entry count.
 
 The bridge checks only the first 1,024 `h1`-`h6` headings, the Glossary heading included, so a doc
-with more headings before its Glossary heading gets no glossary. Its other limits are 10,000
-`dt`/`dd` items and a walk of 100,000 nodes.
+with more headings before its Glossary heading gets no glossary. Its other limits:
+
+- 10,000 `dt`/`dd` items.
+- A walk of 100,000 nodes.
+- Only the first 800 raw characters of each heading's text are read: a heading whose text before
+  "Glossary" is longer does not count, and text after those 800 characters is ignored.
+- Each `dt` and each `dd` yields at most 20,000 characters of text, read from at most 20,000 nodes.
+- The same 20,000,000-unit marking budget as a Markdown doc.
 
 The bridge inside the frame does all of the work. At ready it reads the glossary, marks the first use
 of each term and alias in its own spans (dotted underline, focusable, never inside the glossary, a

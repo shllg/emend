@@ -82,6 +82,9 @@ export const runBreaks = new Set([
 let segmenter: Intl.Segmenter | undefined;
 
 export const TERM_MATCH_WORK_BUDGET = 400_000_000;
+// A doc's own budget, about half a second at worst (measured about 0.29 s per 10,000,000 units on one
+// shared-prefix text node); the writeup keeps TERM_MATCH_WORK_BUDGET.
+export const DOC_TERM_MATCH_WORK_BUDGET = 20_000_000;
 
 export function termMatcher(entries: { term: string; aliases?: string[] }[], budget = TERM_MATCH_WORK_BUDGET) {
   let weight = 0;

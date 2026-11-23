@@ -561,13 +561,13 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   }
   // The glossary of an HTML doc: the first dl after a heading named Glossary. It is read, marked and drawn
   // inside the frame; nothing about it crosses to the parent.
-  // Kept in parity with LIMITS (glossary*) by the bridge glossary tests.
+  // Kept in parity with LIMITS (glossary*) and core's DOC_TERM_MATCH_WORK_BUDGET by the bridge glossary tests.
   const GLOSSARY_TERMS_MAX = 50;
   const GLOSSARY_ALIASES_MAX = 8;
   const GLOSSARY_FORM_MAX = 100;
   const GLOSSARY_DEFINITION_MAX = 2000;
   const GLOSSARY_VISITS_MAX = 100000;
-  const GLOSSARY_WORK_MAX = 400000000;
+  const GLOSSARY_WORK_MAX = 20000000;
   const htmlElement = node => nodeType(node) === 1 && namespace(node) === "http://www.w3.org/1999/xhtml";
   const createText = text => dom(window.Document.prototype, "createTextNode", document, text);
   const phrasingTags = new Set(["a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "i", "ins",

@@ -170,7 +170,7 @@ test("javascript links, raw SVG and a Mermaid click directive stay inert", async
   }
 });
 
-test("a very long whitespace run in a head is skipped without stalling the render", async () => {
+test("a very long whitespace run in a head collapses or is skipped without stalling the render", async () => {
   const spaces = " ".repeat(200_000);
   const { blocks, terms } = await render(
     doc([`- **a${spaces}b:** Inside the bold.`, `- **Term**${spaces}x`, "- **Hub:** Kept."].join("\n")),
@@ -178,6 +178,40 @@ test("a very long whitespace run in a head is skipped without stalling the rende
   expect(blocks.length).toBeGreaterThan(0);
   // Whitespace collapses, so the first item is the valid term "a b"; the second has no colon and is skipped.
   expect(terms?.map((term) => term.term)).toEqual(["a b", "Hub"]);
+});
+
+test("a glossary whose forms share a long prefix lists every term and marks nothing", async () => {
+  const prefix = "a ".repeat(48).trim();
+  const items = Array.from({ length: 50 }, (_, term) => {
+    const form = (alias: number) => `${prefix} ${String(term * 9 + alias).padStart(3, "0")}`;
+    const aliases = Array.from({ length: 8 }, (_, alias) => form(alias + 1));
+    return `- **${form(0)}** (also: ${aliases.join(", ")}): Def.`;
+  });
+  // Compiling the 450-form pattern takes about 1.5 s here; before the doc budget, matching this shape took about 13 s, so the timeout still catches that.
+  const { terms, html } = await render(doc(items.join("\n"), "a ".repeat(4400)));
+  expect(terms).toHaveLength(50);
+  expect(marks(html)).toHaveLength(0);
+}, 10_000);
+
+test("the doc's smaller work budget still marks a late first use in a long ordinary doc", async () => {
+  const words = [
+    "alpha",
+    "bravo",
+    "charlie",
+    "delta",
+    "echo",
+    "foxtrot",
+    "golf",
+    "hotel",
+    "india",
+    "juliet",
+    "kilo",
+    "lima",
+  ];
+  const glossary = words.map((word, index) => `- **term${word}${index}:** Def.`).join("\n");
+  const filler = "Plain words fill this paragraph with ordinary prose. ".repeat(1200);
+  const { html } = await render(doc(glossary, `${filler}Finally termlima11 appears.`));
+  expect(marks(html).map((m) => m[2])).toEqual(["termlima11"]);
 });
 
 test("an alias that is too long is dropped and the term stays", async () => {
