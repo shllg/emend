@@ -173,6 +173,37 @@ The `xychart-beta` and `block-beta` forms draw too.
 Draw a flowchart instead.
 Other types are not checked, so use one of these.
 
+## Charts
+
+This section applies to a review writeup and a Markdown document.
+Show numbers before and after a change as a small chart: timings, sizes and counts.
+Put a JSON spec in a `chart` code fence, in a topic's `why` after the **Fix:** paragraph, or in `body`.
+
+```chart
+{
+  "type": "bar",
+  "title": "Search time",
+  "unit": "ms",
+  "labels": ["Cold start", "Warm cache"],
+  "series": [
+    { "name": "Before", "values": [420, 95] },
+    { "name": "After", "values": [180, 40] }
+  ]
+}
+```
+
+- `type` is `bar`, `line` or `sparkline`.
+  Bars compare a few values, a line shows a trend, and a sparkline shows one small trend per series.
+- `labels` names each value: 1 to 12 for bars, 2 to 24 for a line.
+  A sparkline may leave them out and holds 2 to 60 values.
+- `series` holds 1 to 4 series, each with its own `name` and one value per label.
+  Name them in the reader's words, such as "Before" and "After".
+- Values are numbers from 0 up.
+  `unit` follows each value, up to 8 characters; `title` heads the chart, up to 80.
+- Labels and names have up to 32 characters. Other keys are refused.
+- emend picks the colours for light and dark mode, so the spec has none.
+- A spec that is not valid JSON or breaks a rule shows as its source. Check it before you publish.
+
 ## Risk and proof
 
 This section applies to a review writeup. The writeup is a decision brief: the reviewer decides

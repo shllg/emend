@@ -131,3 +131,16 @@ test.each([
   const node = required(container.firstChild?.firstChild);
   expect(selectionToAnchor(select(node, from, node, to), container)).toEqual({ error });
 });
+
+test("selecting a chart label in BlockView anchors its whole source", () => {
+  const source = '{"type":"bar","labels":["Week one"],"series":[{"name":"Trips","values":[5]}]}';
+  const chart: RenderedBlock = { ...block, kind: "chart", text: source, html: "" };
+  const { container } = render(<BlockView block={chart} />);
+  const wrapper = required(container.querySelector<HTMLElement>("[data-block-kind=chart]"));
+  expect(wrapper.id).toBe(`block-${chart.id}`);
+  expect(wrapper.dataset.blockId).toBe(chart.id);
+  expect(wrapper.dataset.blockText).toBe(source);
+  expect(wrapper.querySelector("figure svg")).not.toBeNull();
+  const label = required(wrapper.querySelector("svg text")?.firstChild);
+  expect(selectionToAnchor(select(label, 0, label, 4), container)).toEqual(blockAnchor(chart));
+});

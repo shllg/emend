@@ -1,4 +1,4 @@
-import type { HtmlElement, HtmlNode, HtmlRoot } from "./blocks.ts";
+import { type HtmlElement, type HtmlNode, type HtmlRoot, renderData } from "./blocks.ts";
 
 const isWhitespace = (node: HtmlNode) => node.type === "text" && node.value.trim() === "";
 const isBreak = (node: HtmlNode | undefined) => node?.type === "element" && node.tagName === "br";
@@ -8,6 +8,7 @@ const hasContent = (node: HtmlNode) =>
 function hasDiagram(quote: HtmlElement): boolean {
   const pending: HtmlNode[] = [quote];
   for (let node = pending.pop(); node; node = pending.pop()) {
+    if (node.type === "element" && node.tagName === "pre" && renderData(node).emendDiagram !== undefined) return true;
     if (
       node.type === "element" &&
       node.tagName === "code" &&

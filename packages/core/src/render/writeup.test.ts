@@ -969,3 +969,26 @@ test.each([false, true])(
     expect(section?.blocks[0]?.id).toMatch(/^deviations-[0-9a-f]{8}$/);
   },
 );
+
+test("chart source stays out of glossary hints, term marks and issue links", async () => {
+  const source = '{"type":"bar","labels":["Budget #123"],"series":[{"name":"Before","values":[2]}]}';
+  const fence = `\`\`\`chart\n${source}\n\`\`\``;
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      overview: `${fence}\n\nBudget #123`,
+      glossary: [{ term: "Budget", definition: `Time allowed.\n\n${fence}` }],
+    },
+    [],
+    { repoUrl: "https://github.com/example/project" },
+  );
+  const blocks = rendered.sections.flatMap(({ blocks }) => blocks);
+  expect(blocks.filter(({ kind }) => kind === "chart")).toMatchObject([
+    { source, html: "" },
+    { source, html: "" },
+  ]);
+  expect(rendered.terms?.[0]?.definition).toBe("Time allowed.");
+  const prose = rendered.sections.find(({ key }) => key === "overview")?.blocks[1]?.html;
+  expect(prose).toContain("emend-term");
+  expect(prose).toContain("issues/123");
+});

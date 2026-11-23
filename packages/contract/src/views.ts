@@ -155,11 +155,11 @@ const sectionKey = z.union([
   z.templateLiteral(["t-", TopicSlug, "-", z.enum(["why", "example", "body"])]),
 ]);
 
-/** Wire representation of core's Block; rendering remains server-only. */
+/** Wire representation of core's server-rendered Markdown blocks. */
 export const RenderedBlock = z.object({
   id: BlockId,
   section: z.union([sectionKey, z.string().regex(/^doc-[0-9a-f]{8}$/)]),
-  kind: z.enum(["heading", "paragraph", "item", "code", "table", "quote", "diagram"]),
+  kind: z.enum(["heading", "paragraph", "item", "code", "table", "quote", "diagram", "chart"]),
   html: renderedText,
   text: renderedText,
   source: renderedText.optional(),

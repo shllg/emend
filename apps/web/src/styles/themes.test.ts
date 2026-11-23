@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { DEFAULT_THEME_FONTS, THEME_SCALE_STEPS, THEME_TOKENS } from "@emend/contract";
 import { expect, test } from "vitest";
 import { DARK_THEME, LIGHT_THEME } from "../../../../packages/core/src/theme/bases.ts";
+import { parseThemeColor, themeColorHex } from "../../../../packages/core/src/theme/color.ts";
 
 const css = readFileSync(new URL("./colors.css", import.meta.url), "utf8");
 function block(pattern: RegExp): Record<string, string> {
@@ -47,4 +48,16 @@ test("default theme fonts match the first family in typography.css", () => {
     text: /--font-sans:\s*"([^"]+)"/.exec(typography)?.[1],
     code: /--font-mono:\s*"([^"]+)"/.exec(typography)?.[1],
   });
+});
+
+test.each([
+  [light, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]],
+  [systemDark, ["#3987e5", "#d95926", "#199e70", "#c98500"]],
+  [explicitDark, ["#3987e5", "#d95926", "#199e70", "#c98500"]],
+] as const)("uses the chart palette in theme %#", (theme, expected) => {
+  const palette = [1, 2, 3, 4].map((index) => {
+    const color = parseThemeColor(theme[`chart-${index}`]);
+    return color && themeColorHex(color.rgba);
+  });
+  expect(palette).toEqual(expected);
 });

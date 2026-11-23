@@ -3841,3 +3841,13 @@ test.each([1, 2])(
     }
   },
 );
+
+test("downloads keep a chart's escaped source in a labelled figure", async () => {
+  const source = '{"type":"sparkline","series":[{"name":"<svg onload=bad()>","values":[2,1]}]}';
+  const html = await render([{ ...block(""), kind: "chart", source }]);
+  const figure = parsed(html).find((el) => el.tagName === "figure");
+  expect(figure?.properties.className).toEqual(["em-diagram"]);
+  expect(hastText(figure as Element)).toBe(`Chart${source}`);
+  expect(html).toContain("<figcaption>Chart</figcaption><pre><code>");
+  expect(html).not.toContain("<svg onload");
+});

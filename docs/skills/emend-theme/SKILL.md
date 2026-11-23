@@ -446,6 +446,10 @@ A downloaded HTML doc keeps its own styles and gets no theme colours.
 | `fg-reading` | Body text in Markdown docs and writeups. Also body text in the offline Download. |
 | `fg-reading-muted` | Quiet and muted writeup sections. Also metadata and muted text in the offline Download. |
 | `fg-reading-strong` | Reading headings, strong text, inline code and comment text. Also strong text and plain code text in the offline Download. |
+| `chart-1` | Fill and stroke for chart series 1. |
+| `chart-2` | Fill and stroke for chart series 2. |
+| `chart-3` | Fill and stroke for chart series 3. |
+| `chart-4` | Fill and stroke for chart series 4. |
 
 ### Accent
 

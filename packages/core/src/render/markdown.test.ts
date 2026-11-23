@@ -331,3 +331,57 @@ test("code spans preserve the theme's italic and bold styles", async () => {
   expect(blocks[1]?.html).toContain("font-weight:bold");
   expect(blocks[1]?.html).toContain("font-style:italic");
 });
+
+const chartSource = JSON.stringify({
+  type: "bar",
+  title: "<script>alert(1)</script>",
+  unit: "<x>",
+  labels: ["<img src=x onerror=alert(1)>", "javascript:alert(1)"],
+  series: [{ name: "<svg onload=alert(1)>", values: [2, 1] }],
+});
+
+test("a chart fence and raw code element keep the exact source outside block HTML", async () => {
+  const escaped = chartSource.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  for (const markdown of [
+    `\`\`\`chart\n${chartSource}\n\`\`\``,
+    `<pre><code class="language-chart">${escaped}</code></pre>`,
+  ]) {
+    const blocks = await render(markdown);
+    expect(blocks).toMatchObject([
+      {
+        id: `overview-${await blockHash(normalizeText(chartSource))}`,
+        kind: "chart",
+        source: chartSource,
+        text: chartSource,
+        html: "",
+      },
+    ]);
+  }
+  const both = await render(`<pre><code class="language-chart language-mermaid">${escaped}</code></pre>`);
+  expect(both).toMatchObject([{ kind: "diagram", source: chartSource }]);
+});
+
+test.each([chartSource.slice(1), chartSource.replace("[2,1]", "[2,-1]")])(
+  "invalid chart source stays visible as escaped code (%#)",
+  async (source) => {
+    const blocks = await render(`\`\`\`chart\n${source}\n\`\`\``);
+    expect(blocks).toMatchObject([{ kind: "code" }]);
+    const html = blocks[0]?.html ?? "";
+    expect(html).toContain("<code");
+    expect(html).not.toMatch(/<(script|img|svg)/i);
+    expect(blockText(html)).toBe(`${source}\n`);
+  },
+);
+
+test("a chart in a list splits the item around the source", async () => {
+  const blocks = await render(`- Start\n\n  \`\`\`chart\n  ${chartSource}\n  \`\`\`\n\n  End`);
+  expect(blocks.map(({ kind }) => kind)).toEqual(["item", "chart", "item"]);
+  expect(blocks[1]).toMatchObject({ source: chartSource, html: "" });
+  expect(blocks.map(({ html }) => html).join("")).not.toMatch(/<script|onerror|onload|<svg/i);
+});
+
+test("an empty chart spec still shows a code block", async () => {
+  const blocks = await render("```chart\n```");
+  expect(blocks).toMatchObject([{ kind: "code" }]);
+  expect(blocks[0]?.html).toContain("<pre><code");
+});

@@ -5,7 +5,12 @@ let graphemes: Intl.Segmenter | undefined;
 
 /** Read-only mapping from normalized UTF-16 offsets to the original text nodes. */
 export function mapBlockText(block: HTMLElement) {
-  if (block.dataset.blockKind === "diagram" || block.dataset.blockText === undefined) return;
+  if (
+    block.dataset.blockKind === "diagram" ||
+    block.dataset.blockKind === "chart" ||
+    block.dataset.blockText === undefined
+  )
+    return;
   const nodes: TextRun[] = [];
   const walker = block.ownerDocument.createTreeWalker(block, NodeFilter.SHOW_TEXT);
   let raw = "";

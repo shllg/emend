@@ -89,6 +89,16 @@ test("review views validate their states, limits, rendered blocks and doc varian
   expect(
     contract.RenderedBlock.safeParse({ id: "bad", section: "overview", kind: "script", html: "", text: "" }).success,
   ).toBe(false);
+  expect(
+    contract.RenderedBlock.safeParse({
+      id: "overview-12345678",
+      section: "overview",
+      kind: "chart",
+      html: "",
+      text: "{}",
+      source: "{}",
+    }).success,
+  ).toBe(true);
   const revision = {
     seq: 1,
     base: null,

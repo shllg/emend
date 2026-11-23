@@ -120,9 +120,11 @@ test.each([
   [0, Infinity],
 ])("rejects invalid offsets %s..%s", (start, end) => expect(mapBlockText(block("seed"))?.(start, end)).toBeUndefined());
 
-test("skips empty text and diagram blocks even when their fallback text matches", () => {
+test("skips empty text, diagrams and charts even when their fallback text matches", () => {
   expect(mapBlockText(block(" \n "))?.(0, 1)).toBeUndefined();
   const node = block("graph TD; A-->B");
-  node.dataset.blockKind = "diagram";
-  expect(mapBlockText(node)).toBeUndefined();
+  for (const kind of ["diagram", "chart"]) {
+    node.dataset.blockKind = kind;
+    expect(mapBlockText(node)).toBeUndefined();
+  }
 });

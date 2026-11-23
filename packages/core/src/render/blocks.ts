@@ -7,7 +7,7 @@ import { normalizeText } from "./normalize.ts";
 export type Block = {
   id: BlockId;
   section: string;
-  kind: "heading" | "paragraph" | "item" | "code" | "table" | "quote" | "diagram";
+  kind: "heading" | "paragraph" | "item" | "code" | "table" | "quote" | "diagram" | "chart";
   html: string;
   text: string;
   source?: string;
@@ -29,6 +29,7 @@ export type HtmlNode = HtmlRoot | HtmlRoot["children"][number];
 
 type RenderData = NonNullable<HtmlElement["data"]> & {
   emendDiagram?: string;
+  emendChart?: boolean;
   emendClasses?: string[];
   emendFootnoteMarker?: boolean;
   /** The doc's glossary list: terms are never marked inside it. */
@@ -43,6 +44,12 @@ type RenderData = NonNullable<HtmlElement["data"]> & {
 export function renderData(element: HtmlElement): RenderData {
   element.data ??= { position: {} };
   return element.data as RenderData;
+}
+
+export function fenceCode(node: HtmlNode): HtmlElement | undefined {
+  if (node.type !== "element" || node.tagName !== "pre") return;
+  const code = node.children[0];
+  if (code?.type === "element" && code.tagName === "code") return code;
 }
 
 export function blockText(html: string): string {
@@ -125,10 +132,14 @@ function* divideAtDiagrams(node: HtmlElement): Generator<HtmlElement> {
   if (hasContent(children)) yield { ...node, children };
 }
 
+function diagramFragment(node: HtmlElement): Fragment | undefined {
+  const { emendDiagram: source, emendChart } = renderData(node);
+  if (source !== undefined) return { kind: emendChart ? "chart" : "diagram", node, source };
+}
+
 function* atomicBlock(kind: Block["kind"], node: HtmlElement): Generator<Fragment> {
   for (const piece of divideAtDiagrams(node)) {
-    const source = renderData(piece).emendDiagram;
-    yield source === undefined ? { kind, node: piece } : { kind: "diagram", node: piece, source };
+    yield diagramFragment(piece) ?? { kind, node: piece };
   }
 }
 
@@ -166,7 +177,7 @@ function blockKind(tag: string): Block["kind"] {
 
 function* strayListContent(children: HtmlRoot["children"], depth: number): Generator<Fragment> {
   for (const fragment of splitChildren(children, depth)) {
-    yield fragment.kind === "diagram" ? fragment : { ...fragment, kind: "paragraph" };
+    yield fragment.source !== undefined ? fragment : { ...fragment, kind: "paragraph" };
   }
 }
 
@@ -176,9 +187,9 @@ function* splitBlocks(node: HtmlNode, depth = 0): Generator<Fragment> {
     return;
   }
   if (node.type !== "element") return;
-  const source = renderData(node).emendDiagram;
-  if (source !== undefined) {
-    yield { kind: "diagram", node, source };
+  const diagram = diagramFragment(node);
+  if (diagram) {
+    yield diagram;
     return;
   }
   const tag = node.tagName;
@@ -202,7 +213,7 @@ function* splitBlocks(node: HtmlNode, depth = 0): Generator<Fragment> {
       const properties = { ...node.properties };
       if (tag === "ol") properties.start = ordinal++;
       for (const fragment of atomicBlock("item", child)) {
-        if (fragment.kind === "diagram") yield fragment;
+        if (fragment.source !== undefined) yield fragment;
         else if (fragment.node.type === "element") {
           yield { ...fragment, node: { ...node, properties, children: [fragment.node] } };
         }
@@ -267,10 +278,14 @@ export async function blocksFromTree(
   });
   const occurrences = new Map<string, number>();
   const append = async ({ kind, node, source }: Fragment) => {
-    let html = kind === "diagram" ? "" : stringifyBlock(node, stringify);
-    // Diagrams have no HTML; their source is the text of the whole commentable block.
+    let html = source !== undefined ? "" : stringifyBlock(node, stringify);
+    // Diagrams and charts have no HTML; their source is the text of the whole commentable block.
     const text = source ?? blockText(html);
-    if (kind !== "diagram" && normalizeText(text) === "") return;
+    if (source === undefined && normalizeText(text) === "") {
+      // Even an empty chart spec has a visible code fallback.
+      const classes = fenceCode(node)?.properties.className;
+      if (!Array.isArray(classes) || !classes.includes("language-chart")) return;
+    }
     const hash = await blockHash(normalizeText(source ?? identityText(node)));
     const count = (occurrences.get(hash) ?? 0) + 1;
     occurrences.set(hash, count);

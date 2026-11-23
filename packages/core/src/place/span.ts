@@ -47,7 +47,7 @@ export function placeTextSpan<B extends Pick<Block, "id" | "text"> & { kind?: Bl
   const same = blocks.find((block) => block.id === target.blockId);
   if (same) {
     const text = normalizeText(same.text);
-    if (same.kind === "diagram") return placed(same, { start: 0, end: text.length });
+    if (same.kind === "diagram" || same.kind === "chart") return placed(same, { start: 0, end: text.length });
     const occurrences = spanCandidates(text, target, false);
     const candidates = occurrences.length === 1 ? occurrences : spanCandidates(text, target);
     if (candidates.length === 1 && candidates[0]) return placed(same, candidates[0]);

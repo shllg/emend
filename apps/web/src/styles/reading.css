@@ -540,6 +540,93 @@
     border-radius: 12px;
     padding: 16px 20px;
   }
+
+  .em-chart svg {
+    display: block;
+  }
+  .em-chart-s1 {
+    --em-series: var(--chart-1);
+  }
+  .em-chart-s2 {
+    --em-series: var(--chart-2);
+  }
+  .em-chart-s3 {
+    --em-series: var(--chart-3);
+  }
+  .em-chart-s4 {
+    --em-series: var(--chart-4);
+  }
+  .em-chart path,
+  .em-chart-end {
+    fill: var(--em-series);
+  }
+  .em-chart-line {
+    fill: none;
+    stroke: var(--em-series);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .em-chart-end {
+    stroke: var(--bg-sunken);
+    stroke-width: 2;
+  }
+  .em-chart-point {
+    fill: transparent;
+  }
+  .em-chart-rule {
+    stroke: var(--border-1);
+    stroke-width: 1;
+  }
+  .em-chart-heading {
+    fill: var(--fg-2);
+    font-size: 13px;
+  }
+  .em-chart-value {
+    fill: var(--fg-2);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .em-chart-axis {
+    fill: var(--fg-3);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .em-chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    list-style: none;
+    padding: 0;
+    color: var(--fg-2);
+    font-size: 13px;
+  }
+  .em-chart-legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .em-chart-legend span {
+    width: 10px;
+    height: 10px;
+    flex-shrink: 0;
+    border-radius: 2px;
+    background: var(--em-series);
+  }
+  .em-chart table {
+    margin-top: 6px;
+    border-collapse: collapse;
+    color: var(--fg-2);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .em-chart :is(th, td) {
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border-1);
+    text-align: start;
+    overflow-wrap: anywhere;
+  }
+
   .em-writeup-news {
     --reading-inset: 23px;
     min-width: 0;
