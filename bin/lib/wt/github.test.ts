@@ -1022,7 +1022,7 @@ test("pr merge needs the original approved commit locally to compare the change"
   }));
 
 for (const changed of [false, true]) {
-  test(`pr merge checks the approved change after a rebase (changed: ${changed})`, () =>
+  test(`pr merge checks the approved change after a rebase despite replace refs (changed: ${changed})`, () =>
     scenario(async (ctx) => {
       const { main } = ctx.fx;
       const approved = commitFile(main, "feature.txt", "reviewed\n");
@@ -1035,6 +1035,8 @@ for (const changed of [false, true]) {
       headSha = gitIn(main, "rev-parse", "HEAD");
       assert.notEqual(headSha, approved);
       gitIn(main, "push", "-q", "origin", `${headSha}:refs/pull/7/head`);
+      // A local history graft hides the merge base from a replacement-aware diff.
+      gitIn(main, "replace", "--graft", approved);
       installFake(ctx.env, "gh", mergeOkRules());
       installFakeEmend(ctx.env, approved, [approvedReview(BRANCH, approved)]);
       const invoke = () =>

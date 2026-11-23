@@ -464,7 +464,8 @@ for (const supported of [true, false])
     test(`R3.3/R4.11: ${failure} diagnostics use protected Git command sequences (lazy-fetch pin ${supported})`, (t) => {
       t.mock.method(gitRuntime, "supportsNoLazyFetch", () => supported);
       const env = failure === "commit-tree" ? makeTestEnv({ ports: false }) : undefined;
-      const mainRoot = env?.home ?? "/synthetic-unused";
+      const mainRoot = env ? join(env.home, "repo") : "/synthetic-unused";
+      if (env) mkdirSync(mainRoot, { recursive: true });
       const repo = { mainRoot, commonDir: join(mainRoot, ".git") } as Repo;
       const old = "a".repeat(40),
         target = "b".repeat(40);

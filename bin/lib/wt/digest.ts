@@ -11,6 +11,7 @@ export function changeDigest(repo: Repo, base: string, head: string): string {
   const diff = git(
     repo,
     [
+      "--no-replace-objects",
       "diff",
       "--unified=3",
       "--binary",

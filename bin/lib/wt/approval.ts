@@ -1,8 +1,8 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { stripVTControlCharacters } from "node:util";
+import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CommandTable } from "./command.ts";
+import { repoDiagnostic } from "./diagnostics.ts";
 import { run } from "./proc.ts";
 import { git, linkedTop, type Repo } from "./repo.ts";
 import { commitSha, parseFlags, WtError } from "./validate.ts";
@@ -40,9 +40,10 @@ export function emendProgram(repo: Repo): string {
     } catch {
       continue;
     }
+    // This catches an emend copy in the repository. A wrapper can still dispatch elsewhere.
     if (inside(root, real)) {
       throw new WtError(
-        1,
+        69,
         "The emend program lies inside this repository. bin/wt reads approvals only through an installed emend.",
       );
     }
@@ -67,10 +68,21 @@ function realpathInside(root: string, path: string): boolean {
 }
 
 export function assertEmendEnv(repo: Repo): void {
+  // Mirror stateDir and configDir in apps/emend/src/state/paths.ts.
+  const home = homedir();
+  const { EMEND_HOME, XDG_DATA_HOME, XDG_CONFIG_HOME } = process.env;
+  if (EMEND_HOME && !isAbsolute(EMEND_HOME)) throw new WtError(69, "EMEND_HOME must be an absolute path.");
+  const dataHome = XDG_DATA_HOME && isAbsolute(XDG_DATA_HOME) ? XDG_DATA_HOME : join(home, ".local", "share");
+  const configHome = XDG_CONFIG_HOME && isAbsolute(XDG_CONFIG_HOME) ? XDG_CONFIG_HOME : join(home, ".config");
+  const state =
+    EMEND_HOME ||
+    (process.platform === "darwin" ? join(home, "Library", "Application Support", "emend") : join(dataHome, "emend"));
   const root = realpathSync.native(repo.mainRoot);
-  for (const name of ["EMEND_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"]) {
-    const path = process.env[name];
-    if (!path || !isAbsolute(path)) continue;
+  for (const [name, path] of [
+    ["home", home],
+    ["state", state],
+    ["config", join(configHome, "emend")],
+  ] as const) {
     const resolved = resolve(path);
     if (
       inside(repo.mainRoot, resolved) ||
@@ -78,8 +90,8 @@ export function assertEmendEnv(repo: Repo): void {
       (path !== resolved && realpathInside(root, path))
     ) {
       throw new WtError(
-        1,
-        `${name} points inside this repository. bin/wt reads approvals only from your own emend state.`,
+        69,
+        `emend's ${name} folder lies inside this repository. bin/wt reads approvals only from your own emend state.`,
       );
     }
   }
@@ -160,8 +172,8 @@ export function readApproval(repo: Repo, branch: string, sha: string): Approval 
         `The emend ${source} is too old to report approvals; it needs 0.8.0 or later. Update it, or set EMEND_BIN.`,
       );
     }
-    const first = stripVTControlCharacters(stderr.split("\n", 1)[0] ?? "").replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, "");
-    throw new WtError(69, `emend ls failed: ${first.slice(0, 200)}`);
+    const first = repoDiagnostic(repo, stderr).split("\n", 1)[0] ?? "";
+    throw new WtError(69, `emend ls failed: ${first.slice(0, 200).replaceAll("\t", " ")}`);
   }
 
   const matches = parseReviews(stdout).filter((r) => r.approved?.head === sha || r.newest?.head === sha);

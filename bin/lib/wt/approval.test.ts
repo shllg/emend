@@ -120,7 +120,9 @@ test("approval maps old emend, timeout and other failures to dependency errors",
     installFake(env, "emend", [{ code: 124 }]);
     assert.throws(lookup, { code: 69, message: "emend did not answer within 30 seconds." });
     installFake(env, "emend", [{ code: 1, stderr: `\x1b[31mfailed\x07\t${"x".repeat(210)}\nsecond line\n` }]);
-    assert.throws(lookup, { code: 69, message: `emend ls failed: failed${"x".repeat(194)}` });
+    assert.throws(lookup, { code: 69, message: `emend ls failed: failed ${"x".repeat(193)}` });
+    installFake(env, "emend", [{ code: 1, stderr: `Authorization: Bearer ${"x".repeat(20)}\nsecond line\n` }]);
+    assert.throws(lookup, { code: 69, message: "emend ls failed: [line withheld: secret shape]" });
   }));
 
 test("approval runs the selected shim by its invoked name from HOME and honors EMEND_BIN", () =>
@@ -151,31 +153,78 @@ test("approval refuses executables in the repository, including through a symlin
     for (const override of ["", executable]) {
       process.env.EMEND_BIN = override;
       assert.throws(() => readApproval(repo, branch, sha), {
-        code: 1,
+        code: 69,
         message:
           "The emend program lies inside this repository. bin/wt reads approvals only through an installed emend.",
       });
     }
   }));
 
-test("approval rejects repository state via each absolute environment path or a symlink", () =>
+function folderRefusal(name: string) {
+  return {
+    code: 69,
+    message: `emend's ${name} folder lies inside this repository. bin/wt reads approvals only from your own emend state.`,
+  };
+}
+
+test("approval rejects the effective folders in the repository or under a symlink to it", () =>
   scenario((env, repo) => {
     installFakeEmend(env, sha, [approved]);
     const alias = join(env.root, "alias");
     symlinkSync(repo.mainRoot, alias);
-    for (const name of ["EMEND_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"]) {
+    for (const [name, folder] of [
+      ["EMEND_HOME", "state"],
+      ["XDG_CONFIG_HOME", "config"],
+      ["XDG_DATA_HOME", "state"],
+      ["HOME", "home"],
+    ] as const) {
+      if (name === "XDG_DATA_HOME" && process.platform === "darwin") continue;
       for (const path of [repo.mainRoot, join(repo.worktreesDir, branch, ".wt/home"), alias, join(alias, "new")]) {
         process.env[name] = path;
-        assert.throws(() => readApproval(repo, branch, sha), {
-          code: 1,
-          message: `${name} points inside this repository. bin/wt reads approvals only from your own emend state.`,
-        });
+        assert.throws(() => readApproval(repo, branch, sha), folderRefusal(folder));
       }
       process.env[name] = `${repo.mainRoot}-other`;
       assert.doesNotThrow(() => assertEmendEnv(repo));
       delete process.env[name];
     }
     assert.deepEqual(fakeCalls(env, "emend"), []);
+  }));
+
+test("approval checks the emend child of each XDG folder and honors the state override", () =>
+  scenario((env, repo) => {
+    const xdg = join(env.root, "xdg");
+    mkdirSync(xdg);
+    symlinkSync(repo.mainRoot, join(xdg, "emend"));
+    process.env.XDG_CONFIG_HOME = xdg;
+    assert.throws(() => assertEmendEnv(repo), folderRefusal("config"));
+    delete process.env.XDG_CONFIG_HOME;
+    process.env.XDG_DATA_HOME = xdg;
+    if (process.platform === "darwin") assert.doesNotThrow(() => assertEmendEnv(repo));
+    else assert.throws(() => assertEmendEnv(repo), folderRefusal("state"));
+    process.env.EMEND_HOME = join(env.home, "state");
+    assert.doesNotThrow(() => assertEmendEnv(repo));
+    process.env.EMEND_HOME = "relative";
+    assert.throws(() => assertEmendEnv(repo), { code: 69, message: "EMEND_HOME must be an absolute path." });
+  }));
+
+test("approval checks the home defaults when XDG settings are missing or relative", () =>
+  scenario((env, repo) => {
+    const config = join(env.home, ".config");
+    mkdirSync(config);
+    symlinkSync(repo.mainRoot, join(config, "emend"));
+    assert.throws(() => assertEmendEnv(repo), folderRefusal("config"));
+    process.env.XDG_CONFIG_HOME = "relative";
+    assert.throws(() => assertEmendEnv(repo), folderRefusal("config"));
+    process.env.XDG_CONFIG_HOME = env.root;
+    const data =
+      process.platform === "darwin"
+        ? join(env.home, "Library", "Application Support")
+        : join(env.home, ".local", "share");
+    mkdirSync(data, { recursive: true });
+    symlinkSync(repo.mainRoot, join(data, "emend"));
+    assert.throws(() => assertEmendEnv(repo), folderRefusal("state"));
+    process.env.XDG_DATA_HOME = "relative";
+    assert.throws(() => assertEmendEnv(repo), folderRefusal("state"));
   }));
 
 test("approval command checks HEAD or an explicit head in a linked worktree", async () => {

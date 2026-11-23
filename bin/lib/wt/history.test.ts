@@ -920,7 +920,7 @@ test("land refuses an unapproved head before writing backup refs or a commit", (
   }));
 
 for (const changed of [false, true]) {
-  test(`land checks the approved change after a rebase (changed: ${changed})`, () =>
+  test(`land checks the approved change after a rebase despite replace refs (changed: ${changed})`, () =>
     scenario(async ({ env, fx, repo }) => {
       const wt = worktree(repo, "feat-a");
       const approved = commitFile(wt, "feature.txt", "reviewed\n");
@@ -930,6 +930,7 @@ for (const changed of [false, true]) {
       if (changed) commitFile(wt, "extra.txt", "extra change\n");
       const head = gitIn(wt, "rev-parse", "HEAD");
       assert.notEqual(head, approved);
+      gitIn(wt, "replace", "--graft", approved);
       const invoke = () =>
         commands.land?.({
           repo: resolveRepo(wt),
@@ -1099,18 +1100,21 @@ test("digest: the same edit in an identical block of another function changes it
     assert.notEqual(digestOf("alpha"), digestOf("beta"));
   }));
 
-test("digest --head hashes the given commit, not the local HEAD", () =>
+test("digest --head and the default HEAD hash the original commit objects", () =>
   scenario(async ({ repo }) => {
     const wt = worktree(repo, "feat-a");
     const wtRepo = resolveRepo(wt);
     const first = commitFile(wt, "a.txt", "a\n");
     const atFirst = changeDigest(wtRepo, "origin/main", "HEAD");
-    commitFile(wt, "b.txt", "b\n");
-    assert.notEqual(changeDigest(wtRepo, "origin/main", "HEAD"), atFirst);
+    const second = commitFile(wt, "b.txt", "b\n");
+    const atSecond = changeDigest(wtRepo, "origin/main", "HEAD");
+    assert.notEqual(atSecond, atFirst);
+    gitIn(wt, "replace", second, first);
+    assert.equal(changeDigest(wtRepo, "origin/main", "HEAD"), atSecond);
     const out = await capture(() => commands.digest?.({ repo: wtRepo, args: ["--head", first] }));
     assert.equal(out, `${atFirst}\n`);
     const dflt = await capture(() => commands.digest?.({ repo: wtRepo, args: [] }));
-    assert.equal(dflt, `${changeDigest(wtRepo, "origin/main", "HEAD")}\n`);
+    assert.equal(dflt, `${atSecond}\n`);
     expectCode(() => commands.digest?.({ repo: wtRepo, args: ["--head", "-x"] }), 2);
   }));
 

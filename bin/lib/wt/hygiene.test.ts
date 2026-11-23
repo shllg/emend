@@ -102,3 +102,20 @@ test("every lifecycle skill exists with a matching name and a description", () =
     assert.match(front, /^description: \S/m, `${name}: description missing`);
   }
 });
+
+test("the merge skill checks the approved review for late feedback before restarting the gates", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
+  const readiness = skill.slice(skill.indexOf("## 2. Readiness"), skill.indexOf("## 3. The approval"));
+  const approval = readiness.indexOf("<main>/bin/wt approval --head <head>");
+  const tracked = readiness.indexOf("git ls-files -- .wt");
+  const fetch = readiness.indexOf('emend feedback <review-id> --save "<top>/.wt/review"');
+  assert.ok(approval >= 0 && approval < tracked && tracked < fetch);
+  const lookup = readiness.slice(approval, tracked);
+  assert.match(lookup, /retained approved head/);
+  assert.match(lookup, /Exit 1[^\n]*step 3/);
+  assert.match(lookup, /exit 2 or 69[^\n]*notify blocked[^\n]*stop/i);
+  assert.match(lookup, /approved <sha> review <id> revision <n>/);
+  assert.match(readiness.slice(tracked, fetch), /Read the hand-off[\s\S]*notify blocked[^\n]*stop/);
+  assert.match(readiness.slice(fetch), /non-zero exit[\s\S]*notify blocked[^\n]*stop/);
+  assert.match(skill, /Any other change from READY[^\n]*stops the merge[^\n]*e-pr-finalize/);
+});
