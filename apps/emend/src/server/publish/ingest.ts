@@ -592,6 +592,8 @@ async function computePublish(
                 ? ((docViewOf(file) === "source" ? sourceMetadata : metadata).get(file.path)?.headings ?? null)
                 : null,
             parts: htmlDoc ? (metadata.get(file.path)?.parts ?? null) : null,
+            terms:
+              file.role === "doc" && docViewOf(file) !== "source" ? (metadata.get(file.path)?.terms ?? null) : null,
             look,
             colorScheme,
             renderedBlob:

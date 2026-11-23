@@ -31,6 +31,10 @@ type RenderData = NonNullable<HtmlElement["data"]> & {
   emendDiagram?: string;
   emendClasses?: string[];
   emendFootnoteMarker?: boolean;
+  /** The doc's glossary list: terms are never marked inside it. */
+  emendGlossary?: boolean;
+  /** A glossary list item, numbered like the entries the doc's glossary yielded. */
+  emendGlossaryItem?: number;
   emendMedia?: string;
   emendMediaPath?: string;
   emendUnlistedMediaPath?: string;
@@ -83,6 +87,8 @@ export function hasBlockChildren(node: HtmlNode): boolean {
     node.children.some((child) => child.type === "element" && (blockTags.has(child.tagName) || hasBlockChildren(child)))
   );
 }
+
+const isElement = (node: HtmlRoot["children"][number]): node is HtmlElement => node.type === "element";
 
 function isDiagram(node: HtmlNode): boolean {
   return node.type === "element" && renderData(node).emendDiagram !== undefined;
@@ -250,6 +256,8 @@ export async function blocksFromTree(
   tree: HtmlRoot,
   section: string,
   stringify: (node: HtmlNode) => string,
+  /** Receives the first block cut from each glossary list item, by the item's number. */
+  itemIds?: Map<number, BlockId>,
 ): Promise<Block[]> {
   const blocks: Block[] = [];
   const elementIds = new Map<string, number>();
@@ -282,8 +290,15 @@ export async function blocksFromTree(
         node.properties.id = `heading-${hash}${count === 1 ? "" : `-${count}`}`;
       html = stringifyBlock(node, stringify);
     }
+    const id = sectionBlockId(section, `${hash}${count === 1 ? "" : `-${count}`}`) as BlockId;
+    if (itemIds && node.type === "element") {
+      // A list wrapper holds the item; pieces cut at a diagram keep the item's data.
+      const item = renderData(node).emendGlossaryItem === undefined ? node.children.find(isElement) : node;
+      const number = item ? renderData(item).emendGlossaryItem : undefined;
+      if (number !== undefined && !itemIds.has(number)) itemIds.set(number, id);
+    }
     blocks.push({
-      id: sectionBlockId(section, `${hash}${count === 1 ? "" : `-${count}`}`),
+      id,
       section,
       kind,
       html,

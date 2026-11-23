@@ -64,7 +64,7 @@ test.each(["Orchard", ".git", null])(
 
 test("export rows keep doc titles but omit recomputable headings", async () => {
   const fixture = await directFixture();
-  await writeFile(join(fixture.source, "plan.md"), "# Named\n\n## Part");
+  await writeFile(join(fixture.source, "plan.md"), "# Named\n\n## Part\n\n## Glossary\n\n- **Part:** A piece.\n");
   const { result } = await fixture.publish();
   const server = await fixture.reviewer();
   expect(
@@ -87,6 +87,9 @@ test("export rows keep doc titles but omit recomputable headings", async () => {
   expect(exported.bundle.files[0]?.title).toBe("Named");
   expect(exported.bundle.files[0]).not.toHaveProperty("headings");
   expect(JSON.parse(exported.json).files[0]).not.toHaveProperty("headings");
+  // Glossary terms are recomputed on import too, so they never travel in the bundle.
+  expect(exported.bundle.files[0]).not.toHaveProperty("terms");
+  expect(JSON.parse(exported.json).files[0]).not.toHaveProperty("terms");
 });
 
 test("export carries stored HTML appearance and explicit nulls for every other file row", async () => {

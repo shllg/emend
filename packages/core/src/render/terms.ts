@@ -170,6 +170,7 @@ export function markTerms() {
       if (node.type === "element") {
         if (
           skipped.has(node.tagName) ||
+          renderData(node).emendGlossary === true ||
           renderData(node).emendMedia !== undefined ||
           renderData(node).emendDiagram !== undefined ||
           (Array.isArray(node.properties.className) &&

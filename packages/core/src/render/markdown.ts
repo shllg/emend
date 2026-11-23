@@ -1,4 +1,4 @@
-import { BlockId, LIMITS } from "@emend/contract";
+import { BlockId, type GlossaryTerm, LIMITS, normalizeGlossaryForm } from "@emend/contract";
 import rehypeShiki from "@shikijs/rehype/core";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeRaw from "rehype-raw";
@@ -11,6 +11,7 @@ import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
 import { type Block, blocksFromTree, type HtmlRoot, renderData, visitElements } from "./blocks.ts";
 import { markCallouts } from "./callouts.ts";
+import { type DocGlossaryEntry, docGlossary } from "./doc-glossary.ts";
 import { exampleRows } from "./example-rows.ts";
 import { blockHash } from "./hash.ts";
 import { HIGHLIGHT_LINE_CHARS, type HighlightBudget, limitHighlighting } from "./highlight.ts";
@@ -35,6 +36,8 @@ export type RenderEffects = {
   docPathUsed?: boolean;
   /** Normalized local image paths without declared media, in first-seen order. */
   unlistedMedia?: Set<string>;
+  /** The terms of a doc's own glossary, in marking order; set only when the doc declares one. */
+  terms?: GlossaryTerm[];
 };
 
 function isolateDiagrams() {
@@ -120,6 +123,7 @@ async function createProcessor() {
   return sanitizedPipeline()
     .use(exampleRows)
     .use(isolateDiagrams)
+    .use(docGlossary)
     .use(markTerms)
     .use(limitHighlighting, highlighter.getLoadedLanguages())
     .use(rehypeShiki, highlighter, {
@@ -153,7 +157,7 @@ export async function renderMarkdownWithBudget(
   effects?: RenderEffects,
   mediaSizes?: ReadonlyMap<string, MediaSize>,
   terms?: TermMatcher,
-  options?: { exampleRows?: boolean },
+  options?: { exampleRows?: boolean; docGlossary?: boolean },
 ): Promise<Block[]> {
   // Check even an empty document: every emitted id must satisfy the contract.
   BlockId.parse(`${section}-00000000`);
@@ -171,6 +175,8 @@ export async function renderMarkdownWithBudget(
     mediaSizes,
     terms,
     exampleRows: options?.exampleRows,
+    docGlossary: options?.docGlossary,
+    docGlossaryEntries: undefined as DocGlossaryEntry[] | undefined,
     docs,
     docBase,
     docBaseUsed: false,
@@ -192,9 +198,25 @@ export async function renderMarkdownWithBudget(
         effects.unlistedMedia.add(path);
       }
     });
-  return blocksFromTree(tree, section, (node) =>
-    processor.stringify(node.type === "root" ? node : { type: "root", children: [node] }),
+  const itemIds = data.docGlossaryEntries ? new Map<number, BlockId>() : undefined;
+  const blocks = await blocksFromTree(
+    tree,
+    section,
+    (node) => processor.stringify(node.type === "root" ? node : { type: "root", children: [node] }),
+    itemIds,
   );
+  if (effects && data.docGlossaryEntries) {
+    // The marks carry the entry's number, so the list keeps every entry. An item always yields a block
+    // (its text is nonblank); the first block is only a guard for that invariant.
+    const fallback = blocks[0]?.id;
+    effects.terms = data.docGlossaryEntries.flatMap((entry, index) => {
+      const blockId = itemIds?.get(index) ?? fallback;
+      return blockId === undefined
+        ? []
+        : [{ term: normalizeGlossaryForm(entry.term), definition: entry.definition, blockId }];
+    });
+  }
+  return blocks;
 }
 
 // Comments need no highlighter or diagram frames: fences stay plain code, and loading Shiki is skipped.
@@ -233,6 +255,8 @@ export async function renderDoc(
     path,
     effects,
     mediaSizes,
+    undefined,
+    { docGlossary: true },
   );
 }
 

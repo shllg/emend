@@ -346,5 +346,13 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
       "ALTER TABLE `reviews` ADD `intent_review_id` text;",
       "CREATE INDEX `reviews_owner_intent_idx` ON `reviews` (`owner_id`,`intent_review_id`);"
     ]
+  },
+  {
+    "tag": "0028_doc_terms",
+    "when": 1795398928018,
+    "hash": "4f04c6e2e931273f6910933985d79acdc6bb10e1da29d1acb96f5dbc20eecf52",
+    "statements": [
+      "ALTER TABLE `files` ADD `terms` text;"
+    ]
   }
 ];

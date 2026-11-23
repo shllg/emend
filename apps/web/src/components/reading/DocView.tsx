@@ -18,6 +18,7 @@ import { docTldrRange } from "../../lib/doc-tldr.ts";
 import { docKey, docView, threadOnDoc } from "../../lib/doc-view.ts";
 import type { DocNavigation, HtmlPosition } from "../../lib/frame-messages.ts";
 import { useLayout } from "../../lib/layout.ts";
+import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { focusReadingTarget } from "../../lib/reading-focus.ts";
 import { readingPositionKey } from "../../lib/reading-position.ts";
 import type { ReadingEntry } from "../../lib/use-reading-trail.ts";
@@ -27,6 +28,7 @@ import { Icon } from "../ui/Icon.tsx";
 import { BlockReader, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { DashOutline } from "./DashOutline.tsx";
 import { DocContents, useCurrentHeading } from "./DocContents.tsx";
+import { GlossaryTerms } from "./GlossaryTerms.tsx";
 import { HtmlDocFrame, type HtmlNavigation } from "./HtmlDocFrame.tsx";
 import { ReadingMenu } from "./ReadingMenu.tsx";
 import { SourceView } from "./SourceView.tsx";
@@ -66,6 +68,18 @@ export function DocView({
   const phone = useLayout() === "phone";
   const root = useRef<HTMLDivElement>(null);
   const bar = useRef<HTMLDivElement>(null);
+  // Only the open Markdown doc's rendered blocks (and the contents rail) live in the body.
+  const body = useRef<HTMLDivElement>(null);
+  const readOnly = useReadOnlyReview();
+  const blockHref = (path: string, blockId: string) => {
+    if (readOnly) return `#block-${blockId}`;
+    const params = new URLSearchParams();
+    if (search.rev !== undefined) params.set("rev", String(search.rev));
+    params.set("tab", "docs");
+    params.set("doc", path);
+    if (search.view !== undefined) params.set("view", String(search.view));
+    return `/r/${encodeURIComponent(props.reviewId)}?${params}#block-${blockId}`;
+  };
   useEffect(() => {
     const element = bar.current;
     if (!element || !openDoc?.path) return;
@@ -364,7 +378,7 @@ export function DocView({
           </p>
         )}
       </div>
-      <div className="em-doc-body" data-reading-doc={openDoc.path}>
+      <div ref={body} className="em-doc-body" data-reading-doc={openDoc.path}>
         {openDoc.kind === "source" ? (
           <SourceView key={docKey(openDoc)} {...props} doc={openDoc} />
         ) : openDoc.kind === "html" ? (
@@ -383,6 +397,10 @@ export function DocView({
           </aside>
         )}
       </div>
+      {/* After the body, so its ref is set when the card's layout effect reads it. */}
+      {openDoc.kind === "markdown" && (
+        <GlossaryTerms root={body} terms={openDoc.terms} href={(blockId) => blockHref(openDoc.path, blockId)} />
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import {
   type DocHeading,
+  type GlossaryTerm,
   type Placement,
   type PlacementLocation,
   type PublishLinks,
@@ -96,7 +97,7 @@ export type Work =
       media?: [string, string][];
       mediaSizes?: [string, ImageSize][];
     }
-  | { kind: "resection"; path: string; bytes: ArrayBuffer }
+  | { kind: "resection"; path: string; bytes: ArrayBuffer; terms?: GlossaryTerm[] }
   | { kind: "comment-md"; bodies: string[]; repoUrl?: string }
   | { kind: "code-colours"; page: string }
   | { kind: "changed"; previous: { format: "writeup" | "doc" | "ids"; bytes: ArrayBuffer }[]; next: ArrayBuffer[] }
@@ -123,6 +124,8 @@ export type Work =
 export type DocMetadata = {
   title?: string;
   headings: DocHeading[];
+  /** A Markdown doc's own glossary, set once the doc is rendered. */
+  terms?: GlossaryTerm[];
   parts?: string[];
   look?: HtmlLook;
   // Look before emend became the default; only for import rows from exporters that send no look.
@@ -150,6 +153,8 @@ export type RenderedBytes = {
   count: number;
   pathDependent?: boolean;
   selfDependent?: boolean;
+  /** A Markdown doc's own glossary terms, with block ids that belong to `bytes`. */
+  terms?: GlossaryTerm[];
 };
 const decode = (bytes: ArrayBuffer) => new TextDecoder().decode(bytes);
 const parse = (bytes: ArrayBuffer, format: "writeup" | "doc"): Block[] => {
@@ -289,7 +294,7 @@ export const executeWork: Executor = async (work) => {
     };
   }
   if (work.kind === "doc") {
-    const effects: { docBaseUsed?: boolean; docPathUsed?: boolean } = {};
+    const effects: RenderEffects = {};
     const blocks = await renderDoc(
       decode(work.source),
       work.path,
@@ -303,6 +308,7 @@ export const executeWork: Executor = async (work) => {
       kind: "doc",
       ...serializeRendered(blocks, effects.docBaseUsed),
       selfDependent: effects.docPathUsed,
+      ...(effects.terms?.length ? { terms: effects.terms } : {}),
     };
   }
   if (work.kind === "code-colours") return { kind: "code-colours", colours: await htmlCodeColours(work.page) };
@@ -316,11 +322,21 @@ export const executeWork: Executor = async (work) => {
     }
     return { kind: "comment-md", html };
   }
-  if (work.kind === "resection")
+  if (work.kind === "resection") {
+    const before = parse(work.bytes, "doc");
+    const after = resectionBlocks(before, `doc-${await blockHash(work.path)}`);
+    // Block ids change with the section, so the terms follow their blocks by position.
+    const moved = new Map(before.map((block, index) => [block.id as string, after[index]?.id as string]));
+    const terms = (work.terms ?? []).flatMap((term) => {
+      const blockId = moved.get(term.blockId);
+      return blockId === undefined ? [] : [{ ...term, blockId }];
+    });
     return {
       kind: "doc",
-      ...serializeRendered(resectionBlocks(parse(work.bytes, "doc"), `doc-${await blockHash(work.path)}`)),
+      ...serializeRendered(after),
+      ...(terms.length ? { terms } : {}),
     };
+  }
   if (work.kind === "changed") {
     const seen = new Set<string>();
     for (const blob of work.previous) {

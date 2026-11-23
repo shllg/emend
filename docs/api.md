@@ -1074,7 +1074,10 @@ Both are absent without a mark. Marks follow the current path, including for ren
 Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram source is optional.
 `RenderedWriteup = { area?: WriteupArea, newInRevision?: { topic?: TopicSlug, section?: NewInRevisionSection, blockId?: BlockId, blockIds: BlockId[] }[], needsYou?: { kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }[], terms?: GlossaryTerm[], sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
-Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
+Markdown docs are `{ path, kind: "markdown", title?, headings?, terms?: GlossaryTerm[], blocks: RenderedBlock[] }`
+(`blocks` empty if unrendered). `terms` holds at most 50 entries `{ term, definition, blockId }` and
+is present only when the doc declares a glossary (see "Glossary in a Markdown doc"); `blockId` names
+the block that holds the entry in that doc.
 HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", colorScheme?: "light", images?: FilePath[] }`.
 The optional `images` lists the doc's own raster image assets linked through `doc_assets`,
 sorted by path, with at most `LIMITS.filesPerRevision` entries. Only `image/png`, `image/jpeg`,
@@ -2174,7 +2177,38 @@ letters, which require exact case. A trailing `s` or `es` also matches; aliases 
 Spaces match whitespace runs; the longest form wins at the same position. Marks have a dotted
 underline and show a definition card on hover, focus or tap, with a link to the glossary entry.
 The glossary starts folded even when changed; navigation to an entry opens it. Old Markdown
-glossaries render as before and get no marks. Markdown docs and published docs get no marks.
+glossaries render as before and get no marks. HTML docs get no marks.
+
+#### Glossary in a Markdown doc
+
+A Markdown doc (a published doc, or a code review's doc) declares its own glossary inside the doc:
+
+```
+## Glossary
+
+- **Budget** (also: allowance, quota):
+  Attempts a worker may spend.
+- **Hub:** The machine the phone reaches.
+```
+
+The glossary is the first top-level heading (any level) whose text, trimmed with whitespace
+collapsed, equals "Glossary" ignoring case, followed directly by one list (`-`, `*` or `1.`). Only
+that first heading counts. Each list item starts with a bold term. The term is followed by `:`
+inside the bold text (`**Hub:**`), or by an optional `(also: a, b)` group and then `:` after it
+(`**Budget** (also: a, b):`). The same group may sit inside the bold text (`**Budget (also: a):**`).
+The definition is the rest of the item, nested lists and later paragraphs included, as plain text,
+whitespace-normalized and cut to `glossaryDefinitionChars` with a closing `…`, as in a list glossary.
+An item that does not fit this shape, has a blank definition or an invalid or repeated term is
+skipped. An invalid or repeated alias is dropped. Terms and aliases follow the manifest glossary's
+rules (`GlossaryForm`, duplicates compared case-insensitively after normalization). At most
+`glossaryTerms` entries and `glossaryAliases` aliases per entry count; later ones are ignored.
+
+The renderer marks the first use of each term and alias elsewhere in the doc, with the same rules
+as the writeup, and never inside the glossary list or headings. `RevisionView.docs[].terms` lists
+the entries in marking order; the app opens the same card as the writeup's, whose "Glossary" link
+jumps to the entry's block. A doc without such a section has no `terms` and no marks. Terms are
+stored beside the doc row, are not part of the export bundle, and the import re-renders them from
+the doc source.
 
 #### Links and repoUrl
 

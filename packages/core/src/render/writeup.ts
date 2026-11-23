@@ -1,6 +1,5 @@
 import {
   type GlossaryTerm,
-  LIMITS,
   type NeedsYouKind,
   type NewInRevisionItem,
   type NewInRevisionSection,
@@ -14,6 +13,7 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
 import type { Block } from "./blocks.ts";
+import { limitDefinition } from "./glossary-definition.ts";
 import { type RenderEffects, renderMarkdownWithBudget } from "./markdown.ts";
 import { normalizeText } from "./normalize.ts";
 import type { MediaSize } from "./sanitize.ts";
@@ -208,12 +208,7 @@ export async function renderWriteup(
       );
       const prefix = normalizeText(`${term}:`);
       if (text.startsWith(prefix)) text = text.slice(prefix.length).trim();
-      if (text.length > LIMITS.glossaryDefinitionChars) {
-        let cut = LIMITS.glossaryDefinitionChars - 1;
-        if ((text.codePointAt(cut - 1) ?? 0) > 0xffff) cut--;
-        text = `${text.slice(0, cut)}…`;
-      }
-      terms.push({ term, definition: text, blockId: first.id });
+      terms.push({ term, definition: limitDefinition(text), blockId: first.id });
     }
     sections.push({ key: "glossary", label: "Glossary", topic: null, blocks: glossaryBlocks });
   } else {

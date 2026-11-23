@@ -39,7 +39,7 @@ export const ReviewVerdict = z
 export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
 
 export const normalizeGlossaryForm = (text: string) => text.normalize("NFC").replace(/\s+/gu, " ").trim();
-const glossaryForm = z
+export const GlossaryForm = z
   .string()
   .min(1)
   .max(LIMITS.glossaryTermChars)
@@ -59,13 +59,13 @@ const glossaryForm = z
   );
 
 export const GlossaryEntry = z.object({
-  term: glossaryForm,
+  term: GlossaryForm,
   definition: z
     .string()
     .min(1)
     .max(LIMITS.glossaryDefinitionChars)
     .refine((text) => /\S/.test(text), "glossary definition must not be blank"),
-  aliases: z.array(glossaryForm).max(LIMITS.glossaryAliases).optional(),
+  aliases: z.array(GlossaryForm).max(LIMITS.glossaryAliases).optional(),
 });
 export type GlossaryEntry = z.infer<typeof GlossaryEntry>;
 

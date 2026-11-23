@@ -1,4 +1,4 @@
-import { docViewOf, isRenderedHtmlDoc, LIMITS, type PublishRequest } from "@emend/contract";
+import { docViewOf, type GlossaryTerm, isRenderedHtmlDoc, LIMITS, type PublishRequest } from "@emend/contract";
 import {
   blockHash,
   cleanDocTitle,
@@ -247,10 +247,15 @@ export async function renderRevision(
   const cache = new Map<string, string | null>();
   const folderCache = new Map<string, string>();
   const docBlobs = new Map<string, string>();
+  // Terms belong to a stored blob: same blocks, same terms. A resection rewrites both together.
+  const termsByBlob = new Map<string, GlossaryTerm[]>();
   const markUnrendered = (path: string) => {
     unrendered.push(path);
     const doc = metadata.get(path);
-    if (doc) doc.headings = [];
+    if (doc) {
+      doc.headings = [];
+      delete doc.terms;
+    }
   };
   const sourceCounts = new Map<string, { lines: number; bytes: number }>();
   const sourceCache = new Map<string, { blob: string; bytes: number } | null>();
@@ -365,7 +370,7 @@ export async function renderRevision(
                 return size ? [[sha, size]] : [];
               }),
             }
-          : { kind: "resection", path: file.path, bytes: await read(shared) },
+          : { kind: "resection", path: file.path, bytes: await read(shared), terms: termsByBlob.get(shared) },
       );
       if (rendered.kind !== "doc") throw new Error("wrong result");
       result = rendered;
@@ -377,18 +382,27 @@ export async function renderRevision(
       continue;
     }
     const json = Buffer.from(result.bytes);
-    onRendered?.(json.length);
-    if (count + result.count > LIMITS.blocksPerRevision || bytes + json.length > LIMITS.renderedBytesPerRevision) {
+    const termsBytes = result.terms ? Buffer.byteLength(JSON.stringify(result.terms)) : 0;
+    onRendered?.(json.length + termsBytes);
+    if (
+      count + result.count > LIMITS.blocksPerRevision ||
+      bytes + json.length + termsBytes > LIMITS.renderedBytesPerRevision
+    ) {
       exhausted = true;
       markUnrendered(file.path);
       continue;
     }
     count += result.count;
-    bytes += json.length;
+    bytes += json.length + termsBytes;
     await yieldToLoop("publish-render");
     checkPublishSignal(signal);
     const blob = await put(json);
     docBlobs.set(file.path, blob);
+    if (result.terms?.length) {
+      termsByBlob.set(blob, result.terms);
+      const own = metadata.get(file.path);
+      if (own) own.terms = result.terms;
+    }
     if (shared === undefined) {
       if (!result.pathDependent) cache.set(cacheKey, blob);
       else if (!result.selfDependent) folderCache.set(folderKey, blob);
