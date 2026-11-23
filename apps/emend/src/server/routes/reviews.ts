@@ -522,6 +522,7 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
         path: file.path,
         kind: "markdown",
         ...metadata,
+        ...(file.terms !== null && file.renderedBlob ? { terms: file.terms } : {}),
         blocks: file.renderedBlob ? await readJson(file.renderedBlob) : [],
       });
     }

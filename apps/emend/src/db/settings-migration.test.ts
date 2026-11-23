@@ -45,6 +45,7 @@ test.each([false, true])("settings migration preserves existing data (previous=%
                 .replace(", `look` text", "")
                 .replace(", `color_scheme` text", "")
                 .replace(", `parts` text", "")
+                .replace(", `terms` text", "")
             : ddl,
         ]),
       ).toEqual(before);

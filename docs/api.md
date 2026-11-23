@@ -1074,7 +1074,10 @@ Both are absent without a mark. Marks follow the current path, including for ren
 Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram source is optional.
 `RenderedWriteup = { area?: WriteupArea, newInRevision?: { topic?: TopicSlug, section?: NewInRevisionSection, blockId?: BlockId, blockIds: BlockId[] }[], needsYou?: { kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }[], terms?: GlossaryTerm[], sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
-Markdown docs are `{ path, kind: "markdown", blocks: RenderedBlock[] }` (empty if unrendered).
+Markdown docs are `{ path, kind: "markdown", title?, headings?, terms?: GlossaryTerm[], blocks: RenderedBlock[] }`
+(`blocks` empty if unrendered). `terms` holds at most 50 entries `{ term, definition, blockId }` and
+is present only when the doc declares a glossary (see "Glossary in a Markdown doc"); `blockId` names
+the block that holds the entry in that doc.
 HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", colorScheme?: "light", images?: FilePath[] }`.
 The optional `images` lists the doc's own raster image assets linked through `doc_assets`,
 sorted by path, with at most `LIMITS.filesPerRevision` entries. Only `image/png`, `image/jpeg`,
@@ -2174,7 +2177,111 @@ letters, which require exact case. A trailing `s` or `es` also matches; aliases 
 Spaces match whitespace runs; the longest form wins at the same position. Marks have a dotted
 underline and show a definition card on hover, focus or tap, with a link to the glossary entry.
 The glossary starts folded even when changed; navigation to an entry opens it. Old Markdown
-glossaries render as before and get no marks. Markdown docs and published docs get no marks.
+glossaries render as before and get no marks. HTML docs declare their own glossary; see "Glossary in an
+HTML doc".
+
+#### Glossary in a Markdown doc
+
+A Markdown doc (a published doc, or a code review's doc) declares its own glossary inside the doc:
+
+```
+## Glossary
+
+- **Budget** (also: allowance, quota):
+  Attempts a worker may spend.
+- **Hub:** The machine the phone reaches.
+```
+
+The glossary is the first top-level heading (any level) whose text, trimmed with whitespace
+collapsed, equals "Glossary" ignoring case, followed directly by one list (`-`, `*` or `1.`). Only
+that first heading counts. Each list item starts with a bold term. The term is followed by `:`
+inside the bold text (`**Hub:**`), or by an optional `(also: a, b)` group and then `:` after it
+(`**Budget** (also: a, b):`). The same group may sit inside the bold text (`**Budget (also: a):**`).
+The definition is the rest of the item, nested lists and later paragraphs included, as plain text,
+whitespace-normalized and cut to `glossaryDefinitionChars` with a closing `…`, as in a list glossary.
+An item that does not fit this shape, has a blank definition or an invalid or repeated term is
+skipped. An invalid or repeated alias is dropped. Terms and aliases follow the manifest glossary's
+rules (`GlossaryForm`, with whitespace collapsed first, so a line break inside a term reads as one
+space; duplicates compared case-insensitively after normalization). At most
+`glossaryTerms` entries and `glossaryAliases` aliases per entry count; later ones are ignored.
+
+The renderer marks the first use of each term and alias elsewhere in the doc, with the same rules
+as the writeup, and never inside the glossary list or headings. Marking in a doc walks a prefix tree
+of the terms and aliases and stops after 10,000,000 steps. A step is charged for each tree lookup per
+character compared, each whitespace character a space in a term consumes, each start position tried,
+each form that ends on the way, each character of the `s`/`es` suffix check and each character of an
+acronym's exact check. The first time a character is case-folded and the first time it is classified
+as a word character cost 32 steps each. A text node that must be split into graphemes costs 256 steps
+plus 32 steps per character; ordinary ASCII text does not need that split, but a match with a
+non-ASCII character at its edge does, and a Markdown text node that is not in NFC is charged the same
+up front, even without a match. Ordinary English prose costs about 1.2 to 2 steps per character (1.2
+when few words start a term, about 1.9 against 50 terms made of common words), so the budget covers
+about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of about 1,000 characters
+that each hold a match with a non-ASCII edge costs about 33 steps per character, so the budget covers
+about 300,000 characters of it. Spending the budget takes about 0.25 s or less on every shape measured
+(median of five runs). Not charged, each linear in the text: building the tree (3 to 6 ms for 450
+forms), the check for a run of more than 30 combining marks (about 20 ns per byte on one two-byte
+mark after each ASCII character, so 21 ms for a 1 MiB doc and 0.17 s for 8 MiB) and normalizing each
+text node to NFC. The 30-mark rule keeps every reordered run to at most 63 non-starters, so that cost
+stays linear: an input built to need the most reordering (U+1F82, then 13 × U+0344, 9 × U+0F75 and
+8 × U+0F73, repeated) takes about 55 ns per byte, which is 58 ms at 1 MiB and 0.46 s at 8 MiB.
+A text node with a run of more than 30 combining marks in a row gets no marks, and a glossary item
+whose term or definition has such a run is skipped (an alias with one is dropped): normalizing a
+longer run in the wrong order takes quadratic time, and real text never has one. When the budget
+is spent, marking stops for the rest of the doc: the text node being read gets no marks, earlier
+text nodes keep theirs, and later first uses stay unmarked. `RevisionView.docs[].terms` lists
+the entries in marking order; the app opens the same card as the writeup's, whose "Glossary" link
+jumps to the entry's block. A doc without such a section has no `terms` and no marks. Terms are
+stored beside the doc row, are not part of the export bundle, and the import re-renders them from
+the doc source.
+
+#### Glossary in an HTML doc
+
+An HTML doc (a pub, or a code review's doc) declares its own glossary inside the doc:
+
+```
+<h2>Glossary</h2>
+<dl>
+  <dt>Budget</dt>
+  <dt>allowance</dt>
+  <dd>Attempts a worker may spend.</dd>
+  <dt>Hub</dt>
+  <dd>The machine the phone reaches.</dd>
+</dl>
+```
+
+The glossary is the first `<dl>` after the first `h1`-`h6` heading whose text, whitespace collapsed
+and trimmed, equals "Glossary" ignoring case. A `<dl>` may group its `dt` and `dd` in `div` children.
+A run of `dt` followed by one or more `dd` is one entry: the first `dt` is the term, each further `dt` an
+alias, and the `dd` texts joined with a space the definition, as plain text, whitespace-normalized
+and cut to `glossaryDefinitionChars` with a closing `…`. Terms and aliases follow the manifest
+glossary's rules (`GlossaryForm`, with whitespace collapsed first). An entry with a blank definition
+or an invalid or repeated term is skipped; an invalid or repeated alias is dropped; at most
+`glossaryTerms` entries and `glossaryAliases` aliases per entry count.
+
+The bridge checks only the first 1,024 `h1`-`h6` headings, the Glossary heading included, so a doc
+with more headings before its Glossary heading gets no glossary. Its other limits:
+
+- 10,000 `dt`/`dd` items.
+- A walk of 100,000 nodes.
+- Only the first 800 raw characters of each heading's text are read, and the read also stops after
+  6,400 nodes. "Glossary" must end within those 800 characters, so a heading with 793 or more
+  characters before the word gets no glossary, and text after those 800 characters is ignored.
+- Each `dt` and each `dd` yields at most 20,000 characters of text, read from at most 20,000 nodes.
+- The same 10,000,000-step marking budget as a Markdown doc, with the same charges. The checks that are
+  not charged cost about 0.17 s (mark runs) and 0.46 s (NFC) at the 8 MiB HTML limit, from about 20 and
+  55 ns per byte on the inputs named in the Markdown section above.
+- A text node with a run of more than 30 combining marks in a row gets no marks, and a `dt` or `dd`
+  with such a run makes its entry invalid (an alias with one is dropped), as in a Markdown doc.
+
+The bridge inside the frame does all of the work. At ready it reads the glossary, marks the first use
+of each term and alias in its own spans (dotted underline, focusable, never inside the glossary, a
+heading, `a`, `code`, `pre`, `kbd`, `samp`, `textarea`, `title`, `button`, `select`, `option`,
+scripts, styles or non-HTML elements), and opens the same short card as the writeup on hover (after
+500 ms), focus, tap and Enter or Space, with a "Glossary" control that scrolls to the entry's first
+`dt`. Marking follows the writeup's rules per text node; it can differ on text that is not NFC and
+across inline elements. The card is plain text in a closed shadow root. No frame message carries the
+glossary, and the parent app does not change. A doc without such a `<dl>` looks as it did.
 
 #### Links and repoUrl
 

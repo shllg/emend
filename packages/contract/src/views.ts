@@ -323,6 +323,7 @@ export const RevisionView = z
             kind: z.literal("markdown"),
             title: DocTitle.optional(),
             headings: DocHeadings.optional(),
+            terms: z.array(GlossaryTerm).max(LIMITS.glossaryTerms).optional(),
             blocks: z
               .array(RenderedBlock)
               .max(LIMITS.blocksPerRevision)

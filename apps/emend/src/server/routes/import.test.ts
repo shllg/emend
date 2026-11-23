@@ -2448,6 +2448,31 @@ test("import carries cleaned doc titles and derives headings from source instead
   expect(view.docs[0]).toMatchObject({ title: "Named doc", headings: [{ level: 2, text: "Real part" }] });
 });
 
+test("import re-renders a Markdown doc's glossary terms from source and ignores supplied ones", async () => {
+  const input = await bundle(f);
+  const doc = required(input.files[0]);
+  const source = "# Guide\n\nThe budget is spent.\n\n## Glossary\n\n- **Budget:** Attempts a worker may spend.\n";
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(source), "text/markdown");
+  const forged = [{ term: "Forged", definition: "x", blockId: "doc-00000000-00000000" }];
+  const row = { ...doc, path: "guide.md", mediaType: "text/markdown", newBlob, terms: forged };
+  const response = await f.importRequest("/import", { ...input, files: [row] });
+  expect(response.status).toBe(201);
+  const stored = await f.db.read((q) =>
+    q
+      .select()
+      .from(tables.files)
+      .where(and(eq(tables.files.ownerId, f.ownerId), eq(tables.files.id, doc.id)))
+      .get(),
+  );
+  expect(stored?.terms).toHaveLength(1);
+  expect(stored?.terms?.[0]).toMatchObject({ term: "Budget", definition: "Attempts a worker may spend." });
+  const view = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
+  const shown = view.docs[0];
+  if (shown?.kind !== "markdown") throw new Error("expected a Markdown doc");
+  expect(shown.terms?.[0]?.blockId).toBe(stored?.terms?.[0]?.blockId);
+  expect(shown.blocks.some((block) => block.id === shown.terms?.[0]?.blockId)).toBe(true);
+});
+
 test.each([new Uint8Array([255]), new Uint8Array([97, 0])])("import refuses non-text source blobs", async (bytes) => {
   const input = await bundle(f);
   const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(bytes), "text/plain");

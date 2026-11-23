@@ -161,7 +161,7 @@ export async function snapshot(
       blastRadius:
         t.blastScope === null || t.blastNote === null ? undefined : { scope: t.blastScope, note: t.blastNote },
     })),
-    files: fileRows.map(({ headings: _headings, ...file }) => ({
+    files: fileRows.map(({ headings: _headings, terms: _terms, ...file }) => ({
       ...file,
       ...(file.role === "doc" && file.mediaType === "text/plain" ? { view: "source" } : {}),
     })),

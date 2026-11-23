@@ -418,10 +418,16 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     return { text, range, boundary };
   }
-  function capture() {
+  function capture(event) {
+    // The glossary card is emend's own: events and selections inside it never become comment anchors.
+    if (card && event && dom(window.Event.prototype, "composedPath", event).includes(card.host)) return;
     const selection = dom(window.Document.prototype, "getSelection", document);
     if (!selection || read(window.Selection.prototype, "isCollapsed", selection) || read(window.Selection.prototype, "rangeCount", selection) !== 1 || !body()) return;
     const range = dom(window.Selection.prototype, "getRangeAt", selection, 0);
+    const inCard = node => card && (node === card.host || dom(window.Node.prototype, "contains", card.host, node) ||
+      dom(window.Node.prototype, "contains", card.dialog, node));
+    if (inCard(read(window.Range.prototype, "startContainer", range)) || inCard(read(window.Range.prototype, "endContainer", range)) ||
+        inCard(read(window.Selection.prototype, "focusNode", selection))) return;
     if (!dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "startContainer", range)) || !dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "endContainer", range))) return;
     const value = model();
     let start = value.boundary(read(window.Range.prototype, "startContainer", range), read(window.Range.prototype, "startOffset", range), false);
@@ -552,6 +558,610 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       dom(window.Node.prototype, "replaceChild", nodeValue("parentNode", node), fragment, node);
     }
     if (lastAnchors) highlight(lastAnchors);
+  }
+  // The glossary of an HTML doc: the first dl after a heading named Glossary. It is read, marked and drawn
+  // inside the frame; nothing about it crosses to the parent.
+  // Kept in parity with LIMITS (glossary*) and core's DOC_TERM_MATCH_STEP_BUDGET by the bridge glossary tests.
+  const GLOSSARY_TERMS_MAX = 50;
+  const GLOSSARY_ALIASES_MAX = 8;
+  const GLOSSARY_FORM_MAX = 100;
+  const GLOSSARY_DEFINITION_MAX = 2000;
+  const GLOSSARY_VISITS_MAX = 100000;
+  const GLOSSARY_STEP_MAX = 10000000;
+  const GLOSSARY_SEGMENT_STEPS = 32;
+  const GLOSSARY_SEGMENT_FIXED_STEPS = 256;
+  const GLOSSARY_LOOKUP_STEPS = 32;
+  const htmlElement = node => nodeType(node) === 1 && namespace(node) === "http://www.w3.org/1999/xhtml";
+  const createText = text => dom(window.Document.prototype, "createTextNode", document, text);
+  const phrasingTags = new Set(["a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "i", "ins",
+    "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small", "span", "strike", "strong", "sub", "sup", "time",
+    "tt", "u", "var"]);
+  let glossary = [], glossaryList;
+  const termMarks = new WeakMap();
+  // Kept in parity with normalizeGlossaryForm and GlossaryForm (packages/contract/src/manifest.ts), except
+  // that text with a run of more than 30 combining marks is not normalized (that can take quadratic time when
+  // its marks are out of order) and reads as empty, so validForm refuses it: the entry, or the alias, is skipped.
+  const glossaryForm = text => longMarkRun(text) ? "" : text.normalize("NFC").replace(/\s+/gu, " ").trim();
+  const validForm = text => text.length > 0 && text.length <= GLOSSARY_FORM_MAX && text.isWellFormed() &&
+    !Array.from(text).some(char => {
+      const code = char.charCodeAt(0);
+      return code < 32 || (code >= 127 && code <= 159) || code === 0x2028 || code === 0x2029;
+    });
+  // Kept in parity with limitDefinition (packages/core/src/render/glossary-definition.ts).
+  function limitDefinition(text) {
+    if (text.length <= GLOSSARY_DEFINITION_MAX) return text;
+    let cut = GLOSSARY_DEFINITION_MAX - 1;
+    if ((text.codePointAt(cut - 1) ?? 0) > 0xffff) cut--;
+    return text.slice(0, cut) + "…";
+  }
+  // Text of an element with a space around block elements, so neighbouring paragraphs do not run together.
+  function glossaryText(root) {
+    const parts = [];
+    const pending = [{ nodes: children(root)[Symbol.iterator](), block: false }];
+    let left = 20000, visits = 20000;
+    while (pending.length && left > 0 && visits > 0) {
+      const entry = pending[pending.length - 1];
+      const next = entry.nodes.next();
+      if (next.done) { pending.pop(); if (entry.block) parts.push(" "); continue; }
+      visits--;
+      const node = next.value;
+      if (nodeType(node) === 3) {
+        const part = textData(node).slice(0, left);
+        parts.push(part);
+        left -= part.length;
+      } else if (nodeType(node) === 1 && !omitted.has(localName(node))) {
+        const block = !(htmlElement(node) && phrasingTags.has(localName(node)));
+        if (block) parts.push(" ");
+        pending.push({ nodes: children(node)[Symbol.iterator](), block });
+      }
+    }
+    return parts.join("");
+  }
+  function readGlossary() {
+    glossary = [];
+    glossaryList = undefined;
+    if (!body()) return;
+    let heading, list, headingCount = 0;
+    for (const node of nodes(body(), GLOSSARY_VISITS_MAX)) {
+      if (!htmlElement(node)) continue;
+      const name = localName(node);
+      if (!heading) {
+        if (/^h[1-6]$/.test(name)) {
+          if (++headingCount > 1024) return;
+          // Only "glossary" has to match, so a short label is enough. The raw budget leaves room for
+          // whitespace and icons before the word; the heading cap bounds the cost.
+          if (label(node, 16, 800).toLowerCase() === "glossary") heading = node;
+        }
+      } else if (name === "dl" && !dom(window.Node.prototype, "contains", heading, node)) { list = node; break; }
+    }
+    if (!list) return;
+    // A dl holds dt and dd children, or div groups of them.
+    const items = [];
+    for (const child of children(list)) {
+      if (!htmlElement(child)) continue;
+      const name = localName(child);
+      if (name === "dt" || name === "dd") items.push(child);
+      else if (name === "div") {
+        for (const inner of children(child)) {
+          if (items.length >= 10000) break;
+          if (htmlElement(inner) && (localName(inner) === "dt" || localName(inner) === "dd")) items.push(inner);
+        }
+      }
+      if (items.length >= 10000) break;
+    }
+    const seen = new Set();
+    const key = form => form.toLowerCase();
+    let run;
+    const finish = () => {
+      const current = run;
+      run = undefined;
+      if (!current || !current.dds.length || glossary.length >= GLOSSARY_TERMS_MAX) return;
+      const term = glossaryForm(glossaryText(current.dts[0]));
+      const definition = limitDefinition(glossaryForm(current.dds.map(dd => glossaryText(dd)).join(" ")));
+      if (definition === "" || !validForm(term) || seen.has(key(term))) return;
+      seen.add(key(term));
+      const aliases = [];
+      for (const dt of current.dts.slice(1)) {
+        if (aliases.length >= GLOSSARY_ALIASES_MAX) break;
+        const alias = glossaryForm(glossaryText(dt));
+        if (!validForm(alias) || seen.has(key(alias))) continue;
+        seen.add(key(alias));
+        aliases.push(alias);
+      }
+      glossary.push({ term, aliases, definition, dt: current.dts[0] });
+    };
+    for (const item of items) {
+      if (localName(item) === "dt") {
+        if (run && run.dds.length) finish();
+        if (!run) run = { dts: [], dds: [] };
+        run.dts.push(item);
+      } else if (run) run.dds.push(item);
+    }
+    finish();
+    if (glossary.length) glossaryList = list;
+  }
+  // Ported from docTermMatcher, scanDocTerms and markTerms (packages/core/src/render/doc-terms.ts and
+  // terms.ts), on one text node at a time. The marks may differ from core's: a text node that is not NFC gets
+  // none, and a word boundary is not checked across inline elements. The bridge tests hold the
+  // single-text-node cases in parity with core's doc matcher, which the regex matcher of the writeup (the
+  // reference) agrees with.
+  // The forms live in a prefix tree keyed by a case fold. A position costs the characters the walk compares,
+  // including every whitespace character a space in a form consumes; one step for each form that ends on
+  // the way, with its suffix check and an acronym's exact check; and, once per text node, a split into
+  // graphemes when a candidate has an uncertain edge. The steps counted: 1 per code point compared (each
+  // tree lookup), per whitespace character a space consumes, per start position tried, per form that ends on
+  // the way, per character of the s/es suffix check and per character of an acronym's exact check;
+  // GLOSSARY_LOOKUP_STEPS for the first fold and the first word lookup of a character;
+  // GLOSSARY_SEGMENT_FIXED_STEPS plus GLOSSARY_SEGMENT_STEPS per character when a text node must be split
+  // into graphemes (ordinary ASCII text does not need it). Measured on this machine (median of five runs),
+  // 10,000,000 steps take about 0.25 s or less on every shape tried: the hostile 450-form shapes, 450 forms
+  // on one tree node (the slowest), refused acronyms, 150,000 tiny text nodes that each need a split, a budget
+  // spent through segmentation alone and one spent through first-seen lookups alone. Ordinary English prose
+  // costs about 1.2 to 2 steps per character (1.2 when few words start a term, about 1.9 against 50 terms
+  // made of common words), so the budget covers about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose
+  // in paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33
+  // steps per character (about 300,000 characters). Not counted, each linear in the text: building the tree
+  // (3 to 6 ms for 450 forms), the check for a run of more than 30 combining marks (about 20 ns per byte on
+  // one two-byte mark after each ASCII character: 21 ms for 1 MiB, 0.17 s for 8 MiB) and the NFC
+  // normalization of each text node. The 30-mark rule keeps every reordered run to at most 63 non-starters,
+  // so the cost stays linear; the input built to need the most reordering (see doc-terms.ts) takes about
+  // 55 ns per byte: 58 ms and 0.46 s. A text node with a longer run gets no marks; a glossary item with
+  // one is skipped.
+  // The parity tests evaluate the slice between "term matcher: start" and "term matcher: end" against core's
+  // doc matcher, charge by charge, so the slice uses only glossaryForm and the GLOSSARY_* constants.
+  // term matcher: start
+  // Kept in parity with longMarkRun (packages/core/src/render/doc-terms.ts) by the bridge glossary tests.
+  const markRun = /\p{M}+/gu;
+  function longMarkRun(text) {
+    markRun.lastIndex = 0;
+    for (let match = markRun.exec(text); match; match = markRun.exec(text)) {
+      const run = match[0];
+      if (run.length <= 30) continue;
+      let count = 0;
+      for (let index = 0; index < run.length; index += (run.codePointAt(index) ?? 0) > 0xffff ? 2 : 1)
+        if (++count > 30) return true;
+    }
+    return false;
+  }
+  // Kept in parity with foldCodePoint (packages/core/src/render/doc-terms.ts) by the bridge glossary tests.
+  const foldExceptions = new Map([[0x131, 0x131], [0x1fd3, 0x390], [0x1fe3, 0x3b0], [0xfb05, 0xfb06]]);
+  const oneCodePoint = text => {
+    const code = text.codePointAt(0) ?? 0;
+    return text.length === (code > 0xffff ? 2 : 1) ? code : undefined;
+  };
+  function foldCodePoint(code) {
+    const exception = foldExceptions.get(code);
+    if (exception !== undefined) return exception;
+    const text = String.fromCodePoint(code);
+    const upper = oneCodePoint(text.toUpperCase());
+    if (upper !== undefined) {
+      const lower = oneCodePoint(String.fromCodePoint(upper).toLowerCase());
+      if (lower !== undefined) return lower;
+    }
+    return oneCodePoint(text.toLowerCase()) ?? code;
+  }
+  const isSpaceUnit = unit => unit === 32 || (unit >= 9 && unit <= 13) || unit === 0xa0 || unit === 0x1680 ||
+    (unit >= 0x2000 && unit <= 0x200a) || unit === 0x2028 || unit === 0x2029 || unit === 0x202f ||
+    unit === 0x205f || unit === 0x3000 || unit === 0xfeff;
+  const wordPattern = /^[\p{L}\p{M}\p{N}_]$/u;
+  function termMatcher(entries) {
+    const folds = new Map(), words = new Map();
+    const fold = code => {
+      let folded = folds.get(code);
+      if (folded === undefined) folds.set(code, folded = foldCodePoint(code));
+      return folded;
+    };
+    const word = code => {
+      let is = words.get(code);
+      if (is === undefined) words.set(code, is = wordPattern.test(String.fromCodePoint(code)));
+      return is;
+    };
+    const forms = entries
+      .flatMap((entry, index) => [entry.term, ...entry.aliases].map(form => ({ form: glossaryForm(form), entry: index })))
+      .filter(({ form }) => form.length > 0)
+      .sort((a, b) => b.form.length - a.form.length)
+      .map(({ form, entry }, rank) => ({ entry, rank, codes: Array.from(form, char => char.codePointAt(0) ?? 0),
+        acronym: !/\p{Ll}/u.test(form) && (form.match(/\p{Lu}/gu)?.length ?? 0) >= 2 }));
+    const root = { next: new Map() };
+    for (const form of forms) {
+      let node = root;
+      for (const code of form.codes) {
+        if (code === 32) node = node.space ??= { next: new Map() };
+        else {
+          const key = fold(code);
+          let child = node.next.get(key);
+          if (!child) node.next.set(key, child = { next: new Map() });
+          node = child;
+        }
+      }
+      (node.forms ??= []).push(form);
+    }
+    return { forms, root, folds, words, fold, word, remaining: GLOSSARY_STEP_MAX };
+  }
+  // True when value has a grapheme boundary at index for certain, without segmenting (UAX #29: both ends,
+  // and between two ASCII code units except CR LF). Kept in parity with certainBoundary in core's doc-terms.ts.
+  function certainBoundary(value, index) {
+    if (index <= 0 || index >= value.length) return true;
+    const before = value.charCodeAt(index - 1), after = value.charCodeAt(index);
+    return before < 0x80 && after < 0x80 && !(before === 13 && after === 10);
+  }
+  // Marks the first use of each entry in value. accept(index, length) is the grapheme check of a range, and
+  // segment() splits the node so that accept can use the boundaries; until then it treats every
+  // certainBoundary index as a boundary. mark(entry, index, length) returns true when no entry is left.
+  // Returns false when a step did not fit. Kept in step with scanDocTerms in core's doc-terms.ts, which the
+  // bridge glossary tests compare charge by charge.
+  function scanTerms(matcher, value, accept, seen, mark, segment) {
+    const { root, folds, words } = matcher;
+    const size = value.length;
+    const foldE = matcher.fold(101), foldS = matcher.fold(115);
+    let left = matcher.remaining, segmented = false;
+    // The first use of a code point costs steps; later uses read the cache.
+    const fold = code => {
+      const cached = folds.get(code);
+      if (cached !== undefined) return cached;
+      left -= GLOSSARY_LOOKUP_STEPS;
+      return matcher.fold(code);
+    };
+    const word = code => {
+      const cached = words.get(code);
+      if (cached !== undefined) return cached;
+      left -= GLOSSARY_LOOKUP_STEPS;
+      return matcher.word(code);
+    };
+    // A candidate's grapheme check; segmenting the node is charged once, and only when an edge is not certain.
+    const check = (start, length) => {
+      if (!segmented && !(certainBoundary(value, start) && certainBoundary(value, start + length))) {
+        left -= GLOSSARY_SEGMENT_FIXED_STEPS + GLOSSARY_SEGMENT_STEPS * size;
+        if (left < 0) return false;
+        segment();
+        segmented = true;
+      }
+      return accept(start, length);
+    };
+    const wordBefore = index => {
+      if (index <= 0) return false;
+      let code = value.charCodeAt(index - 1);
+      if (code >= 0xdc00 && code <= 0xdfff && index >= 2) {
+        const high = value.charCodeAt(index - 2);
+        if (high >= 0xd800 && high <= 0xdbff) code = (high - 0xd800) * 0x400 + (code - 0xdc00) + 0x10000;
+      }
+      return word(code);
+    };
+    const wordAt = index => index < size && word(value.codePointAt(index) ?? 0);
+    const exactEnd = (form, start) => {
+      let index = start;
+      for (const code of form.codes) {
+        if (index >= size) return -1;
+        if (code === 32) {
+          if (!isSpaceUnit(value.charCodeAt(index))) return -1;
+          do { index++; left--; } while (index < size && isSpaceUnit(value.charCodeAt(index)) && left >= 0);
+        } else {
+          left--;
+          const here = value.codePointAt(index) ?? 0;
+          if (here !== code) return -1;
+          index += here > 0xffff ? 2 : 1;
+        }
+        if (left < 0) return -1;
+      }
+      return index;
+    };
+    const withSuffix = (end, exact) => {
+      if (end < size) {
+        left--;
+        const first = value.codePointAt(end) ?? 0;
+        if ((exact ? first === 101 : fold(first) === foldE) && end + 1 < size) {
+          left--;
+          const second = value.codePointAt(end + 1) ?? 0;
+          if ((exact ? second === 115 : fold(second) === foldS) && !wordAt(end + 2)) return end + 2;
+        }
+        if ((exact ? first === 115 : fold(first) === foldS) && !wordAt(end + 1)) return end + 1;
+      }
+      return wordAt(end) ? -1 : end;
+    };
+    const find = start => {
+      let node = root, index = start, ends;
+      while (index < size) {
+        const unit = value.charCodeAt(index);
+        if (isSpaceUnit(unit)) {
+          left--;
+          if (!node.space) break;
+          do { index++; left--; } while (index < size && isSpaceUnit(value.charCodeAt(index)) && left >= 0);
+          node = node.space;
+        } else {
+          const code = value.codePointAt(index) ?? 0;
+          left--;
+          const child = node.next.get(fold(code));
+          if (!child) break;
+          node = child;
+          index += code > 0xffff ? 2 : 1;
+        }
+        if (left < 0) return;
+        if (node.forms) {
+          left -= node.forms.length;
+          ends ??= [];
+          for (const form of node.forms) ends.push({ form, end: index });
+        }
+      }
+      if (left < 0 || !ends) return;
+      if (ends.length > 1) ends.sort((a, b) => a.form.rank - b.form.rank);
+      for (const { form, end } of ends) {
+        let literal = end;
+        if (form.acronym) {
+          literal = exactEnd(form, start);
+          if (left < 0) return;
+          if (literal < 0) continue;
+        }
+        const finish = withSuffix(literal, form.acronym);
+        if (left < 0) return;
+        if (finish < 0) continue;
+        const accepted = check(start, finish - start);
+        if (left < 0) return;
+        if (accepted) return { entry: form.entry, length: finish - start };
+      }
+    };
+    let index = 0, previousWord = false;
+    while (index < size) {
+      left--;
+      if (left < 0) break;
+      const code = value.codePointAt(index) ?? 0;
+      if (!previousWord) {
+        const hit = find(index);
+        if (left < 0) break;
+        if (hit) {
+          const start = index;
+          index += hit.length;
+          previousWord = wordBefore(index);
+          if (left < 0) break;
+          if (!seen.has(hit.entry) && mark(hit.entry, start, hit.length)) break;
+          continue;
+        }
+      }
+      previousWord = word(code);
+      index += code > 0xffff ? 2 : 1;
+    }
+    matcher.remaining = left >= 0 ? left : 0;
+    return left >= 0;
+  }
+  // term matcher: end
+  function termMark(text, index) {
+    const mark = createElement("span");
+    const style = styleOf(mark);
+    styleCall("setProperty", style, "text-decoration", "underline dotted");
+    styleCall("setProperty", style, "text-underline-offset", "0.15em");
+    styleCall("setProperty", style, "cursor", "help");
+    for (const [name, value] of [["tabindex", "0"], ["role", "button"], ["aria-haspopup", "dialog"], ["aria-expanded", "false"]])
+      elementCall("setAttribute", mark, name, value);
+    dom(window.Node.prototype, "appendChild", mark, createText(text));
+    termMarks.set(mark, index);
+    return mark;
+  }
+  function markTerms() {
+    if (!glossary.length) return;
+    const matcher = termMatcher(glossary);
+    if (!matcher.forms.length) return;
+    const skipped = new Set([...omitted, "a", "code", "pre", "kbd", "samp", "h1", "h2", "h3", "h4", "h5", "h6",
+      "textarea", "title", "button", "select", "option"]);
+    const textNodes = [];
+    const pending = body() ? [[body()][Symbol.iterator]()] : [];
+    let visits = GLOSSARY_VISITS_MAX;
+    // Collect before replacing: childNodes is live, so mutations must not revisit new text nodes.
+    while (pending.length && visits) {
+      const next = pending[pending.length - 1].next();
+      if (next.done) { pending.pop(); continue; }
+      visits--;
+      const node = next.value;
+      if (nodeType(node) === 3) textNodes.push(node);
+      else if (htmlElement(node) && !skipped.has(localName(node)) && node !== glossaryList)
+        pending.push(children(node)[Symbol.iterator]());
+    }
+    const seen = new Set();
+    let segmenter;
+    for (const node of textNodes) {
+      if (seen.size === glossary.length) break;
+      const value = textData(node);
+      const parent = nodeValue("parentNode", node);
+      if (!parent || longMarkRun(value) || value !== value.normalize("NFC")) continue;
+      // Grapheme boundaries are found only when a candidate range has an edge scanTerms cannot be sure of.
+      let boundaries;
+      const segment = () => {
+        segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
+        boundaries = new Set([value.length]);
+        for (const { index } of segmenter.segment(value)) boundaries.add(index);
+      };
+      const accept = (start, length) => !boundaries || (boundaries.has(start) && boundaries.has(start + length));
+      const replacements = [];
+      let end = 0;
+      const scanned = scanTerms(matcher, value, accept, seen, (entry, start, length) => {
+        if (start > end) replacements.push(createText(value.slice(end, start)));
+        replacements.push(termMark(value.slice(start, start + length), entry));
+        end = start + length;
+        seen.add(entry);
+        return seen.size === glossary.length;
+      }, segment);
+      if (!scanned) break;
+      if (!replacements.length) continue;
+      if (end < value.length) replacements.push(createText(value.slice(end)));
+      const fragment = dom(window.Document.prototype, "createDocumentFragment", document);
+      for (const part of replacements) dom(window.Node.prototype, "appendChild", fragment, part);
+      dom(window.Node.prototype, "replaceChild", parent, fragment, node);
+    }
+  }
+  // The card: text only, in a closed shadow root on a host the doc's markup cannot reach.
+  let card, openTerm, hoverTimer, leaveTimer, pointerTarget = null, restoringFocus = false;
+  const markFor = node => {
+    for (let current = node; current; current = nodeValue("parentNode", current)) if (termMarks.has(current)) return current;
+    return null;
+  };
+  const isNode = value => value instanceof window.Node;
+  const insideCard = target => !!card && isNode(target) &&
+    (target === card.host || dom(window.Node.prototype, "contains", card.host, target) ||
+      dom(window.Node.prototype, "contains", card.dialog, target));
+  const insideOpen = target => !!openTerm && isNode(target) &&
+    (dom(window.Node.prototype, "contains", openTerm.mark, target) || insideCard(target));
+  const activeElement = () => documentValue("activeElement");
+  const focusedOpen = (target = activeElement()) => insideOpen(target);
+  const cardFocused = () => !!card && activeElement() === card.host;
+  const hoveredOpen = () => !!pointerTarget && nodeValue("isConnected", pointerTarget) && insideOpen(pointerTarget);
+  const clearOpenTimer = () => { window.clearTimeout(hoverTimer); hoverTimer = undefined; };
+  const clearCloseTimer = () => { window.clearTimeout(leaveTimer); leaveTimer = undefined; };
+  const focusElement = (element, options) => dom(window.HTMLElement.prototype, "focus", element, options);
+  const eventTarget = event => read(window.Event.prototype, "target", event);
+  const pointerKind = event => event.pointerType === "mouse" || event.pointerType === "pen";
+  function ensureCard() {
+    if (card) return card;
+    const host = createElement("emend-term-card");
+    const hostStyle = styleOf(host);
+    for (const [name, value] of [["position", "fixed"], ["left", "0"], ["top", "0"], ["width", "0"], ["height", "0"],
+        ["margin", "0"], ["padding", "0"], ["border", "0"], ["display", "none"], ["z-index", "2147483647"]])
+      styleCall("setProperty", hostStyle, name, value, "important");
+    const shadow = elementCall("attachShadow", host, { mode: "closed" });
+    // The theme's variables where the frame defines them, the frame's own colour scheme otherwise.
+    const css = ".card{position:fixed;left:0;top:0;box-sizing:border-box;width:min(20rem,calc(100vw - 16px));" +
+      "max-height:calc(100vh - 16px);overflow:auto;margin:0;padding:12px;background:var(--bg-raised,Canvas);" +
+      "color:var(--fg-1,CanvasText);border:1px solid var(--border-1,GrayText);border-radius:8px;" +
+      "box-shadow:0 4px 16px rgba(0,0,0,.25);font:400 14px/1.5 var(--font-sans,system-ui,sans-serif);" +
+      "text-align:start;text-transform:none;letter-spacing:normal;text-indent:0;white-space:normal;overflow-wrap:anywhere}" +
+      "p{margin:6px 0}strong{font-weight:600}" +
+      "button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;text-decoration:underline;cursor:pointer}" +
+      "button:focus-visible{outline:2px solid currentColor;outline-offset:2px}";
+    try {
+      const sheet = new CSSStyleSheet();
+      dom(window.CSSStyleSheet.prototype, "replaceSync", sheet, css);
+      write(window.ShadowRoot.prototype, "adoptedStyleSheets", shadow, [sheet]);
+    } catch { /* The card stays usable, only plain, without constructed stylesheet support. */ }
+    const dialog = createElement("div");
+    elementCall("setAttribute", dialog, "class", "card");
+    elementCall("setAttribute", dialog, "role", "dialog");
+    elementCall("setAttribute", dialog, "aria-labelledby", "term");
+    const term = createElement("strong");
+    elementCall("setAttribute", term, "id", "term");
+    const definition = createElement("p");
+    const control = createElement("button");
+    elementCall("setAttribute", control, "type", "button");
+    write(window.Element.prototype, "textContent", control, "Glossary");
+    for (const element of [term, definition, control]) elementCall("setAttribute", element, "dir", "auto");
+    for (const element of [term, definition, control]) dom(window.Node.prototype, "appendChild", dialog, element);
+    dom(window.Node.prototype, "appendChild", shadow, dialog);
+    dom(window.Node.prototype, "appendChild", body(), host);
+    listen(control, "click", () => {
+      const entry = openTerm && glossary[openTerm.index];
+      if (!entry) return;
+      if (nodeValue("isConnected", entry.dt)) { scroll(entry.dt); schedulePosition(); }
+      closeCard();
+    });
+    return card = { host, dialog, term, definition, control };
+  }
+  function positionCard() {
+    if (!openTerm || !card) return;
+    const anchor = bounds(openTerm.mark);
+    const size = bounds(card.dialog);
+    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - size.width - 8));
+    const below = anchor.bottom + 6;
+    const top = below + size.height <= window.innerHeight - 8 ? below : anchor.top - size.height - 6;
+    const style = styleOf(card.dialog);
+    styleCall("setProperty", style, "left", left + "px");
+    styleCall("setProperty", style, "top", Math.max(8, Math.min(top, window.innerHeight - size.height - 8)) + "px");
+  }
+  function showCard(mark, focus = false) {
+    const index = termMarks.get(mark);
+    const entry = glossary[index];
+    if (!entry || !nodeValue("isConnected", mark)) return;
+    clearOpenTimer();
+    clearCloseTimer();
+    if (openTerm && openTerm.mark !== mark) elementCall("setAttribute", openTerm.mark, "aria-expanded", "false");
+    const view = ensureCard();
+    write(window.Element.prototype, "textContent", view.term, entry.term);
+    write(window.Element.prototype, "textContent", view.definition, entry.definition);
+    openTerm = { mark, index };
+    elementCall("setAttribute", mark, "aria-expanded", "true");
+    styleCall("setProperty", styleOf(view.host), "display", "block", "important");
+    positionCard();
+    if (focus) focusElement(view.control);
+  }
+  function closeCard(restore = false) {
+    clearOpenTimer();
+    clearCloseTimer();
+    const current = openTerm;
+    openTerm = undefined;
+    if (!current || !card) return;
+    elementCall("setAttribute", current.mark, "aria-expanded", "false");
+    styleCall("setProperty", styleOf(card.host), "display", "none", "important");
+    if (restore && nodeValue("isConnected", current.mark)) {
+      restoringFocus = true;
+      try { focusElement(current.mark); } finally { restoringFocus = false; }
+    }
+  }
+  function delayOpen(mark) {
+    clearOpenTimer();
+    if (openTerm && openTerm.mark === mark) return;
+    hoverTimer = window.setTimeout(() => { hoverTimer = undefined; showCard(mark); }, 500);
+  }
+  // Behaviour matches apps/web/src/components/reading/GlossaryTerms.tsx.
+  function startGlossary() {
+    listen(document, "pointerover", event => {
+      if (!pointerKind(event)) return;
+      const target = eventTarget(event);
+      pointerTarget = target;
+      if (insideCard(target)) { clearCloseTimer(); return; }
+      const mark = markFor(target);
+      if (!mark) return;
+      if (openTerm && openTerm.mark === mark) clearCloseTimer();
+      if (!(isNode(event.relatedTarget) && dom(window.Node.prototype, "contains", mark, event.relatedTarget))) delayOpen(mark);
+    }, true);
+    listen(document, "pointerout", event => {
+      if (!pointerKind(event)) return;
+      const target = eventTarget(event);
+      if (event.relatedTarget === null) pointerTarget = null;
+      if (!markFor(target) && !insideCard(target)) return;
+      clearOpenTimer();
+      if (insideOpen(event.relatedTarget)) { clearCloseTimer(); return; }
+      if (insideOpen(target) && !focusedOpen()) {
+        clearCloseTimer();
+        leaveTimer = window.setTimeout(() => {
+          leaveTimer = undefined;
+          if (!hoveredOpen() && !focusedOpen()) closeCard();
+        }, 300);
+      }
+    }, true);
+    listen(document, "focusin", event => {
+      if (restoringFocus) return;
+      const target = eventTarget(event);
+      if (focusedOpen(target)) clearCloseTimer();
+      const mark = markFor(target);
+      if (mark) delayOpen(mark);
+    }, true);
+    listen(document, "focusout", event => {
+      clearOpenTimer();
+      if (insideOpen(eventTarget(event)) && !focusedOpen(event.relatedTarget) && !hoveredOpen()) closeCard();
+    }, true);
+    listen(document, "click", event => {
+      if (event.defaultPrevented) return;
+      const mark = markFor(eventTarget(event));
+      if (!mark) return;
+      const selection = dom(window.Document.prototype, "getSelection", document);
+      if (!selection || read(window.Selection.prototype, "isCollapsed", selection)) showCard(mark);
+    });
+    listen(document, "keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const target = eventTarget(event);
+      if (!termMarks.has(target)) return;
+      dom(window.Event.prototype, "preventDefault", event);
+      showCard(target, true);
+    });
+    listen(document, "keydown", event => {
+      if (event.key !== "Escape" || !openTerm) return;
+      const inCard = cardFocused();
+      if (focusedOpen()) {
+        dom(window.Event.prototype, "preventDefault", event);
+        dom(window.Event.prototype, "stopPropagation", event);
+      }
+      closeCard(inCard);
+    }, true);
+    listen(document, "pointerdown", event => {
+      if (openTerm && !insideOpen(eventTarget(event))) closeCard();
+    }, true);
+    listen(window, "resize", positionCard, { passive: true });
+    listen(window, "scroll", positionCard, { capture: true, passive: true });
   }
   let keptMarks = [], marked = [], changeLabels = [];
   let themeMode = "light";
@@ -1119,6 +1729,9 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"])
     listen(document, type, onDiagramMotionEnd, true);
   const ready = () => {
+    readGlossary();
+    markTerms();
+    if (glossary.length) startGlossary();
     headings = collectHeadings();
     parts = collectParts();
     post({ type: "emend:ready" });
