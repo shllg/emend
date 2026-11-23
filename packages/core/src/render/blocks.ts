@@ -30,6 +30,7 @@ export type HtmlNode = HtmlRoot | HtmlRoot["children"][number];
 type RenderData = NonNullable<HtmlElement["data"]> & {
   emendDiagram?: string;
   emendChart?: boolean;
+  emendMixedPre?: boolean;
   emendClasses?: string[];
   emendFootnoteMarker?: boolean;
   /** The doc's glossary list: terms are never marked inside it. */
@@ -47,9 +48,14 @@ export function renderData(element: HtmlElement): RenderData {
 }
 
 export function fenceCode(node: HtmlNode): HtmlElement | undefined {
-  if (node.type !== "element" || node.tagName !== "pre") return;
-  const code = node.children[0];
-  if (code?.type === "element" && code.tagName === "code") return code;
+  if (node.type !== "element" || node.tagName !== "pre" || renderData(node).emendMixedPre) return;
+  let code: HtmlElement | undefined;
+  for (const child of node.children) {
+    if (child.type === "text" && child.value.trim() === "") continue;
+    if (code || child.type !== "element" || child.tagName !== "code") return;
+    code = child;
+  }
+  return code;
 }
 
 export function blockText(html: string): string {

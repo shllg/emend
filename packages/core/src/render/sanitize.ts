@@ -2,6 +2,7 @@ import { toString as hastText } from "hast-util-to-string";
 import { defaultSchema } from "rehype-sanitize";
 import { type DocLinks, resolveDocLink } from "../links.ts";
 import {
+  fenceCode,
   type HtmlElement,
   type HtmlNode,
   type HtmlRoot,
@@ -130,6 +131,8 @@ export function restoreFootnotes() {
 export function namespaceClasses() {
   return (tree: HtmlRoot) => {
     visitElements(tree, (element) => {
+      // Sanitization may remove a sibling (such as a comment) that made this pre ineligible.
+      if (element.tagName === "pre" && !fenceCode(element)) renderData(element).emendMixedPre = true;
       const classes = element.properties.className;
       if (!Array.isArray(classes)) return;
       renderData(element).emendClasses = classes.flatMap((value) =>

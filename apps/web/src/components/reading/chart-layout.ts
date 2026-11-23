@@ -1,11 +1,32 @@
 import type { ChartSpec } from "@emend/contract";
 
+const exact = new Intl.NumberFormat("en-US", { maximumFractionDigits: 20 });
 const decimal = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
-const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+const small = new Intl.NumberFormat("en-US", { maximumSignificantDigits: 3 });
+const scientific = new Intl.NumberFormat("en-US", { notation: "scientific", maximumSignificantDigits: 3 });
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 4 });
 
-export function formatChartValue(value: number, unit?: string) {
-  const number = (value < 10_000 ? decimal : compact).format(value);
+function withUnit(number: string, unit?: string) {
   return unit ? number + (unit === "%" ? "%" : ` ${unit}`) : number;
+}
+
+export function formatChartExact(value: number, unit?: string) {
+  const number = exact.format(value || 0);
+  // Fractions needing more than 20 decimal places still have a round-trip string.
+  return withUnit(value < 1 && Number(number) !== value ? String(value) : number, unit);
+}
+
+export function formatChartLabel(value: number, unit?: string) {
+  if (value === 0) return withUnit("0", unit);
+  const format = value < 1e-6 ? scientific : value < 1 ? small : value < 10_000 ? decimal : compact;
+  return withUnit(format.format(value), unit);
+}
+
+function formatChartTick(value: number, fractionDigits: number, unit?: string) {
+  // Even the 2.5 steps need at most three significant digits across five intervals.
+  const rounded = Number(fractionDigits <= 20 ? value.toFixed(fractionDigits) : value.toPrecision(3));
+  if (rounded >= 10_000) return withUnit(compact.format(rounded), unit);
+  return withUnit(rounded < 1e-6 ? String(rounded) : exact.format(rounded), unit);
 }
 
 export function chartWidth(width: number) {
@@ -15,11 +36,13 @@ export function chartWidth(width: number) {
 export function niceScale(maximum: number) {
   const max = maximum || 1;
   // Subnormal values can underflow when divided into five intervals.
-  const power = Math.max(Number.MIN_VALUE, 10 ** Math.floor(Math.log10(max / 5 || Number.MIN_VALUE)));
+  const exponent = Math.floor(Math.log10(max / 5 || Number.MIN_VALUE));
+  const power = Math.max(Number.MIN_VALUE, 10 ** exponent);
   const factor = [1, 2, 2.5, 5, 10].find((n) => n * power * 5 >= max) ?? 10;
   const step = factor * power;
   const count = [1, 2, 3, 4, 5].find((n) => n * step >= max) ?? 5;
-  return { step, axisMax: step * count, ticks: Array.from({ length: count + 1 }, (_, i) => i * step) };
+  const fractionDigits = Math.max(0, (factor === 2.5 ? 1 : 0) - exponent);
+  return { step, fractionDigits, axisMax: step * count, ticks: Array.from({ length: count + 1 }, (_, i) => i * step) };
 }
 
 type Spec<T extends ChartSpec["type"]> = Extract<ChartSpec, { type: T }>;
@@ -46,7 +69,7 @@ function barPath(length: number, y: number) {
 
 export function layoutBars(spec: Spec<"bar">, width: number) {
   const { axisMax } = niceScale(maximum(spec));
-  const formatted = spec.series.flatMap(({ values }) => values.map((n) => formatChartValue(n, spec.unit)));
+  const formatted = spec.series.flatMap(({ values }) => values.map((n) => formatChartLabel(n, spec.unit)));
   const barSpace = width - reserve(formatted);
   let top = 0;
   const rows = spec.labels.map((label, index) => {
@@ -54,7 +77,7 @@ export function layoutBars(spec: Spec<"bar">, width: number) {
     const barTop = top + heading.length * 16 + 4;
     const bars = spec.series.map(({ name, values }, s) => {
       const n = values[index] as number;
-      const value = formatChartValue(n, spec.unit);
+      const value = formatChartLabel(n, spec.unit);
       const length = (n / axisMax) * barSpace;
       const y = barTop + s * 14;
       return {
@@ -64,7 +87,7 @@ export function layoutBars(spec: Spec<"bar">, width: number) {
         value,
         valueX: length + 6,
         valueY: y + 6,
-        title: `${label} · ${name}: ${value}`,
+        title: `${label} · ${name}: ${formatChartExact(n, spec.unit)}`,
       };
     });
     top = barTop + bars.length * 14 - 2 + 14;
@@ -77,7 +100,7 @@ const lastValue = (series: Series) => series.values.at(-1) as number;
 
 function seriesLine(spec: ChartSpec, series: Series, x: (index: number) => number, y: (n: number) => number) {
   const points = series.values.map((n, i) => {
-    const value = formatChartValue(n, spec.unit);
+    const value = formatChartExact(n, spec.unit);
     const label = spec.labels?.[i] ?? String(i + 1);
     return { x: x(i), y: y(n), title: `${label} · ${series.name}: ${value}` };
   });
@@ -87,7 +110,7 @@ function seriesLine(spec: ChartSpec, series: Series, x: (index: number) => numbe
     points,
     end,
     coordinates: points.map(({ x, y }) => `${x},${y}`).join(" "),
-    value: formatChartValue(lastValue(series), spec.unit),
+    value: formatChartLabel(lastValue(series), spec.unit),
     valueX: end.x + 8,
   };
 }
@@ -114,18 +137,21 @@ function thinLabels(labels: string[], x: (i: number) => number, width: number) {
   });
 }
 
-export function layoutLine(spec: Spec<"line">, width: number) {
-  const { axisMax, ticks } = niceScale(maximum(spec));
+export function layoutLine(spec: Spec<"line">, availableWidth: number) {
+  const { axisMax, ticks, fractionDigits } = niceScale(maximum(spec));
   const y = (n: number) => 7 + (1 - n / axisMax) * 140;
-  const grid = ticks.map((tick) => ({ y: y(tick), text: formatChartValue(tick) }));
+  const grid = ticks.map((tick) => ({ y: y(tick), text: formatChartTick(tick, fractionDigits, spec.unit) }));
   const left = reserve(grid.map(({ text }) => text));
   const ends = spec.series.map((series) => y(lastValue(series))).sort((a, b) => a - b);
   const showEndValues = ends.every((end, i) => i === 0 || end - (ends[i - 1] as number) >= 14);
-  const right =
-    width - (showEndValues ? reserve(spec.series.map((s) => formatChartValue(lastValue(s), spec.unit))) : 6);
+  const endReserve = showEndValues ? reserve(spec.series.map((s) => formatChartLabel(lastValue(s), spec.unit))) : 6;
+  // Long units on both axes can leave no plot space on a phone. The figure scrolls horizontally.
+  const width = Math.max(availableWidth, left + 32 + endReserve);
+  const right = width - endReserve;
   const x = (i: number) => left + ((right - left) * i) / (spec.labels.length - 1);
   const labels = thinLabels(spec.labels, x, width);
   return {
+    width,
     height: 170 + 16 * (Math.max(...labels.map((label) => label.lines.length)) - 1),
     left,
     right,
@@ -138,7 +164,7 @@ export function layoutLine(spec: Spec<"line">, width: number) {
 }
 
 export function layoutSparklines(spec: Spec<"sparkline">, width: number) {
-  const right = width - reserve(spec.series.map((s) => formatChartValue(lastValue(s), spec.unit)));
+  const right = width - reserve(spec.series.map((s) => formatChartLabel(lastValue(s), spec.unit)));
   let top = 0;
   const rows = spec.series.map((series) => {
     const heading = labelLines(series.name, width, top + 13);

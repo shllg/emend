@@ -2,6 +2,7 @@ import { BlockId, type WriteupInput } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { expect, test, vi } from "vitest";
 import { blockText, visitElements } from "./blocks.ts";
+import { hostileChartSource } from "./fixtures/chart.ts";
 import { topics, writeup } from "./fixtures/writeup.ts";
 import { HIGHLIGHT_RENDER_BYTES } from "./highlight.ts";
 import * as markdown from "./markdown.ts";
@@ -991,4 +992,18 @@ test("chart source stays out of glossary hints, term marks and issue links", asy
   const prose = rendered.sections.find(({ key }) => key === "overview")?.blocks[1]?.html;
   expect(prose).toContain("emend-term");
   expect(prose).toContain("issues/123");
+});
+
+test("a hostile chart in a writeup glossary stays out of the plain definition", async () => {
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      glossary: [{ term: "Budget", definition: `Time allowed.\n\n\`\`\`chart\n${hostileChartSource}\n\`\`\`` }],
+    },
+    [],
+  );
+  expect(rendered.terms).toMatchObject([{ term: "Budget", definition: "Time allowed." }]);
+  const blocks = rendered.sections.find(({ key }) => key === "glossary")?.blocks ?? [];
+  expect(blocks.filter(({ kind }) => kind === "chart")).toMatchObject([{ html: "", source: hostileChartSource }]);
+  for (const block of blocks) expect(block.html).not.toMatch(/<script|<img|onerror=|javascript:|<svg|onload=/i);
 });

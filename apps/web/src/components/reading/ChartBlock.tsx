@@ -2,7 +2,7 @@ import { type ChartSpec, parseChartSource } from "@emend/contract";
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import {
   chartWidth,
-  formatChartValue,
+  formatChartExact,
   layoutBars,
   layoutLine,
   layoutSparklines,
@@ -83,7 +83,7 @@ function ChartPlot({ spec, width }: { spec: ChartSpec; width: number }) {
   if (spec.type === "line") {
     const plot = layoutLine(spec, width);
     return (
-      <Plot width={width} height={plot.height}>
+      <Plot width={plot.width} height={plot.height}>
         {plot.grid.map(({ text, y }) => (
           <g key={y}>
             <line className="em-chart-rule" x1={plot.left} x2={plot.right} y1={y} y2={y} />
@@ -146,7 +146,7 @@ function ChartData({ spec }: { spec: ChartSpec }) {
             <tr key={i}>
               <th scope="row">{label}</th>
               {spec.series.map(({ name, values }) => (
-                <td key={name}>{formatChartValue(values[i] as number, spec.unit)}</td>
+                <td key={name}>{formatChartExact(values[i] as number, spec.unit)}</td>
               ))}
             </tr>
           ))}

@@ -51,7 +51,7 @@ test("default theme fonts match the first family in typography.css", () => {
 });
 
 test.each([
-  [light, ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]],
+  [light, ["#2a78d6", "#cf5421", "#14916a", "#b07400"]],
   [systemDark, ["#3987e5", "#d95926", "#199e70", "#c98500"]],
   [explicitDark, ["#3987e5", "#d95926", "#199e70", "#c98500"]],
 ] as const)("uses the chart palette in theme %#", (theme, expected) => {

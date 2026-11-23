@@ -51,6 +51,22 @@ test("draws two grouped bars per label, names their series and exposes the data 
   expect(table.getAllByRole("cell").map((el) => el.textContent)).toEqual(["420 ms", "180 ms", "95 ms", "40 ms"]);
 });
 
+test.each(["bar", "line", "sparkline"])("shows exact %s values in the Data table and tooltips", (type) => {
+  const source = JSON.stringify({ ...bar, type, series: [{ name: "Search", values: [12341, 12349] }] });
+  const { container, getByRole, getByText } = render(<ChartBlock source={source} />);
+  fireEvent.click(getByText("Data"));
+  expect(
+    within(getByRole("table"))
+      .getAllByRole("cell")
+      .map((cell) => cell.textContent),
+  ).toEqual(["12,341 ms", "12,349 ms"]);
+  const titles = container.querySelectorAll(type === "bar" ? "path title" : "circle title");
+  expect(Array.from(titles, (title) => title.textContent)).toEqual([
+    "Cold start · Search: 12,341 ms",
+    "Warm cache · Search: 12,349 ms",
+  ]);
+});
+
 test.each(["line", "sparkline"])("draws a %s with a tooltip at every point", (type) => {
   const source = JSON.stringify({ ...bar, type, labels: type === "line" ? bar.labels : undefined });
   const { container } = render(<ChartBlock source={source} />);

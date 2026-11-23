@@ -3,6 +3,7 @@ import { expect, test, vi } from "vitest";
 import type { HtmlElement, HtmlRoot } from "./blocks.ts";
 import { extractDocGlossary } from "./doc-glossary.ts";
 import { longMarkRun } from "./doc-terms.ts";
+import { hostileChartSource } from "./fixtures/chart.ts";
 import { type RenderEffects, renderDoc } from "./markdown.ts";
 
 async function render(markdown: string) {
@@ -35,6 +36,28 @@ test("reads both forms, aliases and a nested definition from a tight list", asyn
     ["0", "budget"],
     ["1", "hub"],
   ]);
+});
+
+test("a hostile chart inside a dd leaves only prose in the Markdown glossary definition", async () => {
+  const { blocks, terms } = await render(
+    doc(
+      [
+        "- **Budget:** Time allowed.",
+        "",
+        "  <dl><dt>Example</dt><dd>Daily counts.",
+        "",
+        "  ```chart",
+        `  ${hostileChartSource}`,
+        "  ```",
+        "",
+        "  </dd></dl>",
+      ].join("\n"),
+    ),
+  );
+  expect(terms).toMatchObject([{ term: "Budget", definition: "Time allowed. Example Daily counts." }]);
+  expect(blocks.filter(({ kind }) => kind === "chart")).toMatchObject([{ html: "", source: hostileChartSource }]);
+  expect(blocks.some(({ html }) => html.includes("<dd>Daily counts."))).toBe(true);
+  for (const block of blocks) expect(block.html).not.toMatch(/<script|<img|onerror=|javascript:|<svg|onload=/i);
 });
 
 test("a first-use mark is made per entry, aliases included", async () => {

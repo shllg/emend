@@ -1,6 +1,7 @@
 import { fromHtml } from "hast-util-from-html";
 import { describe, expect, test, vi } from "vitest";
 import { blockText, visitElements } from "./blocks.ts";
+import { hostileChartSource } from "./fixtures/chart.ts";
 import { blockHash } from "./hash.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { normalizeText } from "./normalize.ts";
@@ -332,36 +333,49 @@ test("code spans preserve the theme's italic and bold styles", async () => {
   expect(blocks[1]?.html).toContain("font-style:italic");
 });
 
-const chartSource = JSON.stringify({
-  type: "bar",
-  title: "<script>alert(1)</script>",
-  unit: "<x>",
-  labels: ["<img src=x onerror=alert(1)>", "javascript:alert(1)"],
-  series: [{ name: "<svg onload=alert(1)>", values: [2, 1] }],
-});
-
 test("a chart fence and raw code element keep the exact source outside block HTML", async () => {
-  const escaped = chartSource.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const escaped = hostileChartSource.replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   for (const markdown of [
-    `\`\`\`chart\n${chartSource}\n\`\`\``,
+    `\`\`\`chart\n${hostileChartSource}\n\`\`\``,
     `<pre><code class="language-chart">${escaped}</code></pre>`,
   ]) {
     const blocks = await render(markdown);
     expect(blocks).toMatchObject([
       {
-        id: `overview-${await blockHash(normalizeText(chartSource))}`,
+        id: `overview-${await blockHash(normalizeText(hostileChartSource))}`,
         kind: "chart",
-        source: chartSource,
-        text: chartSource,
+        source: hostileChartSource,
+        text: hostileChartSource,
         html: "",
       },
     ]);
   }
   const both = await render(`<pre><code class="language-chart language-mermaid">${escaped}</code></pre>`);
-  expect(both).toMatchObject([{ kind: "diagram", source: chartSource }]);
+  expect(both).toMatchObject([{ kind: "diagram", source: hostileChartSource }]);
 });
 
-test.each([chartSource.slice(1), chartSource.replace("[2,1]", "[2,-1]")])(
+test.each([
+  ["chart", '{"type":"sparkline","series":[{"name":"Daily","values":[1,2]}]}', "chart"],
+  ["mermaid", "graph TD; A-->B", "diagram"],
+])("isolates raw %s only when the code has whitespace siblings", async (language, source, kind) => {
+  const code = `<code class="language-${language}">${source}</code>`;
+  for (const sibling of ["more text", "<em>more text</em>", "<code>more text</code>", "<!--comment-->"]) {
+    const blocks = await render(`<pre>${code}${sibling}</pre>`);
+    expect(blocks).toMatchObject([{ kind: "code" }]);
+    expect(blocks[0]?.text).toBe(source + (sibling.startsWith("<!--") ? "" : "more text"));
+  }
+  expect(await render(`<pre>\n \n${code}\n</pre>`)).toMatchObject([{ kind, source, html: "" }]);
+});
+
+test("raw chart code takes only text from nested HTML after sanitization", async () => {
+  const source = '{"type":"bar","title":"AxB","labels":["Day"],"series":[{"name":"Count","values":[3]}]}';
+  const markup = '<img src=x onerror=alert(1)><a href="javascript:alert(1)">x</a><svg onload=alert(1)></svg>';
+  const blocks = await render(`<pre><code class="language-chart">${source.replace("AxB", `A${markup}B`)}</code></pre>`);
+  expect(blocks).toMatchObject([{ kind: "chart", html: "", source, text: source }]);
+  for (const block of blocks) expect(block.html).not.toMatch(/onerror=|onload=|<script|href="javascript:|<img|<svg/i);
+});
+
+test.each([hostileChartSource.slice(1), hostileChartSource.replace("[2,1]", "[2,-1]")])(
   "invalid chart source stays visible as escaped code (%#)",
   async (source) => {
     const blocks = await render(`\`\`\`chart\n${source}\n\`\`\``);
@@ -374,9 +388,9 @@ test.each([chartSource.slice(1), chartSource.replace("[2,1]", "[2,-1]")])(
 );
 
 test("a chart in a list splits the item around the source", async () => {
-  const blocks = await render(`- Start\n\n  \`\`\`chart\n  ${chartSource}\n  \`\`\`\n\n  End`);
+  const blocks = await render(`- Start\n\n  \`\`\`chart\n  ${hostileChartSource}\n  \`\`\`\n\n  End`);
   expect(blocks.map(({ kind }) => kind)).toEqual(["item", "chart", "item"]);
-  expect(blocks[1]).toMatchObject({ source: chartSource, html: "" });
+  expect(blocks[1]).toMatchObject({ source: hostileChartSource, html: "" });
   expect(blocks.map(({ html }) => html).join("")).not.toMatch(/<script|onerror|onload|<svg/i);
 });
 

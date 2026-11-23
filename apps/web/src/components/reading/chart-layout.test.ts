@@ -1,7 +1,15 @@
 // @vitest-environment node
 import type { ChartSpec } from "@emend/contract";
 import { expect, test } from "vitest";
-import { chartWidth, formatChartValue, layoutBars, layoutLine, layoutSparklines, niceScale } from "./chart-layout.ts";
+import {
+  chartWidth,
+  formatChartExact,
+  formatChartLabel,
+  layoutBars,
+  layoutLine,
+  layoutSparklines,
+  niceScale,
+} from "./chart-layout.ts";
 
 test.each([
   [0, 0.2, 1],
@@ -24,11 +32,72 @@ test("zero or missing widths use the fallback, and measured widths stay within b
   expect([0, 150, 320, 1440].map(chartWidth)).toEqual([480, 200, 320, 960]);
 });
 
-test("formats precise small values, compact large values and percent units", () => {
-  expect(formatChartValue(12, "ms")).toBe("12 ms");
-  expect(formatChartValue(1234.5)).toBe("1,234.5");
-  expect(formatChartValue(12345)).toBe("12.3K");
-  expect(formatChartValue(7, "%")).toBe("7%");
+test.each([
+  [0, "0"],
+  [0.001, "0.001"],
+  [0.004, "0.004"],
+  [0.00123456, "0.00123"],
+  [1234.5, "1,234.5"],
+  [12341, "12.34K"],
+  [12349, "12.35K"],
+  [123456, "123.5K"],
+  [1e12, "1T"],
+] as const)("formats %s as a chart label", (value, expected) => {
+  expect(formatChartLabel(value)).toBe(expected);
+});
+
+test.each([
+  [0.001, "0.001"],
+  [12341, "12,341"],
+  [12349, "12,349"],
+  [1e12, "1,000,000,000,000"],
+  [0.1, "0.1"],
+  [1e-25, "1e-25"],
+] as const)("keeps the exact value of %s", (value, expected) => {
+  expect(formatChartExact(value)).toBe(expected);
+});
+
+test.each([
+  [0.004, ["0", "0.001", "0.002", "0.003", "0.004"]],
+  [0.012, ["0", "0.0025", "0.005", "0.0075", "0.01", "0.0125"]],
+  [0.3, ["0", "0.1", "0.2", "0.3"]],
+  [7, ["0", "2", "4", "6", "8"]],
+  [95, ["0", "20", "40", "60", "80", "100"]],
+  [1234, ["0", "250", "500", "750", "1,000", "1,250"]],
+  [1e12, ["0", "200B", "400B", "600B", "800B", "1T"]],
+] as const)("draws distinct exact tick labels for a maximum of %s", (maximum, expected) => {
+  const { grid } = layoutLine(
+    { type: "line", labels: ["First", "Last"], series: [{ name: "Count", values: [0, maximum] }] },
+    480,
+  );
+  expect(grid.map(({ text }) => text)).toEqual(expected);
+});
+
+test.each(["ms", "%"])("appends %s to values and reserves space for the drawn strings", (unit) => {
+  const suffix = unit === "%" ? "%" : " ms";
+  const spec = { unit, labels: ["First", "Last"], series: [{ name: "Counts", values: [0.004, 12349] }] };
+  expect(formatChartExact(12349, unit)).toBe(`12,349${suffix}`);
+  const bar = layoutBars({ ...spec, type: "bar" }, 480);
+  expect(bar.rows[1]?.bars[0]?.value).toBe(`12.35K${suffix}`);
+  expect(bar.barSpace).toBe(480 - `12.35K${suffix}`.length * 7 - 8);
+  const line = layoutLine({ ...spec, type: "line" }, 480);
+  expect(line.grid[0]?.text).toBe(`0${suffix}`);
+  expect(line.left).toBe(Math.max(...line.grid.map(({ text }) => text.length)) * 7 + 8);
+  expect(line.right).toBe(bar.barSpace);
+  expect(layoutSparklines({ ...spec, type: "sparkline" }, 480).rows[0]?.line.end.x).toBe(bar.barSpace);
+});
+
+test("long unit suffixes leave room for the plot on a narrow line chart", () => {
+  const spec = {
+    type: "line" as const,
+    labels: ["First", "Next"],
+    unit: "requests",
+    series: [{ name: "Rate", values: [0, 0.000012345] }],
+  };
+  const plot = layoutLine(spec, 200);
+  expect(plot.left).toBe(Math.max(...plot.grid.map(({ text }) => text.length)) * 7 + 8);
+  expect(plot.right).toBe(plot.width - "0.0000123 requests".length * 7 - 8);
+  expect(plot.right).toBeGreaterThan(plot.left);
 });
 
 const series = [
