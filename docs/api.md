@@ -2201,7 +2201,8 @@ The definition is the rest of the item, nested lists and later paragraphs includ
 whitespace-normalized and cut to `glossaryDefinitionChars` with a closing `…`, as in a list glossary.
 An item that does not fit this shape, has a blank definition or an invalid or repeated term is
 skipped. An invalid or repeated alias is dropped. Terms and aliases follow the manifest glossary's
-rules (`GlossaryForm`, duplicates compared case-insensitively after normalization). At most
+rules (`GlossaryForm`, with whitespace collapsed first, so a line break inside a term reads as one
+space; duplicates compared case-insensitively after normalization). At most
 `glossaryTerms` entries and `glossaryAliases` aliases per entry count; later ones are ignored.
 
 The renderer marks the first use of each term and alias elsewhere in the doc, with the same rules
@@ -2231,7 +2232,7 @@ and trimmed, equals "Glossary" ignoring case. A `<dl>` may group its `dt` and `d
 A run of `dt` followed by one or more `dd` is one entry: the first `dt` is the term, each further `dt` an
 alias, and the `dd` texts joined with a space the definition, as plain text, whitespace-normalized
 and cut to `glossaryDefinitionChars` with a closing `…`. Terms and aliases follow the manifest
-glossary's rules (`GlossaryForm`). An entry with a blank definition or an invalid or repeated term
+glossary's rules (`GlossaryForm`, with whitespace collapsed first). An entry with a blank definition or an invalid or repeated term
 is skipped; an invalid or repeated alias is dropped; at most `glossaryTerms` entries and
 `glossaryAliases` aliases per entry count.
 

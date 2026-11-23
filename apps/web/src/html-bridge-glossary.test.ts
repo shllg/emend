@@ -133,6 +133,31 @@ test("a doc without a glossary does not change at all", () => {
   expect(b.host()).toBeNull();
 });
 
+test("more than 1,024 headings before the Glossary heading leave the doc without a glossary", () => {
+  const headings = "<h3>Section</h3>".repeat(1030);
+  const b = bridge(`<body><p id="t">A budget.</p>${headings}${entries(entry("Budget", "Money."))}</body>`);
+  expect(b.marks()).toEqual([]);
+  expect(b.host()).toBeNull();
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+});
+
+test("a div-grouped list is cut at 10,000 items", () => {
+  const group = (count: number) =>
+    `<h2>Glossary</h2><dl><div>${"<dd>x</dd>".repeat(count)}<dt>Late</dt><dd>Defined.</dd></div></dl>`;
+  const within = bridge(page("A late word.", group(9990)));
+  expect(markTexts(within)).toEqual(["late"]);
+  const beyond = bridge(page("A late word.", group(10010)));
+  expect(beyond.marks()).toEqual([]);
+  expect(beyond.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+});
+
+test("a line break inside a term reads as one space, as in core", () => {
+  const b = bridge(page("A hub node.", entries(entry("Hub\nnode", "Machine.", "edge\nbox"))));
+  expect(markTexts(b)).toEqual(["hub node"]);
+  b.click(required(b.marks()[0]));
+  expect(cardText(b).term).toBe("Hub node");
+});
+
 test("a Glossary heading without a dl marks nothing", () => {
   const b = bridge("<body><p>Budget here.</p><h2>Glossary</h2><p>Budget: money.</p><ul><li>Budget</li></ul></body>");
   expect(b.marks()).toEqual([]);

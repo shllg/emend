@@ -142,3 +142,45 @@ test("hostile terms, definitions and raw HTML stay inert text", async () => {
   for (const term of terms ?? []) expect(term.definition).not.toContain("javascript:");
   for (const [, , text] of marks(html)) expect(text).not.toMatch(/[<>&]/);
 });
+
+test("javascript links, raw SVG and a Mermaid click directive stay inert", async () => {
+  const { blocks, terms, html } = await render(
+    doc(
+      [
+        "- **[Hub](javascript:alert(1)):** Def one.",
+        "- **Link** [x](javascript:alert(2)): Def two.",
+        "- **Raw:** <svg onload=alert(3)><circle r=1 /></svg> tail <script>alert(4)</script>",
+        "<svg onload=alert(5)><text>raw</text></svg>",
+      ].join("\n"),
+      'hub raw link\n\n```mermaid\ngraph TD\n  Hub-->B\n  click Hub href "javascript:alert(6)"\n```',
+    ),
+  );
+  for (const text of [html, ...blocks.map((block) => block.html)]) {
+    expect(text).not.toMatch(/javascript:|<svg|<script|\son[a-z]+\s*=/i);
+  }
+  const diagram = blocks.find((block) => block.text.includes("click Hub"));
+  expect(diagram).toBeDefined();
+  expect(diagram?.html).not.toContain("emend-term");
+  expect(terms?.map((term) => term.term)).toContain("Hub");
+  for (const term of terms ?? []) {
+    for (const text of [term.term, term.definition]) {
+      expect(typeof text).toBe("string");
+      expect(text).not.toMatch(/javascript:|<svg|<script/i);
+    }
+  }
+});
+
+test("a very long whitespace run in a head is skipped without stalling the render", async () => {
+  const spaces = " ".repeat(200_000);
+  const { blocks, terms } = await render(
+    doc([`- **a${spaces}b:** Inside the bold.`, `- **Term**${spaces}x`, "- **Hub:** Kept."].join("\n")),
+  );
+  expect(blocks.length).toBeGreaterThan(0);
+  expect(terms?.map((term) => term.term)).toEqual(["Hub"]);
+});
+
+test("a line break inside a term reads as one space", async () => {
+  const { terms, html } = await render(doc("- **Hub\nnode** (also: edge\nbox):\n  A machine.", "An edge box here."));
+  expect(terms?.map((term) => term.term)).toEqual(["Hub node"]);
+  expect(marks(html).map((m) => [m[1], m[2]])).toEqual([["0", "edge box"]]);
+});

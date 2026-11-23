@@ -616,12 +616,16 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     glossary = [];
     glossaryList = undefined;
     if (!body()) return;
-    let heading, list;
+    let heading, list, headings = 0;
     for (const node of nodes(body(), GLOSSARY_VISITS_MAX)) {
       if (!htmlElement(node)) continue;
       const name = localName(node);
       if (!heading) {
-        if (/^h[1-6]$/.test(name) && label(node).toLowerCase() === "glossary") heading = node;
+        if (/^h[1-6]$/.test(name)) {
+          if (++headings > 1024) return;
+          // Only "glossary" has to match, so a short label is enough.
+          if (label(node, 16).toLowerCase() === "glossary") heading = node;
+        }
       } else if (name === "dl" && !dom(window.Node.prototype, "contains", heading, node)) { list = node; break; }
     }
     if (!list) return;
@@ -632,8 +636,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       const name = localName(child);
       if (name === "dt" || name === "dd") items.push(child);
       else if (name === "div") {
-        for (const inner of children(child))
+        for (const inner of children(child)) {
+          if (items.length >= 10000) break;
           if (htmlElement(inner) && (localName(inner) === "dt" || localName(inner) === "dd")) items.push(inner);
+        }
       }
       if (items.length >= 10000) break;
     }

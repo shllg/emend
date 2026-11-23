@@ -10,8 +10,11 @@ type Child = HtmlElement["children"][number];
 
 const headingTags = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 // Aliases sit in "(also: a, b)" at the end of the head, or after the bold term.
-const alsoAtEnd = /^(.*?)\s*\(\s*also\s*:([^()]*)\)\s*$/isu;
-const alsoAfterTerm = /^\s*(?:\(\s*also\s*:([^()]*)\))?\s*:/iu;
+// Both patterns run in linear time: no free whitespace run sits next to another one or a lazy quantifier.
+const alsoAtEnd = /\(\s*also\s*:([^()]*)\)\s*$/iu;
+const alsoAfterTerm = /^\s*(?:\(\s*also\s*:([^()]*)\)\s*)?:/iu;
+// A head is a term of 100 characters, 8 aliases of 100 and the "(also: …)" wrapper: about 1,000 at most.
+const HEAD_MAX = 1000;
 
 /** Text of nodes, with a space around block elements so adjacent paragraphs and items do not run together. */
 function textOf(nodes: Child[]): string {
@@ -56,6 +59,7 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
   const strong = inline[0];
   if (strong?.type !== "element" || strong.tagName !== "strong") return;
   const strongText = textOf(strong.children).trim();
+  if (strongText.length > HEAD_MAX) return;
   let head: string;
   let definition: Child[];
   let lead = "";
@@ -65,7 +69,8 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
   } else {
     const after = inline[1];
     if (after?.type !== "text") return;
-    const match = alsoAfterTerm.exec(after.value);
+    // Only a bounded prefix is matched; the definition still takes the whole rest.
+    const match = alsoAfterTerm.exec(after.value.slice(0, HEAD_MAX));
     if (!match) return;
     head = match[1] === undefined ? strongText : `${strongText} (also: ${match[1]})`;
     lead = after.value.slice(match[0].length);
@@ -76,8 +81,8 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
   let aliases: string[] = [];
   const split = alsoAtEnd.exec(head);
   if (split) {
-    term = split[1] ?? "";
-    aliases = (split[2] ?? "")
+    term = head.slice(0, split.index).trim();
+    aliases = (split[1] ?? "")
       .split(",")
       .map((alias) => alias.trim())
       .filter((alias) => alias !== "");
@@ -109,18 +114,22 @@ export function extractDocGlossary(tree: HtmlRoot): { entries: DocGlossaryEntry[
     if (entries.length >= LIMITS.glossaryTerms) break;
     if (item.type !== "element" || item.tagName !== "li") continue;
     const parsed = parseItem(item);
-    if (!parsed || parsed.definition === "" || !GlossaryForm.safeParse(parsed.term).success) continue;
-    if (seen.has(key(parsed.term))) continue;
-    seen.add(key(parsed.term));
+    if (!parsed || parsed.definition === "") continue;
+    // Whitespace is collapsed first, as the bridge does, so a soft break inside a term does not skip it.
+    const term = normalizeGlossaryForm(parsed.term);
+    if (!GlossaryForm.safeParse(term).success) continue;
+    if (seen.has(key(term))) continue;
+    seen.add(key(term));
     const aliases: string[] = [];
-    for (const alias of parsed.aliases) {
+    for (const raw of parsed.aliases) {
       if (aliases.length >= LIMITS.glossaryAliases) break;
+      const alias = normalizeGlossaryForm(raw);
       if (!GlossaryForm.safeParse(alias).success || seen.has(key(alias))) continue;
       seen.add(key(alias));
       aliases.push(alias);
     }
     renderData(item).emendGlossaryItem = entries.length;
-    entries.push({ ...parsed, aliases });
+    entries.push({ ...parsed, term, aliases });
     items.push(item);
   }
   return { entries, items };
