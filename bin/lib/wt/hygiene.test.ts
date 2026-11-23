@@ -112,10 +112,18 @@ test("the merge skill checks the approved review for late feedback before restar
   assert.ok(approval >= 0 && approval < tracked && tracked < fetch);
   const lookup = readiness.slice(approval, tracked);
   assert.match(lookup, /retained approved head/);
-  assert.match(lookup, /Exit 1[^\n]*step 3/);
+  const missingApproval = /On exit 1, run `<main>\/bin\/wt notify blocked`, report [^\n]*approval[^\n]* and stop\./;
+  assert.match(lookup, missingApproval);
+  assert.match(lookup, /A later run restarts at step 1/);
   assert.match(lookup, /exit 2 or 69[^\n]*notify blocked[^\n]*stop/i);
   assert.match(lookup, /approved <sha> review <id> revision <n>/);
   assert.match(readiness.slice(tracked, fetch), /Read the hand-off[\s\S]*notify blocked[^\n]*stop/);
   assert.match(readiness.slice(fetch), /non-zero exit[\s\S]*notify blocked[^\n]*stop/);
+  const rerun = skill.slice(
+    skill.indexOf("Rerun `<main>/bin/wt approval --head <approved head>`"),
+    skill.indexOf("## 5."),
+  );
+  assert.match(rerun, missingApproval);
+  assert.match(rerun, /A later run restarts at step 1/);
   assert.match(skill, /Any other change from READY[^\n]*stops the merge[^\n]*e-pr-finalize/);
 });

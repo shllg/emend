@@ -919,35 +919,45 @@ test("land refuses an unapproved head before writing backup refs or a commit", (
     assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
   }));
 
-for (const changed of [false, true]) {
-  test(`land checks the approved change after a rebase despite replace refs (changed: ${changed})`, () =>
-    scenario(async ({ env, fx, repo }) => {
-      const wt = worktree(repo, "feat-a");
-      const approved = commitFile(wt, "feature.txt", "reviewed\n");
-      installFakeEmend(env, approved, [approvedReview("feat-a", approved)]);
-      const main = commitFile(fx.main, "other.txt", "main advanced\n");
-      gitIn(wt, "rebase", "main");
-      if (changed) commitFile(wt, "extra.txt", "extra change\n");
-      const head = gitIn(wt, "rev-parse", "HEAD");
-      assert.notEqual(head, approved);
-      gitIn(wt, "replace", "--graft", approved);
-      const invoke = () =>
-        commands.land?.({
-          repo: resolveRepo(wt),
-          args: ["--match-head", head, "--approved-head", approved, "--subject", "feat: reviewed", "--body", ""],
-        });
-      if (changed) {
-        const objects = gitIn(wt, "count-objects", "-v");
-        assert.throws(invoke, { code: 1, message: "HEAD changes the approved change." });
-        assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
-        assert.equal(gitIn(wt, "count-objects", "-v"), objects);
-        assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
-      } else {
-        const out = await capture(invoke);
-        assert.ok(out.endsWith(`landed ${gitIn(fx.main, "rev-parse", "main")}\n`));
-        assert.equal(gitIn(fx.main, "rev-parse", "main^{tree}"), gitIn(wt, "rev-parse", `${head}^{tree}`));
-      }
-    }));
+for (const override of ["refs/replace", "info/grafts"]) {
+  for (const changed of [false, true]) {
+    const outcome = changed ? "refuses the changed replay" : "lands the original rebased tree";
+    test(`land ${outcome} with ${override}`, () =>
+      scenario(async ({ env, fx, repo }) => {
+        const wt = worktree(repo, "feat-a");
+        const approved = commitFile(wt, "feature.txt", "reviewed\n");
+        installFakeEmend(env, approved, [approvedReview("feat-a", approved)]);
+        const main = commitFile(fx.main, "other.txt", "main advanced\n");
+        gitIn(wt, "rebase", "main");
+        const replay = gitIn(wt, "rev-parse", "HEAD");
+        const head = changed ? commitFile(wt, "extra.txt", "extra change\n") : replay;
+        const originalTree = gitIn(wt, "rev-parse", `${head}^{tree}`);
+        if (override === "refs/replace") {
+          gitIn(wt, "replace", head, changed ? replay : approved);
+        } else {
+          // The graft makes the rebased head appear parentless to a reader that honors it.
+          const info = join(repo.commonDir, "info");
+          mkdirSync(info, { recursive: true });
+          writeFileSync(join(info, "grafts"), `${head}\n`);
+        }
+        const invoke = () =>
+          commands.land?.({
+            repo: resolveRepo(wt),
+            args: ["--match-head", head, "--approved-head", approved, "--subject", "feat: reviewed", "--body", ""],
+          });
+        if (changed) {
+          const objects = gitIn(wt, "count-objects", "-v");
+          assert.throws(invoke, { code: 1, message: "HEAD changes the approved change." });
+          assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+          assert.equal(gitIn(wt, "count-objects", "-v"), objects);
+          assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+        } else {
+          const out = await capture(invoke);
+          assert.ok(out.endsWith(`landed ${gitIn(fx.main, "rev-parse", "main")}\n`));
+          assert.equal(gitIn(fx.main, "rev-parse", "main^{tree}"), originalTree);
+        }
+      }));
+  }
 }
 
 test("land refuses issue branches before creating a commit, even without closing text or metadata", () =>

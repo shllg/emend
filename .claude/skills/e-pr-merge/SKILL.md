@@ -69,7 +69,9 @@ finish. Then, before any gate, look for an answer the owner may have sent in eme
 Run `<main>/bin/wt approval --head <head>` in the PR's worktree. Use the PR's `headRefOid` for
 `<head>`, or the retained approved head in the 4.4.5 rerun.
 
-- Exit 1 means no approval is on record. Go to step 3.
+- On exit 1, run `<main>/bin/wt notify blocked`, report that no approval is on record, and stop.
+  If an approval was on record before the settle window, report that it disappeared during the window.
+  This also stops the 4.4.5 rerun. A later run restarts at step 1.
 - On exit 2 or 69, run `<main>/bin/wt notify blocked`, report the message and stop.
 - On exit 0, take the review id only from `approved <sha> review <id> revision <n>`.
 
@@ -166,7 +168,8 @@ unchanged.
       equal digests. A `closed` answer stops the whole flow as step 2 says.
       Check that `headRefOid` still equals the rebased head.
       Rerun `<main>/bin/wt approval --head <approved head>`. It must still exit 0.
-      On exit 1, report the reason and hand back to `/e-pr-finalize`.
+      On exit 1, run `<main>/bin/wt notify blocked`, report that the earlier approval is no longer on record, and stop.
+      A later run restarts at step 1.
       On exit 2 or 69, run `<main>/bin/wt notify blocked`, report the message and stop.
       Any other change from READY stops the merge and hands back to `/e-pr-finalize`.
 5. Otherwise (a restack, or different digests): the content changed. Return to the hand-off in

@@ -58,6 +58,9 @@ function childEnv(cmd: string, gitNoLazyFetch?: boolean): NodeJS.ProcessEnv {
     delete env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
     delete env.GIT_NAMESPACE;
     delete env.GIT_CEILING_DIRECTORIES;
+    env.GIT_NO_REPLACE_OBJECTS = "1";
+    // Grafts still rewrite parents with replace refs disabled. Git cannot open a file below /dev/null.
+    env.GIT_GRAFT_FILE = "/dev/null/wt-no-grafts";
     // Status text and JSON must stay plain even when the parent forces terminal output.
     delete env.GH_FORCE_TTY;
     delete env.CLICOLOR_FORCE;
@@ -83,7 +86,8 @@ function childEnv(cmd: string, gitNoLazyFetch?: boolean): NodeJS.ProcessEnv {
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
  * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST and EMEND_PRIVATE_TERMS.
- * Git and gh children also discard repository-selection overrides and disable forced color/terminal output.
+ * Git and gh children use the original objects and parents, discard repository-selection overrides
+ * and disable forced color/terminal output.
  * gitNoLazyFetch pins local Git reads or clears the inherited setting for remote commands.
  * Exit 127 means not found; 124 means it ran past the timeout.
  */

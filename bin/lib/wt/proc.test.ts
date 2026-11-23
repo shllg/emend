@@ -134,7 +134,7 @@ for (const execute of [run, runBytes]) {
 
 for (const execute of [run, runBytes]) {
   for (const command of ["gh", "git"]) {
-    test(`${execute.name} gives ${command} a plain-output environment`, (t) => {
+    test(`${execute.name} pins ${command}'s object view and plain output`, (t) => {
       const parent = {
         GH_FORCE_TTY: "120",
         CLICOLOR_FORCE: "1",
@@ -155,6 +155,8 @@ for (const execute of [run, runBytes]) {
         GIT_ALTERNATE_OBJECT_DIRECTORIES: "/synthetic/alternate-objects",
         GIT_NAMESPACE: "synthetic-namespace",
         GIT_CEILING_DIRECTORIES: "/synthetic/ceiling",
+        GIT_NO_REPLACE_OBJECTS: "0",
+        GIT_GRAFT_FILE: "/synthetic/grafts",
       };
       const original = { ...parent };
       t.mock.property(process, "env", parent);
@@ -187,6 +189,8 @@ for (const execute of [run, runBytes]) {
           assert.equal(options.env.NO_COLOR, "1");
           assert.equal(options.env.CLICOLOR, "0");
           assert.equal(options.env.GH_NO_UPDATE_NOTIFIER, "1");
+          assert.equal(options.env.GIT_NO_REPLACE_OBJECTS, "1");
+          assert.equal(options.env.GIT_GRAFT_FILE, "/dev/null/wt-no-grafts");
           return { status: 0, stdout: options.encoding === "buffer" ? Buffer.alloc(0) : "", stderr: "" };
         },
       );
