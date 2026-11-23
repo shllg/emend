@@ -177,7 +177,9 @@ Other types are not checked, so use one of these.
 
 This section applies to a review writeup and a Markdown document.
 Show numbers before and after a change as a small chart: timings, sizes and counts.
-Put a JSON spec in a `chart` code fence, in a topic's `why` after the **Fix:** paragraph, or in `body`.
+Put a JSON spec in a `chart` code fence.
+In a review writeup, put it in a topic's `why` after the **Fix:** paragraph, or in `body`.
+In a Markdown document, put it next to the text that discusses the numbers.
 
 ```chart
 {

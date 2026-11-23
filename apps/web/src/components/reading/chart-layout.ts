@@ -51,13 +51,18 @@ const textWidth = (text: string) => Array.from(text).length * 7;
 const reserve = (values: string[]) => Math.max(...values.map(textWidth)) + 8;
 const maximum = (spec: ChartSpec) => Math.max(...spec.series.flatMap(({ values }) => values));
 
-function labelLines(text: string, width: number, baseline: number) {
-  const chars = Array.from(text);
-  const length = Math.max(1, Math.floor(width / 7));
-  const lines = [];
-  for (let i = 0; i < chars.length; i += length)
-    lines.push({ text: chars.slice(i, i + length).join(""), y: baseline + lines.length * 16 });
-  return lines;
+export function labelLines(text: string, width: number, baseline: number) {
+  const limit = Math.max(1, Math.floor(width / 7));
+  let remaining = Array.from(text.trim().replace(/\s+/gu, " "));
+  const lines: string[] = [];
+  while (remaining.length > limit) {
+    const space = remaining.lastIndexOf(" ", limit);
+    const end = space < 0 ? limit : space;
+    lines.push(remaining.slice(0, end).join(""));
+    remaining = remaining.slice(space < 0 ? end : end + 1);
+  }
+  lines.push(remaining.join(""));
+  return lines.map((text, i) => ({ text, y: baseline + i * 16 }));
 }
 
 function barPath(length: number, y: number) {
@@ -118,15 +123,14 @@ export type SeriesLine = ReturnType<typeof seriesLine>;
 
 function thinLabels(labels: string[], x: (i: number) => number, width: number) {
   const last = labels.length - 1;
-  const middle = (x(0) + x(last)) / 2;
+  const edgeWidth = (x(last) - x(0)) / 2 - 4;
   const candidates = labels.map((label, i) => {
-    // Both endpoints must fit even when two long labels alone would fill the entire plot.
-    const min = i === last ? middle + 4 : 0;
-    const max = i === 0 ? middle - 4 : width;
-    const lines = labelLines(label, max - min, 166);
-    const half = Math.max(...lines.map(({ text }) => textWidth(text))) / 2;
-    const center = Math.max(min + half, Math.min(max - half, x(i)));
-    return { lines, x: center, left: center - half, right: center + half };
+    const anchor: "start" | "middle" | "end" = i === 0 ? "start" : i === last ? "end" : "middle";
+    const lines = labelLines(label, anchor === "middle" ? width : edgeWidth, 166);
+    const widest = Math.max(...lines.map(({ text }) => textWidth(text)));
+    const point = x(i);
+    const left = anchor === "start" ? point : anchor === "end" ? point - widest : point - widest / 2;
+    return { lines, anchor, x: point, left, right: left + widest };
   });
   const end = candidates[last] as (typeof candidates)[number];
   let right = -Infinity;

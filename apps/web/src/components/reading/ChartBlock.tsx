@@ -92,8 +92,8 @@ function ChartPlot({ spec, width }: { spec: ChartSpec; width: number }) {
             </text>
           </g>
         ))}
-        {plot.labels.map(({ x, lines }) => (
-          <text className="em-chart-axis" key={x} textAnchor="middle">
+        {plot.labels.map(({ x, lines, anchor }) => (
+          <text className="em-chart-axis" key={x} textAnchor={anchor}>
             {lines.map(({ text, y }) => (
               <tspan key={y} x={x} y={y}>
                 {text}
