@@ -176,7 +176,25 @@ test("a very long whitespace run in a head is skipped without stalling the rende
     doc([`- **a${spaces}b:** Inside the bold.`, `- **Term**${spaces}x`, "- **Hub:** Kept."].join("\n")),
   );
   expect(blocks.length).toBeGreaterThan(0);
-  expect(terms?.map((term) => term.term)).toEqual(["Hub"]);
+  // Whitespace collapses, so the first item is the valid term "a b"; the second has no colon and is skipped.
+  expect(terms?.map((term) => term.term)).toEqual(["a b", "Hub"]);
+});
+
+test("an alias that is too long is dropped and the term stays", async () => {
+  const alias = "z".repeat(950);
+  const { terms, html } = await render(doc(`- **Term** (also: ${alias}): Def.`, `A term and ${alias}.`));
+  expect(terms?.map((term) => term.term)).toEqual(["Term"]);
+  expect(marks(html).map((m) => m[2])).toEqual(["term"]);
+});
+
+test("many aliases keep the term and the first valid ones", async () => {
+  const aliases = Array.from({ length: 30 }, (_, i) => `alias${i}z`);
+  const { terms, html } = await render(
+    doc(`- **Root** (also: ${aliases.join(", ")}): Def.`, "alias29z alias8z alias7z"),
+  );
+  expect(terms?.map((term) => term.term)).toEqual(["Root"]);
+  // Only the first use of an entry is marked, so the ninth and later aliases being dropped shows here.
+  expect(marks(html).map((m) => m[2])).toEqual(["alias7z"]);
 });
 
 test("a line break inside a term reads as one space", async () => {

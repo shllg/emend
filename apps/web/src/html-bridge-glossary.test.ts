@@ -141,6 +141,15 @@ test("more than 1,024 headings before the Glossary heading leave the doc without
   expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
 });
 
+test("a pretty-printed Glossary heading with an indented svg icon and much whitespace still counts", () => {
+  const space = " ".repeat(120);
+  const heading = `<h2>\n${space}<svg width="1" height="1">\n${space}<path d="M0 0"/>\n${space}</svg>\n${space}Glossary\n${space}</h2>`;
+  const b = bridge(
+    `<body><main><p id="t">A budget.</p>${heading}<dl><dt>Budget</dt><dd>Money.</dd></dl></main></body>`,
+  );
+  expect(markTexts(b)).toEqual(["budget"]);
+});
+
 test("a div-grouped list is cut at 10,000 items", () => {
   const group = (count: number) =>
     `<h2>Glossary</h2><dl><div>${"<dd>x</dd>".repeat(count)}<dt>Late</dt><dd>Defined.</dd></div></dl>`;

@@ -616,15 +616,16 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     glossary = [];
     glossaryList = undefined;
     if (!body()) return;
-    let heading, list, headings = 0;
+    let heading, list, headingCount = 0;
     for (const node of nodes(body(), GLOSSARY_VISITS_MAX)) {
       if (!htmlElement(node)) continue;
       const name = localName(node);
       if (!heading) {
         if (/^h[1-6]$/.test(name)) {
-          if (++headings > 1024) return;
-          // Only "glossary" has to match, so a short label is enough.
-          if (label(node, 16).toLowerCase() === "glossary") heading = node;
+          if (++headingCount > 1024) return;
+          // Only "glossary" has to match, so a short label is enough. The raw budget leaves room for
+          // whitespace and icons before the word; the heading cap bounds the cost.
+          if (label(node, 16, 800).toLowerCase() === "glossary") heading = node;
         }
       } else if (name === "dl" && !dom(window.Node.prototype, "contains", heading, node)) { list = node; break; }
     }

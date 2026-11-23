@@ -10,11 +10,10 @@ type Child = HtmlElement["children"][number];
 
 const headingTags = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 // Aliases sit in "(also: a, b)" at the end of the head, or after the bold term.
-// Both patterns run in linear time: no free whitespace run sits next to another one or a lazy quantifier.
+// Both patterns run in linear time on any input, so neither needs a length bound: no free whitespace
+// run sits next to another one or a lazy quantifier, and a group cannot span a parenthesis.
 const alsoAtEnd = /\(\s*also\s*:([^()]*)\)\s*$/iu;
 const alsoAfterTerm = /^\s*(?:\(\s*also\s*:([^()]*)\)\s*)?:/iu;
-// A head is a term of 100 characters, 8 aliases of 100 and the "(also: …)" wrapper: about 1,000 at most.
-const HEAD_MAX = 1000;
 
 /** Text of nodes, with a space around block elements so adjacent paragraphs and items do not run together. */
 function textOf(nodes: Child[]): string {
@@ -59,7 +58,6 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
   const strong = inline[0];
   if (strong?.type !== "element" || strong.tagName !== "strong") return;
   const strongText = textOf(strong.children).trim();
-  if (strongText.length > HEAD_MAX) return;
   let head: string;
   let definition: Child[];
   let lead = "";
@@ -69,8 +67,7 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
   } else {
     const after = inline[1];
     if (after?.type !== "text") return;
-    // Only a bounded prefix is matched; the definition still takes the whole rest.
-    const match = alsoAfterTerm.exec(after.value.slice(0, HEAD_MAX));
+    const match = alsoAfterTerm.exec(after.value);
     if (!match) return;
     head = match[1] === undefined ? strongText : `${strongText} (also: ${match[1]})`;
     lead = after.value.slice(match[0].length);

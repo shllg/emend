@@ -2232,9 +2232,13 @@ and trimmed, equals "Glossary" ignoring case. A `<dl>` may group its `dt` and `d
 A run of `dt` followed by one or more `dd` is one entry: the first `dt` is the term, each further `dt` an
 alias, and the `dd` texts joined with a space the definition, as plain text, whitespace-normalized
 and cut to `glossaryDefinitionChars` with a closing `…`. Terms and aliases follow the manifest
-glossary's rules (`GlossaryForm`, with whitespace collapsed first). An entry with a blank definition or an invalid or repeated term
-is skipped; an invalid or repeated alias is dropped; at most `glossaryTerms` entries and
-`glossaryAliases` aliases per entry count.
+glossary's rules (`GlossaryForm`, with whitespace collapsed first). An entry with a blank definition
+or an invalid or repeated term is skipped; an invalid or repeated alias is dropped; at most
+`glossaryTerms` entries and `glossaryAliases` aliases per entry count.
+
+The bridge checks only the first 1,024 `h1`-`h6` headings, the Glossary heading included, so a doc
+with more headings before its Glossary heading gets no glossary. Its other limits are 10,000
+`dt`/`dd` items and a walk of 100,000 nodes.
 
 The bridge inside the frame does all of the work. At ready it reads the glossary, marks the first use
 of each term and alias in its own spans (dotted underline, focusable, never inside the glossary, a
