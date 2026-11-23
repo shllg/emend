@@ -60,23 +60,34 @@ test("run reports a missing program as 127 and a timeout as 124", () => {
   assert.equal(slow.code, 124);
 });
 
-test("regression: every process helper strips the private terms environment", (t) => {
-  const parent = { EMEND_PRIVATE_TERMS: "fixturecorp" };
+test("every process helper strips private terms and pins the Git history seen by fzf previews", (t) => {
+  const parent = {
+    EMEND_PRIVATE_TERMS: "fixturecorp",
+    GIT_NO_REPLACE_OBJECTS: "0",
+    GIT_GRAFT_FILE: "/synthetic/grafts",
+    GIT_REPLACE_REF_BASE: "refs/synthetic/",
+    GIT_SHALLOW_FILE: "/synthetic/shallow",
+  };
+  const original = { ...parent };
   t.mock.property(process, "env", parent);
   const spy = t.mock.method(childProcess, "spawnSync", (...args: unknown[]) => {
     const options = args[2] as { env: NodeJS.ProcessEnv; encoding: string };
     assert.equal(Object.hasOwn(options.env, "EMEND_PRIVATE_TERMS"), false);
     assert.equal(options.env.GIT_TERMINAL_PROMPT, "0");
+    assert.equal(options.env.GIT_NO_REPLACE_OBJECTS, "1");
+    assert.equal(options.env.GIT_GRAFT_FILE, "/dev/null/wt-no-grafts");
+    assert.equal(Object.hasOwn(options.env, "GIT_REPLACE_REF_BASE"), false);
+    assert.equal(Object.hasOwn(options.env, "GIT_SHALLOW_FILE"), false);
     return { status: 0, stdout: options.encoding === "buffer" ? Buffer.alloc(0) : "", stderr: "" };
   });
   syncBuiltinESMExports();
   try {
     for (const execute of [run, runBytes]) {
-      const result = execute("fixture-command", [], { cwd: "/" });
+      const result = execute("fzf", [], { cwd: "/" });
       assert.equal(result.code, 0);
     }
     assert.equal(spy.mock.callCount(), 2);
-    assert.deepEqual(parent, { EMEND_PRIVATE_TERMS: "fixturecorp" });
+    assert.deepEqual(parent, original);
   } finally {
     spy.mock.restore();
     syncBuiltinESMExports();
@@ -157,6 +168,8 @@ for (const execute of [run, runBytes]) {
         GIT_CEILING_DIRECTORIES: "/synthetic/ceiling",
         GIT_NO_REPLACE_OBJECTS: "0",
         GIT_GRAFT_FILE: "/synthetic/grafts",
+        GIT_REPLACE_REF_BASE: "refs/synthetic/",
+        GIT_SHALLOW_FILE: "/synthetic/shallow",
       };
       const original = { ...parent };
       t.mock.property(process, "env", parent);
@@ -184,6 +197,8 @@ for (const execute of [run, runBytes]) {
             "GIT_ALTERNATE_OBJECT_DIRECTORIES",
             "GIT_NAMESPACE",
             "GIT_CEILING_DIRECTORIES",
+            "GIT_REPLACE_REF_BASE",
+            "GIT_SHALLOW_FILE",
           ])
             assert.equal(Object.hasOwn(options.env, key), false, `${key} must not reach ${command}`);
           assert.equal(options.env.NO_COLOR, "1");

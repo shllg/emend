@@ -69,9 +69,9 @@ finish. Then, before any gate, look for an answer the owner may have sent in eme
 Run `<main>/bin/wt approval --head <head>` in the PR's worktree. Use the PR's `headRefOid` for
 `<head>`, or the retained approved head in the 4.4.5 rerun.
 
-- On exit 1, run `<main>/bin/wt notify blocked`, report that no approval is on record, and stop.
-  If an approval was on record before the settle window, report that it disappeared during the window.
-  This also stops the 4.4.5 rerun. A later run restarts at step 1.
+- On exit 1, if `/e-pr-finalize` invoked this skill or this is the 4.4.5 rerun, run
+  `<main>/bin/wt notify blocked`, report that no approval is on record, and stop. A later run restarts at step 1.
+  Otherwise the owner typed the command. Follow step 6 to ask for approval in emend and stop.
 - On exit 2 or 69, run `<main>/bin/wt notify blocked`, report the message and stop.
 - On exit 0, take the review id only from `approved <sha> review <id> revision <n>`.
 

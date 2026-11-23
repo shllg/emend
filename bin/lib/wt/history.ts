@@ -10,6 +10,7 @@ import { requirePublic, requirePublicText } from "./public.ts";
 import { withRegistry } from "./registry.ts";
 import {
   assertNoGitlinks,
+  assertNoHistoryOverrides,
   fetchOrigin,
   git,
   gitBytes,
@@ -398,6 +399,7 @@ export function land(
   matchHead: string,
   approvedHead?: string,
 ): { commit: string; backups: string[] } {
+  assertNoHistoryOverrides(repo, "Nothing was changed.");
   requireGlobalIdentity(repo, top);
   const branch = currentBranch(repo, top);
   if (issueFromBranch(branch) !== null) throw new WtError(1, "Issue branches must land through a pull request.");

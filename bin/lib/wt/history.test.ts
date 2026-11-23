@@ -922,7 +922,7 @@ test("land refuses an unapproved head before writing backup refs or a commit", (
 for (const override of ["refs/replace", "info/grafts"]) {
   for (const changed of [false, true]) {
     const outcome = changed ? "refuses the changed replay" : "lands the original rebased tree";
-    test(`land ${outcome} with ${override}`, () =>
+    test(`land ${outcome} once ${override} is removed`, () =>
       scenario(async ({ env, fx, repo }) => {
         const wt = worktree(repo, "feat-a");
         const approved = commitFile(wt, "feature.txt", "reviewed\n");
@@ -945,6 +945,9 @@ for (const override of ["refs/replace", "info/grafts"]) {
             repo: resolveRepo(wt),
             args: ["--match-head", head, "--approved-head", approved, "--subject", "feat: reviewed", "--body", ""],
           });
+        assert.throws(invoke, { code: 1, message: /history overrides exist\..*Nothing was changed\.$/ });
+        if (override === "refs/replace") gitIn(wt, "replace", "-d", head);
+        else rmSync(join(repo.commonDir, "info", "grafts"));
         if (changed) {
           const objects = gitIn(wt, "count-objects", "-v");
           assert.throws(invoke, { code: 1, message: "HEAD changes the approved change." });

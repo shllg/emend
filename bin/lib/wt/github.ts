@@ -16,7 +16,7 @@ import { htmlEntityNames, legacyEntities, legacyEntityNames, namedEntities } fro
 import { checkIssue, githubRepository, originRepository } from "./issues.ts";
 import { type RunResult, run } from "./proc.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
-import { fetchOrigin, gitTry, type Repo, requireGlobalIdentity } from "./repo.ts";
+import { assertNoHistoryOverrides, fetchOrigin, gitTry, type Repo, requireGlobalIdentity } from "./repo.ts";
 import { hasTerminal, readTerminalLine } from "./terminal.ts";
 import {
   branchName,
@@ -155,6 +155,7 @@ export function push(
 ): void {
   if (o.acceptNewMarkers && (!markerTerminal.stdinTTY() || !markerTerminal.stderrTTY() || !markerTerminal.available()))
     throw new WtError(1, MARKER_TERMINAL_MESSAGE);
+  assertNoHistoryOverrides(repo, "Nothing was pushed.");
   requireGlobalIdentity(repo, top);
   const head = gitTry(repo, ["symbolic-ref", "--quiet", "HEAD"], { cwd: top });
   if (head.code !== 0 || head.stdout === "") throw new WtError(2, "HEAD is detached. Nothing was pushed.");
@@ -1183,6 +1184,7 @@ export function prMerge(
 ): string {
   const sha = commitSha(o.matchHead);
   const subject = oneLine(o.subject, "subject");
+  assertNoHistoryOverrides(repo, "Nothing was merged.");
   requirePublicText(repo, { message: `${subject}\n\n${o.body}`, branch: repo.callerBranch ?? undefined });
   const identity = originRepository(repo);
   const n = o.pr !== undefined ? prNumber(o.pr) : requireOpenPr(repo, [], identity).number;
