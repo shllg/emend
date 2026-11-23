@@ -2,6 +2,7 @@ import { BlockId, type WriteupInput } from "@emend/contract";
 import { fromHtml } from "hast-util-from-html";
 import { expect, test, vi } from "vitest";
 import { blockText, visitElements } from "./blocks.ts";
+import { hostileChartSource } from "./fixtures/chart.ts";
 import { topics, writeup } from "./fixtures/writeup.ts";
 import { HIGHLIGHT_RENDER_BYTES } from "./highlight.ts";
 import * as markdown from "./markdown.ts";
@@ -969,3 +970,40 @@ test.each([false, true])(
     expect(section?.blocks[0]?.id).toMatch(/^deviations-[0-9a-f]{8}$/);
   },
 );
+
+test("chart source stays out of glossary hints, term marks and issue links", async () => {
+  const source = '{"type":"bar","labels":["Budget #123"],"series":[{"name":"Before","values":[2]}]}';
+  const fence = `\`\`\`chart\n${source}\n\`\`\``;
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      overview: `${fence}\n\nBudget #123`,
+      glossary: [{ term: "Budget", definition: `Time allowed.\n\n${fence}` }],
+    },
+    [],
+    { repoUrl: "https://github.com/example/project" },
+  );
+  const blocks = rendered.sections.flatMap(({ blocks }) => blocks);
+  expect(blocks.filter(({ kind }) => kind === "chart")).toMatchObject([
+    { source, html: "" },
+    { source, html: "" },
+  ]);
+  expect(rendered.terms?.[0]?.definition).toBe("Time allowed.");
+  const prose = rendered.sections.find(({ key }) => key === "overview")?.blocks[1]?.html;
+  expect(prose).toContain("emend-term");
+  expect(prose).toContain("issues/123");
+});
+
+test("a hostile chart in a writeup glossary stays out of the plain definition", async () => {
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      glossary: [{ term: "Budget", definition: `Time allowed.\n\n\`\`\`chart\n${hostileChartSource}\n\`\`\`` }],
+    },
+    [],
+  );
+  expect(rendered.terms).toMatchObject([{ term: "Budget", definition: "Time allowed." }]);
+  const blocks = rendered.sections.find(({ key }) => key === "glossary")?.blocks ?? [];
+  expect(blocks.filter(({ kind }) => kind === "chart")).toMatchObject([{ html: "", source: hostileChartSource }]);
+  for (const block of blocks) expect(block.html).not.toMatch(/<script|<img|onerror=|javascript:|<svg|onload=/i);
+});

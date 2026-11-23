@@ -244,7 +244,39 @@ non-whitespace text or an element other than a line break must follow it in the 
 `emend-callout-marker-break`, and a first paragraph that holds only the marker gets
 `emend-callout-marker-line`. The app hides these and draws the type's label; the label is not
 text. Glossary terms and example rows skip the marker. A quote inside another element, or one
-that holds a Mermaid diagram, stays a plain quote. Text and block ids stay unchanged.
+that holds a Mermaid diagram or chart block, stays a plain quote. Text and block ids stay unchanged.
+
+### Charts
+
+A `chart` fence in a writeup or Markdown doc holds a JSON object of up to 4000 characters.
+
+```chart
+{
+  "type": "bar",
+  "title": "Search time",
+  "unit": "ms",
+  "labels": ["Cold start", "Warm cache"],
+  "series": [
+    { "name": "Before", "values": [420, 95] },
+    { "name": "After", "values": [180, 40] }
+  ]
+}
+```
+
+`type` is `bar`, `line` or `sparkline`.
+`labels` holds 1 to 12 labels for bars and 2 to 24 for lines.
+A sparkline holds 2 to 60 values per series and may omit its labels.
+`series` holds 1 to 4 objects with distinct names.
+Each series has a `name` and an array of numeric `values` from 0 through 1,000,000,000,000.
+All series have the same length and one value per label when labels are present.
+Labels and series names have up to 32 characters.
+The optional `title` has up to 80 characters and the optional `unit` up to 8.
+Each text field must contain a non-whitespace character.
+Unknown keys are refused, including keys on a series.
+An invalid spec stays a code block showing its source.
+The app draws the SVG with React elements and treats spec text as text throughout.
+Colours come from the app. The spec has no colour field.
+Comment HTML displays chart fences as code.
 
 ### Downloads
 
@@ -298,7 +330,7 @@ blocks and builds in its listed images like writeup images. Source uses its stor
 tokens. Code reviews and Markdown and source pubs get the emend header with the review title,
 project, branch and publish links. An HTML pub keeps
 the agent's HTML layout, with no emend header. Its listed assets are built in after filtering.
-Mermaid diagrams show as labelled source text. Links to other docs become plain text.
+Mermaid diagrams and charts show as labelled source text. Links to other docs become plain text.
 Absolute HTTP, HTTPS and mailto links keep working on `a` and `area` elements.
 Only SVG `image` and `feImage` hrefs follow the resource rules. Other elements, including SVG
 `use` and MathML elements, keep only same-document fragments in hrefs. These rules also apply
@@ -1071,7 +1103,8 @@ revision-only rule above.
 Both are absent without a mark. Marks follow the current path, including for renames.
 
 `RenderedBlock = { id: BlockId, section, kind, html, text, source? }` mirrors core's `Block`.
-Kinds are `heading | paragraph | item | code | table | quote | diagram`; diagram source is optional.
+Kinds are `heading | paragraph | item | code | table | quote | diagram | chart`. Diagram and chart source is optional.
+A chart block has empty `html` and its fence text in `source`.
 `RenderedWriteup = { area?: WriteupArea, newInRevision?: { topic?: TopicSlug, section?: NewInRevisionSection, blockId?: BlockId, blockIds: BlockId[] }[], needsYou?: { kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }[], terms?: GlossaryTerm[], sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", title?, headings?, terms?: GlossaryTerm[], blocks: RenderedBlock[] }`

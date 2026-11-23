@@ -656,12 +656,12 @@ async function blocksContent(
 ): Promise<ElementContent[]> {
   const children: ElementContent[] = [];
   for (const block of blocks) {
-    if (block.kind === "diagram") {
+    if (block.kind === "diagram" || block.kind === "chart") {
       children.push(
         element(
           "figure",
           [
-            element("figcaption", [text("Mermaid diagram")]),
+            element("figcaption", [text(block.kind === "chart" ? "Chart" : "Mermaid diagram")]),
             element("pre", [element("code", [text(block.source ?? block.text)])]),
           ],
           { className: ["em-diagram"] },

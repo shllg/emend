@@ -206,7 +206,7 @@ export async function renderWriteup(
       const term = normalizeGlossaryForm(entry.term);
       let text = normalizeText(
         rendered
-          .filter((block) => block.kind !== "diagram")
+          .filter((block) => block.kind !== "diagram" && block.kind !== "chart")
           .map((block) => block.text)
           .join(" "),
       );

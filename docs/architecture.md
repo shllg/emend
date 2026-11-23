@@ -92,6 +92,8 @@ server; every reviewer device sees them, while agents and attach/import do not c
 Inbox pins live in `review_pins`, scoped to the owner on this server; every reviewer device sees
 them, while agents and attach/import neither copy nor expose them.
 
+A valid Markdown `chart` fence becomes a chart block the app draws as SVG, and downloads keep it as labelled source.
+
 HTML pubs keep their content sandbox and allow only emend's bridge script. The bridge sends
 `pre.mermaid` and `pre > code.language-mermaid` sources to the app, which renders them sequentially
 in its sandboxed Mermaid frame.

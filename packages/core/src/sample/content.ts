@@ -108,7 +108,16 @@ parcel:
 
 export const SAMPLE_WRITEUP: WriteupInput = {
   area: "Parcel delivery",
-  overview: SAMPLE_MARKDOWN,
+  overview: `${SAMPLE_MARKDOWN}
+\`\`\`chart
+{
+  "type": "bar", "title": "Parcels packed", "labels": ["Morning", "Afternoon"],
+  "series": [
+    { "name": "Small", "values": [12, 18] }, { "name": "Medium", "values": [8, 14] },
+    { "name": "Large", "values": [4, 6] }, { "name": "Oversized", "values": [2, 1] }
+  ]
+}
+\`\`\``,
   tldr: "A parcel moves from packing to delivery. This sample shows text, diagrams, files and feedback.",
   whyItMatters: "Clear labels make progress easier to follow.",
   review: { level: "everything", reason: "Check the delivery steps and their examples." },

@@ -47,7 +47,7 @@ export function Block({
         <span className="em-reading-block__comment">
           <IconButton
             icon={MessageSquarePlus}
-            label={block.kind === "diagram" ? "Comment on diagram" : "Comment on block"}
+            label={block.kind === "chart" || block.kind === "diagram" ? `Comment on ${block.kind}` : "Comment on block"}
             size="sm"
             variant="ghost"
             className="size-6 [&:not(:disabled):not([aria-disabled=true])]:hover:bg-accent-tint [&:not(:disabled):not([aria-disabled=true])]:hover:text-accent-text"

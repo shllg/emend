@@ -213,3 +213,14 @@ describe("placeSpan", () => {
     });
   });
 });
+
+test("a quote in a chart places the whole block", async () => {
+  const source = '{"type":"sparkline","series":[{"name":"Daily","values":[1,2]}]}';
+  const chart = await block(`\`\`\`chart\n${source}\n\`\`\``);
+  expect(
+    placeSpan([chart], { kind: "writeup-span", blockId: chart.id, quote: "Daily", prefix: "", suffix: "" }),
+  ).toEqual({
+    status: "placed",
+    location: { kind: "writeup-span", blockId: chart.id, start: 0, end: source.length },
+  });
+});

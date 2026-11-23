@@ -39,6 +39,11 @@ describe("comment Markdown", () => {
     const diagram = await renderCommentHtml("```mermaid\ngraph TD\n  A --> B\n```");
     expect(diagram).toContain("<pre><code");
     expect(diagram).toContain("graph TD");
+    const source = '{"type":"bar","labels":["Day"],"series":[{"name":"Count","values":[2]}]}';
+    const chart = await renderCommentHtml(`\`\`\`chart\n${source}\n\`\`\``);
+    expect(chart).toContain("<pre><code");
+    expect(chart).toContain(source);
+    expect(chart).not.toContain("<svg");
   });
 
   test("a plain one-line comment is one paragraph", async () => {

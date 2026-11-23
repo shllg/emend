@@ -108,6 +108,10 @@
   --fg-reading: var(--fg-1);
   --fg-reading-muted: oklch(0.55 0.004 260);
   --fg-reading-strong: var(--fg-1);
+  --chart-1: oklch(0.57527 0.16257 255.532);
+  --chart-2: oklch(0.59951 0.16764 40.473);
+  --chart-3: oklch(0.584 0.11795 165.183);
+  --chart-4: oklch(0.60704 0.1291 73.296);
   /* accent: the editor's pencil */
   --accent: var(--ochre-400);
   --accent-hover: var(--ochre-300);
@@ -220,6 +224,10 @@
     --fg-reading: oklch(0.79 0.004 260);
     --fg-reading-muted: var(--n-400);
     --fg-reading-strong: var(--n-200);
+    --chart-1: oklch(0.62206 0.16121 255.053);
+    --chart-2: oklch(0.62206 0.17257 40.112);
+    --chart-3: oklch(0.62122 0.12831 163.115);
+    --chart-4: oklch(0.66993 0.14253 73.227);
     --focus-color: var(--ochre-400);
     --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--focus-color);
     --accent-text: var(--ochre-300);
@@ -331,6 +339,10 @@
   --fg-reading: oklch(0.79 0.004 260);
   --fg-reading-muted: var(--n-400);
   --fg-reading-strong: var(--n-200);
+  --chart-1: oklch(0.62206 0.16121 255.053);
+  --chart-2: oklch(0.62206 0.17257 40.112);
+  --chart-3: oklch(0.62122 0.12831 163.115);
+  --chart-4: oklch(0.66993 0.14253 73.227);
   --focus-color: var(--ochre-400);
   --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--focus-color);
   --accent-text: var(--ochre-300);

@@ -1,6 +1,7 @@
 import type { RenderedBlock } from "@emend/contract";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button.tsx";
+import { ChartBlock } from "./ChartBlock.tsx";
 import { MermaidBlock } from "./MermaidBlock.tsx";
 
 /** A comment's server-rendered, sanitized Markdown. Like BlockView, the only other place that sets HTML. */
@@ -144,6 +145,12 @@ export function BlockView({ block }: { block: RenderedBlock }) {
     "data-block-kind": block.kind,
     "data-block-text": block.text,
   };
+  if (block.kind === "chart")
+    return (
+      <div {...attributes}>
+        <ChartBlock source={block.source ?? block.text} />
+      </div>
+    );
   return block.kind === "diagram" ? (
     <div {...attributes}>
       <MermaidBlock source={block.source ?? block.text} />

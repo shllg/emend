@@ -31,7 +31,7 @@ export function selectionToAnchor(
   const topicPart = slug && (part === "title" || part === "summary") ? part : undefined;
   const text = first.dataset.blockText;
   if ((!id && !topicPart) || text === undefined) return { error: "empty" };
-  if (id && first.dataset.blockKind === "diagram")
+  if (id && (first.dataset.blockKind === "diagram" || first.dataset.blockKind === "chart"))
     return normalizeText(text) ? blockAnchor({ id, text }) : { error: "empty" };
   const quote = normalizeText(range.toString());
   if (quote.length > LIMITS.quoteChars) return { error: "too-long" };

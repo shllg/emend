@@ -1,4 +1,4 @@
-import { BlockId, type GlossaryTerm, LIMITS, normalizeGlossaryForm } from "@emend/contract";
+import { BlockId, type GlossaryTerm, LIMITS, normalizeGlossaryForm, parseChartSource } from "@emend/contract";
 import rehypeShiki from "@shikijs/rehype/core";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeRaw from "rehype-raw";
@@ -9,7 +9,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import { unified } from "unified";
 import type { DocLinks } from "../links.ts";
-import { type Block, blocksFromTree, type HtmlRoot, renderData, visitElements } from "./blocks.ts";
+import { type Block, blocksFromTree, fenceCode, type HtmlRoot, renderData, visitElements } from "./blocks.ts";
 import { markCallouts } from "./callouts.ts";
 import { type DocGlossaryEntry, docGlossary } from "./doc-glossary.ts";
 import { exampleRows } from "./example-rows.ts";
@@ -43,18 +43,18 @@ export type RenderEffects = {
 function isolateDiagrams() {
   return (tree: HtmlRoot) => {
     visitElements(tree, (element) => {
-      if (element.tagName !== "pre") return;
-      const code = element.children[0];
-      if (
-        code?.type !== "element" ||
-        code.tagName !== "code" ||
-        !Array.isArray(code.properties.className) ||
-        !code.properties.className.includes("language-mermaid")
-      )
-        return;
+      const code = fenceCode(element);
+      if (!code || !Array.isArray(code.properties.className)) return;
+      const mermaid = code.properties.className.includes("language-mermaid");
+      if (!mermaid && !code.properties.className.includes("language-chart")) return;
       // remark-rehype adds one terminal newline to nonempty fences.
       const text = hastText(code);
-      renderData(element).emendDiagram = text.endsWith("\n") ? text.slice(0, -1) : text;
+      const source = text.endsWith("\n") ? text.slice(0, -1) : text;
+      if (!mermaid) {
+        if (!parseChartSource(source)) return;
+        renderData(element).emendChart = true;
+      }
+      renderData(element).emendDiagram = source;
       element.children = [];
     });
   };
@@ -78,8 +78,9 @@ function sanitizedTreePipeline(lineBreaks = false) {
     .use(rehypeSanitize, sanitizeSchema);
 }
 
-function sanitizedPipeline(lineBreaks = false) {
-  return sanitizedTreePipeline(lineBreaks).use(linkIssueRefs).use(hardenLinks).use(markCallouts);
+function sanitizedPipeline(comment = false) {
+  const processor = sanitizedTreePipeline(comment).use(linkIssueRefs).use(hardenLinks);
+  return (comment ? processor : processor.use(isolateDiagrams)).use(markCallouts);
 }
 
 const imageReferenceProcessor = sanitizedTreePipeline();
@@ -122,7 +123,6 @@ async function createProcessor() {
   const highlighter = await sharedHighlighter();
   return sanitizedPipeline()
     .use(exampleRows)
-    .use(isolateDiagrams)
     .use(docGlossary)
     .use(markTerms)
     .use(limitHighlighting, highlighter.getLoadedLanguages())
@@ -260,7 +260,7 @@ export async function renderDoc(
   );
 }
 
-const metadataProcessor = sanitizedPipeline().use(isolateDiagrams).use(rehypeStringify);
+const metadataProcessor = sanitizedPipeline().use(rehypeStringify);
 /** The same sanitized blocks, without syntax highlighting, for publish metadata and CLI titles. */
 export async function renderMetadataBlocks(markdown: string, media?: ReadonlyMap<string, string>): Promise<Block[]> {
   const { source, tables } = prepareTables(markdown);

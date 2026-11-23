@@ -300,3 +300,11 @@ describe("GitHub alert callouts", () => {
     expect(blocks.at(-1)?.html).toBe("<blockquote>\n<p>A plain quote.</p>\n</blockquote>");
   });
 });
+
+test("a quote split by a chart stays plain on both sides", async () => {
+  const source = '{"type":"sparkline","series":[{"name":"Daily","values":[1,2]}]}';
+  const blocks = await renderDoc(`> [!NOTE]\n> First\n>\n> \`\`\`chart\n> ${source}\n> \`\`\`\n>\n> Last`, "guide.md");
+  expect(blocks.map(({ kind }) => kind)).toEqual(["quote", "chart", "quote"]);
+  expect(blocks[1]).toMatchObject({ source, html: "" });
+  expect(blocks.map(({ html }) => html).join("")).not.toContain("emend-callout");
+});
