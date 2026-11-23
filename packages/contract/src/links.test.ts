@@ -1,5 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { PublishLinks, PublishManifest, PublishRequest, RepoUrl } from "./index.ts";
+import {
+  ISSUE_REFS,
+  IssueRefs,
+  PublishLinks,
+  PublishManifest,
+  PublishRequest,
+  plainIssueTitle,
+  RepoUrl,
+} from "./index.ts";
 
 const link = { url: "https://example.test/o/r/pull/7", label: "PR 7", kind: "pr" as const };
 const manifest = {
@@ -83,5 +91,64 @@ describe("manifest and request", () => {
     expect(PublishRequest.safeParse({ ...base, links: [link], repoUrl: "https://github.com/o/r" }).success).toBe(true);
     expect(PublishRequest.safeParse({ ...base, repoUrl: "http://github.com/o/r" }).success).toBe(false);
     expect(PublishRequest.safeParse({ ...base, links: [{ ...link, url: "http://x.test" }] }).success).toBe(false);
+  });
+});
+
+describe("issueRefs", () => {
+  const ref = { number: 17, title: "Retries never stop", state: "open" as const };
+
+  test("hold the limits", () => {
+    expect(IssueRefs.safeParse(Array.from({ length: 64 }, (_, i) => ({ ...ref, number: i + 1 }))).success).toBe(true);
+    expect(IssueRefs.safeParse(Array.from({ length: 65 }, (_, i) => ({ ...ref, number: i + 1 }))).success).toBe(false);
+    expect(IssueRefs.safeParse([{ ...ref, title: "a".repeat(256) }]).success).toBe(true);
+    expect(IssueRefs.safeParse([{ ...ref, title: "a".repeat(257) }]).success).toBe(false);
+    expect(IssueRefs.safeParse([{ ...ref, number: 0 }]).success).toBe(false);
+    expect(IssueRefs.safeParse([{ ...ref, number: ISSUE_REFS.maxNumber }]).success).toBe(true);
+    expect(IssueRefs.safeParse([{ ...ref, number: 10_000_000 }]).success).toBe(false);
+    expect(IssueRefs.safeParse([{ ...ref, state: "draft" }]).success).toBe(false);
+    expect(IssueRefs.safeParse([{ ...ref, title: "  " }]).success).toBe(false);
+  });
+
+  test("refuse a repeated number", () => {
+    expect(IssueRefs.safeParse([ref, { ...ref, title: "Other" }]).success).toBe(false);
+  });
+
+  test("a request refuses a control or format character in a title", () => {
+    const request = { reviewKey: "a".repeat(64), repo: null, branch: null, title: "T", base: null, head: null };
+    const base = { ...request, topics: [], writeup: manifest.writeup, files: [] };
+    expect(PublishRequest.safeParse({ ...base, issueRefs: [ref] }).success).toBe(true);
+    for (const title of ["a\u0007b", "a\u202eb", "a\nb"])
+      expect(PublishRequest.safeParse({ ...base, issueRefs: [{ ...ref, title }] }).success).toBe(false);
+  });
+
+  test("plainIssueTitle flattens, trims and cuts", () => {
+    expect(plainIssueTitle("  a \t\n b\u0007c\u200bd ")).toBe("a b cd");
+    expect(plainIssueTitle("\u0007 \n")).toBe("");
+    expect(plainIssueTitle("a".repeat(300))).toHaveLength(256);
+    // A surrogate pair is never split at the cut.
+    const cut = plainIssueTitle(`${"a".repeat(255)}\u{1F600}`);
+    expect(cut).toBe("a".repeat(255));
+    expect(plainIssueTitle(`${"a".repeat(254)}\u{1F600}`)).toHaveLength(256);
+    // Trim again after the cut.
+    expect(plainIssueTitle(`${"a".repeat(255)} b`)).toBe("a".repeat(255));
+  });
+
+  test("a manifest cleans titles to plain text and keeps markup literal", () => {
+    const parsed = PublishManifest.parse({
+      ...manifest,
+      issueRefs: [{ ...ref, title: "<img src=x onerror=alert(1)>\u0007 <b>Fix</b>\u202e" }],
+    });
+    expect(parsed.issueRefs).toEqual([{ ...ref, title: "<img src=x onerror=alert(1)> <b>Fix</b>" }]);
+  });
+
+  test("a manifest still fails on an entry invalid after cleaning", () => {
+    for (const issueRefs of [
+      [{ ...ref, title: "\u0007\u200b " }],
+      [{ ...ref, number: 0 }],
+      [{ ...ref, state: "draft" }],
+      [ref, { ...ref, title: "Other" }],
+      [{ ...ref, title: 5 }],
+    ])
+      expect(PublishManifest.safeParse({ ...manifest, issueRefs }).success).toBe(false);
   });
 });

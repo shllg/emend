@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
 import { DocTitle, DocView, docViewOf, isRenderedHtmlDoc, isRenderedMarkdownDoc, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
-import { PublishLinks, RepoUrl } from "./links.ts";
+import { IssueRefs, PublishLinks, RepoUrl } from "./links.ts";
 import { MEDIA_EXTENSIONS, PublishManifest, WriteupInput } from "./manifest.ts";
 import { FileFlag, FilePath, FileRole, FileStatus, OTHER_TOPIC, TopicMeta, TopicSlug } from "./review.ts";
 
@@ -56,6 +56,7 @@ export const PublishRequest = z
     topics: z.array(TopicMeta).max(LIMITS.topicsPerReview + 1),
     writeup: WriteupInput,
     links: PublishLinks.optional(),
+    issueRefs: IssueRefs.optional(),
     repoUrl: RepoUrl.optional(),
     intentReview: z.uuid().optional(),
     files: z.array(PublishFile).max(LIMITS.filesPerRevision),

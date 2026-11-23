@@ -65,7 +65,9 @@ import { commentHtml } from "./comment-html.ts";
 export function publishMeta(rendered: unknown) {
   const meta = PublishMeta.safeParse(rendered);
   // Invalid stored values are dropped, never shown.
-  return meta.success ? { links: meta.data.links ?? [], repoUrl: meta.data.repoUrl ?? null } : {};
+  return meta.success
+    ? { links: meta.data.links ?? [], repoUrl: meta.data.repoUrl ?? null, issueRefs: meta.data.issueRefs ?? [] }
+    : {};
 }
 
 export function topicView(topic: typeof topics.$inferSelect) {

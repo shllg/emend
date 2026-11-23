@@ -35,13 +35,11 @@ export const RepoUrl = z.string().refine((value) => {
 }, "expected https://host/owner/name");
 export type RepoUrl = z.infer<typeof RepoUrl>;
 
+const isPlainVisible = (value: string): boolean => value.trim() !== "" && !/[\p{Cc}\p{Cf}]/u.test(value);
+
 export const PublishLink = z.object({
   url: HttpsUrl,
-  label: z
-    .string()
-    .min(1)
-    .max(LINKS.labelChars)
-    .refine((label) => label.trim() !== "" && !/[\p{Cc}\p{Cf}]/u.test(label), "label must be plain visible text"),
+  label: z.string().min(1).max(LINKS.labelChars).refine(isPlainVisible, "label must be plain visible text"),
   kind: z.enum(["pr", "issue", "other"]).optional(),
 });
 export type PublishLink = z.infer<typeof PublishLink>;
@@ -49,6 +47,59 @@ export type PublishLink = z.infer<typeof PublishLink>;
 export const PublishLinks = z.array(PublishLink).max(LINKS.perRevision);
 export type PublishLinks = z.infer<typeof PublishLinks>;
 
-/** The two publish-level fields that ride beside the writeup: in its source blob and its rendered blob. */
-export const PublishMeta = z.object({ links: PublishLinks.optional(), repoUrl: RepoUrl.optional() });
+export const ISSUE_REFS = { perRevision: 64, titleChars: 256, maxNumber: 9_999_999 } as const;
+
+export const IssueState = z.enum(["open", "closed", "merged"]);
+export type IssueState = z.infer<typeof IssueState>;
+
+const issueTitle = z
+  .string()
+  .min(1)
+  .max(ISSUE_REFS.titleChars)
+  .refine(isPlainVisible, "title must be plain visible text");
+
+const issueNumber = z.int().min(1).max(ISSUE_REFS.maxNumber);
+
+function issueRefsOf<T extends z.ZodType<{ number: number }>>(entry: T) {
+  return z
+    .array(entry)
+    .max(ISSUE_REFS.perRevision)
+    .refine((refs) => new Set(refs.map((ref) => ref.number)).size === refs.length, "each issue number at most once");
+}
+
+/** The title and state of one issue or pull request the writeup names as `#123`. */
+export const IssueRef = z.object({ number: issueNumber, title: issueTitle, state: IssueState });
+export type IssueRef = z.infer<typeof IssueRef>;
+
+export const IssueRefs = issueRefsOf(IssueRef);
+export type IssueRefs = z.infer<typeof IssueRefs>;
+
+/** Control and whitespace runs become one space, format characters go, then trim and cut to the limit. */
+export function plainIssueTitle(value: string): string {
+  const flat = value
+    .replace(/[\s\p{Cc}]+/gu, " ")
+    .replace(/\p{Cf}/gu, "")
+    .trim();
+  if (flat.length <= ISSUE_REFS.titleChars) return flat;
+  let end = ISSUE_REFS.titleChars;
+  const last = flat.charCodeAt(end - 1);
+  // Do not end on the high half of a surrogate pair.
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return flat.slice(0, end).trim();
+}
+
+/** A manifest cleans each title to plain text first; an entry still invalid after that fails the manifest. */
+export const ManifestIssueRef = z.object({
+  number: issueNumber,
+  title: z.preprocess((value) => (typeof value === "string" ? plainIssueTitle(value) : value), issueTitle),
+  state: IssueState,
+});
+export const ManifestIssueRefs = issueRefsOf(ManifestIssueRef);
+
+/** The publish-level fields that ride beside the writeup: in its source blob and its rendered blob. */
+export const PublishMeta = z.object({
+  links: PublishLinks.optional(),
+  repoUrl: RepoUrl.optional(),
+  issueRefs: IssueRefs.optional(),
+});
 export type PublishMeta = z.infer<typeof PublishMeta>;

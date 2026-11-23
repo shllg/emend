@@ -16,6 +16,7 @@ import { ThreadCard } from "../threads/ThreadCard.tsx";
 import { BlockReader, groupBlocks, type ReaderFact, type ReaderGroup, type ReaderProps } from "./BlockReader.tsx";
 import { DepthMarker } from "./DepthMarker.tsx";
 import { GlossaryTerms } from "./GlossaryTerms.tsx";
+import { IssueCards } from "./IssueCards.tsx";
 import { undoSentence } from "./TopicChips.tsx";
 import { TopicsMap } from "./TopicsMap.tsx";
 import { useCurrentTopic } from "./useCurrentTopic.ts";
@@ -39,6 +40,8 @@ export function Writeup({
   onCurrentTopic,
   onNote,
   code,
+  issueRefs,
+  repoUrl,
   ...props
 }: ReaderProps & {
   writeup: RenderedWriteup;
@@ -52,6 +55,8 @@ export function Writeup({
   depthSlot?: HTMLElement | null;
   onCurrentTopic?: (slug: string | undefined) => void;
   onNote?: (id: string) => void;
+  issueRefs?: RevisionView["issueRefs"];
+  repoUrl?: string | null;
   code?: { current?: CodeFocus; onOpen: (focus: CodeFocus, opener: HTMLElement) => void };
 }) {
   const readOnly = useReadOnlyReview();
@@ -582,6 +587,7 @@ export function Writeup({
         />
       </div>
       <GlossaryTerms root={root} terms={writeup.terms} href={(blockId) => link(`block-${blockId}`)} />
+      <IssueCards root={root} repoUrl={repoUrl} refs={issueRefs} />
     </>
   );
 }

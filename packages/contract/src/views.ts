@@ -3,7 +3,7 @@ import { AgentNoteView } from "./agent-note.ts";
 import { DocHeadings, DocTitle, SourceContent } from "./doc.ts";
 import { InboxListGroup } from "./groups.ts";
 import { LIMITS } from "./limits.ts";
-import { PublishLinks, RepoUrl } from "./links.ts";
+import { IssueRefs, PublishLinks, RepoUrl } from "./links.ts";
 import { NeedsYouKind, NewInRevisionSection, WriteupArea } from "./manifest.ts";
 import { Placement } from "./placement.ts";
 import { PublishRequest, Sha256 } from "./publish.ts";
@@ -308,6 +308,7 @@ export const RevisionView = z
     writeup: RenderedWriteup,
     // Absent on revisions published before these fields existed.
     links: PublishLinks.optional(),
+    issueRefs: IssueRefs.optional(),
     repoUrl: RepoUrl.nullable().optional(),
     docs: z
       .array(

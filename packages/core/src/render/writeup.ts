@@ -1,5 +1,6 @@
 import {
   type GlossaryTerm,
+  type IssueRefs,
   type NeedsYouKind,
   type NewInRevisionItem,
   type NewInRevisionSection,
@@ -28,6 +29,8 @@ export type RenderedWriteup = {
   /** Publish-level links and the repo base, kept beside the sections in the stored blob. */
   links?: PublishLinks;
   repoUrl?: string;
+  /** Title and state of each issue or PR number the writeup names; the server never asks GitHub. */
+  issueRefs?: IssueRefs;
 };
 
 const unwrittenDecisions =
@@ -58,6 +61,7 @@ export async function renderWriteup(
   meta: {
     links?: PublishLinks;
     repoUrl?: string;
+    issueRefs?: IssueRefs;
     media?: ReadonlyMap<string, string>;
     docs?: DocLinks;
     effects?: RenderEffects;
@@ -256,5 +260,6 @@ export async function renderWriteup(
     ...(terms.length ? { terms } : {}),
     ...(meta.links?.length ? { links: meta.links } : {}),
     ...(meta.repoUrl ? { repoUrl: meta.repoUrl } : {}),
+    ...(meta.issueRefs?.length ? { issueRefs: meta.issueRefs } : {}),
   };
 }

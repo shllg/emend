@@ -227,7 +227,7 @@ export function importPublishInput(
   bundle: ImportBundle,
   revisionId: string,
   writeup: unknown,
-  meta: { links?: unknown; repoUrl?: unknown } = {},
+  meta: { links?: unknown; repoUrl?: unknown; issueRefs?: unknown } = {},
 ): unknown {
   const index = indexImportBundle(bundle);
   const rows = index.revisions.get(revisionId);
@@ -245,6 +245,7 @@ export function importPublishInput(
     writeup,
     links: meta.links,
     repoUrl: meta.repoUrl,
+    issueRefs: meta.issueRefs,
     files: files.map((f) => ({
       ...f,
       status: f.status ?? undefined,

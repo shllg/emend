@@ -2,7 +2,7 @@ import { z } from "zod";
 import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
 import { DocTitle, DocView, docViewOf, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
-import { PublishLinks, RepoUrl } from "./links.ts";
+import { ManifestIssueRefs, PublishLinks, RepoUrl } from "./links.ts";
 import { FilePath, OTHER_TOPIC, TopicMeta, TopicSlug } from "./review.ts";
 
 const encoder = new TextEncoder();
@@ -277,6 +277,7 @@ export const PublishManifest = z
       .optional(),
     writeup: WriteupInput,
     links: PublishLinks.optional(),
+    issueRefs: ManifestIssueRefs.optional(),
     intentReview: z.uuid().optional(),
     // null opts out of the address the CLI derives from the remote. A string that is not
     // https://host/owner/name is dropped, and the CLI derives one instead.

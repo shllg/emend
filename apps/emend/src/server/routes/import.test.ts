@@ -704,6 +704,21 @@ test("a round trip keeps links and repoUrl from the source blob and links issue 
   expect(html).toContain('href="https://github.com/owner/name/issues/5"');
 });
 
+test("a round trip keeps issueRefs from the source blob", async () => {
+  const input = await bundle(f);
+  const issueRefs = [{ number: 5, title: "Synthetic title", state: "closed" }];
+  const writeup = { overview: "Fixes #5", tldr: "", decisions: null, topics: {} };
+  const source = await f.deps.blobs.put(
+    f.ownerId,
+    Buffer.from(JSON.stringify({ ...writeup, repoUrl: "https://github.com/owner/name", issueRefs })),
+    "application/json",
+  );
+  for (const w of input.writeups) w.sourceBlob = source;
+  expect((await f.importRequest("/import", input)).status).toBe(201);
+  const revision = RevisionView.parse(await (await f.request(`/reviews/${input.review.id}/revisions/1`, "GET")).json());
+  expect(revision.issueRefs).toEqual(issueRefs);
+});
+
 test.each([undefined, "outOfScope", "whereToLook", "context"] as const)(
   "import re-renders the source order and computes emptiness with optional %s",
   async (field) => {

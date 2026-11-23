@@ -651,6 +651,53 @@ test("links and repoUrl come back on the revision, link issue numbers in the wri
   expect(bare.repoUrl ?? null).toBeNull();
 });
 
+test("issueRefs come back on the revision, and an invalid entry is refused", async () => {
+  const empty = { overview: "Closes #12.", tldr: "", decisions: null, topics: {} };
+  const repoUrl = "https://github.com/owner/name";
+  const issueRefs = [{ number: 12, title: "Retries never stop", state: "open" }];
+  const { reviewId } = await publishReview(f, { key: "5", writeup: empty, repoUrl, issueRefs });
+  const revision = (await (await get(`/${reviewId}/revisions/1`)).json()) as {
+    issueRefs: unknown;
+    writeup: { sections: { blocks: { html: string }[] }[] };
+  };
+  expect(revision.issueRefs).toEqual(issueRefs);
+  expect(revision.writeup.sections.flatMap((s) => s.blocks.map((b) => b.html)).join("")).toContain(
+    'data-emend-issue="12"',
+  );
+  const plain = await publishReview(f, { key: "6", writeup: empty });
+  const bare = (await (await get(`/${plain.reviewId}/revisions/1`)).json()) as { issueRefs?: unknown[] };
+  expect(bare.issueRefs ?? []).toEqual([]);
+  for (const bad of [
+    [{ number: 0, title: "x", state: "open" }],
+    [{ number: 1, title: "x", state: "draft" }],
+    [{ number: 1, title: "a\u0007b", state: "open" }],
+    [
+      { number: 1, title: "x", state: "open" },
+      { number: 1, title: "y", state: "closed" },
+    ],
+  ]) {
+    const response = await f.request(
+      "/publish",
+      "POST",
+      {
+        reviewKey: "7".repeat(64),
+        repo: null,
+        branch: null,
+        title: "T",
+        base: null,
+        head: null,
+        topics: [],
+        writeup: empty,
+        issueRefs: bad,
+        files: [],
+      },
+      "agent",
+    );
+    expect(response.status).toBe(400);
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("invalid_request");
+  }
+});
+
 test.each([
   { links: [{ url: "javascript:alert(1)", label: "x" }] },
   { links: [{ url: "data:text/html,x", label: "x" }] },
