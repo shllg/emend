@@ -2206,9 +2206,12 @@ space; duplicates compared case-insensitively after normalization). At most
 `glossaryTerms` entries and `glossaryAliases` aliases per entry count; later ones are ignored.
 
 The renderer marks the first use of each term and alias elsewhere in the doc, with the same rules
-as the writeup, and never inside the glossary list or headings. Marking in a doc has its own work
-budget of 20,000,000 units. Each text node is charged its length times the total length of all terms
-and aliases. Once the budget is spent, later first uses stay unmarked. `RevisionView.docs[].terms` lists
+as the writeup, and never inside the glossary list or headings. Marking in a doc walks a prefix tree
+of the terms and aliases and stops after 10,000,000 steps; each step is one character compared (a
+tree lookup, a whitespace character a space consumes, a start position tried, or a character of an
+acronym's exact check). Ordinary prose costs about one or two steps per character. When the budget
+is spent, marking stops for the rest of the doc: the text node being read gets no marks, earlier
+text nodes keep theirs, and later first uses stay unmarked. `RevisionView.docs[].terms` lists
 the entries in marking order; the app opens the same card as the writeup's, whose "Glossary" link
 jumps to the entry's block. A doc without such a section has no `terms` and no marks. Terms are
 stored beside the doc row, are not part of the export bundle, and the import re-renders them from
@@ -2243,10 +2246,11 @@ with more headings before its Glossary heading gets no glossary. Its other limit
 
 - 10,000 `dt`/`dd` items.
 - A walk of 100,000 nodes.
-- Only the first 800 raw characters of each heading's text are read: a heading whose text before
-  "Glossary" is longer does not count, and text after those 800 characters is ignored.
+- Only the first 800 raw characters of each heading's text are read, and the read also stops after
+  6,400 nodes. "Glossary" must end within those 800 characters, so a heading with 793 or more
+  characters before the word gets no glossary, and text after those 800 characters is ignored.
 - Each `dt` and each `dd` yields at most 20,000 characters of text, read from at most 20,000 nodes.
-- The same 20,000,000-unit marking budget as a Markdown doc.
+- The same 10,000,000-step marking budget as a Markdown doc.
 
 The bridge inside the frame does all of the work. At ready it reads the glossary, marks the first use
 of each term and alias in its own spans (dotted underline, focusable, never inside the glossary, a

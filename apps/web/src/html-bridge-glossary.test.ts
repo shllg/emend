@@ -5,7 +5,8 @@ import { LIMITS } from "@emend/contract";
 import { type Element, type Node, type ShadowRoot, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { HtmlRoot } from "../../../packages/core/src/render/blocks.ts";
-import { DOC_TERM_MATCH_WORK_BUDGET, markTerms, termMatcher } from "../../../packages/core/src/render/terms.ts";
+import { docTermMatcher, foldCodePoint } from "../../../packages/core/src/render/doc-terms.ts";
+import { DOC_TERM_MATCH_STEP_BUDGET, markTerms } from "../../../packages/core/src/render/terms.ts";
 
 const bridgeSource = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
 const windows: Window[] = [];
@@ -122,7 +123,7 @@ test("bridge glossary limits stay in parity with the contract", () => {
 });
 
 test("the bridge's marking budget stays in parity with core's doc budget", () => {
-  expect(bridgeSource).toContain(`const GLOSSARY_WORK_MAX = ${DOC_TERM_MATCH_WORK_BUDGET};`);
+  expect(bridgeSource).toContain(`const GLOSSARY_STEP_MAX = ${DOC_TERM_MATCH_STEP_BUDGET};`);
 });
 
 test("a glossary whose forms share a long prefix cannot stall the doc: ready is posted and nothing is marked", () => {
@@ -134,6 +135,68 @@ test("a glossary whose forms share a long prefix cannot stall the doc: ready is 
   const b = bridge(page("a ".repeat(4489), entries(...items)));
   expect(b.marks()).toEqual([]);
   expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+});
+
+// The 450-form shape: 50 entries with 9 forms, each 48 one-letter words and a 3-digit index.
+const hostileItems = (word: string) =>
+  Array.from({ length: 50 }, (_, term) => {
+    const form = (alias: number) => `${Array(48).fill(word).join(" ")} ${String(term * 9 + alias).padStart(3, "0")}`;
+    return entry(form(0), "Defined.", ...Array.from({ length: 8 }, (_, alias) => form(alias + 1)));
+  });
+const manyParagraphs = (text: string, count: number, glossary: string) =>
+  `<body><main>${`<p>${text}</p>`.repeat(count)}${glossary}</main></body>`;
+
+test("hostile: 200 paragraphs of 440 characters, also with U+3000 between the words, mark nothing", () => {
+  for (const gap of [" ", "　"]) {
+    const b = bridge(manyParagraphs(`a${gap}`.repeat(220), 200, entries(...hostileItems("a"))));
+    expect(b.marks()).toEqual([]);
+    expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  }
+});
+
+test("hostile: acronym forms against lowercase text refuse every position, and plain forms still mark", () => {
+  const text = `${"a ".repeat(48)}000 `.repeat(10);
+  const refused = bridge(manyParagraphs(text, 200, entries(...hostileItems("A"))));
+  expect(refused.marks()).toEqual([]);
+  const exact = bridge(manyParagraphs(text, 1, entries(...hostileItems("a"))));
+  expect(markTexts(exact)).toEqual([`${"a ".repeat(48)}000`]);
+});
+
+test("a doc far beyond the step budget stops marking and still posts ready", () => {
+  const b = bridge(manyParagraphs("a ".repeat(2500), 400, entries(...hostileItems("a"))));
+  expect(b.marks()).toEqual([]);
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+});
+
+test("coverage: 50 terms with 3 aliases each are all marked in a 60,000-character doc", () => {
+  const letters = "bcdfghjklmnpqrstvwxz";
+  const name = (index: number, prefix: string, length: number) =>
+    `${prefix}${index}${Array.from({ length }, (_, at) => letters[(index + at * 3) % letters.length]).join("")}`.slice(
+      0,
+      length,
+    );
+  const items = Array.from({ length: 50 }, (_, index) => {
+    const forms = [
+      name(index, "term", 10 + (index % 11)),
+      name(index, "alias", 10),
+      name(index, "other", 15),
+      name(index, "third", 20),
+    ];
+    return { forms, item: entry(forms[0] as string, "Defined.", ...forms.slice(1)) };
+  });
+  const filler = "Plain words fill this paragraph with ordinary prose. ";
+  let prose = "";
+  const used: string[] = [];
+  for (const [index, { forms }] of items.entries()) {
+    while (prose.length < index * 1200) prose += filler;
+    const use = forms[index % 4] as string;
+    used.push(use);
+    prose += `Here ${use} appears. `;
+  }
+  while (prose.length < 60_000) prose += filler;
+  const b = bridge(page(prose, entries(...items.map(({ item }) => item))));
+  expect(prose.length).toBeGreaterThanOrEqual(60_000);
+  expect(markTexts(b)).toEqual(used);
 });
 
 test("a doc without a glossary does not change at all", () => {
@@ -586,16 +649,17 @@ const matcherSamples = [
   "Budgetary budget'sbudget",
 ];
 
-test.each(matcherSamples)("bridge term marks match core for %s", (text) => {
+// The bridge's marks for one text node equal core's doc matcher (the regex matcher of the writeup agrees with it).
+function expectBridgeMatchesCore(items: typeof sampleEntries, text: string) {
   const tree: HtmlRoot = { type: "root", children: [{ type: "text", value: text }] };
-  const file = { data: { terms: termMatcher(sampleEntries) } } as unknown as Parameters<
+  const file = { data: { terms: docTermMatcher(items, DOC_TERM_MATCH_STEP_BUDGET) } } as unknown as Parameters<
     ReturnType<typeof markTerms>
   >[1];
   markTerms()(tree, file);
   const expected = tree.children.flatMap((node) =>
     node.type === "element" ? node.children.map((child) => (child.type === "text" ? child.value : "")) : [],
   );
-  const definitions = sampleEntries
+  const definitions = items
     .map(
       (item) =>
         `<dt>${item.term}</dt>${item.aliases.map((alias) => `<dt>${alias}</dt>`).join("")}<dd>${item.definition}</dd>`,
@@ -607,6 +671,56 @@ test.each(matcherSamples)("bridge term marks match core for %s", (text) => {
   });
   expect(markTexts(b)).toEqual(expected);
   expect(b.window.document.querySelector("#t")?.textContent).toBe(text);
+  return expected;
+}
+
+test.each(matcherSamples)("bridge term marks match core for %s", (text) => {
+  expectBridgeMatchesCore(sampleEntries, text);
+});
+
+// Characters whose case folding crosses scripts and lengths, and the characters the plain rule gets wrong.
+const foldSpecials = [
+  ["s", "S", "ſ"],
+  ["ς", "σ", "Σ"],
+  ["K", "k", "K"],
+  ["µ", "μ", "Μ"],
+  ["ß", "ẞ"],
+  ["İ", "ı", "i", "I"],
+  ["ꭰ", "Ꭰ"],
+  ["\u{10428}", "\u{10400}"],
+  ["ΐ", "ΐ"],
+  ["ΰ", "ΰ"],
+  ["ﬅ", "ﬆ"],
+];
+test.each(foldSpecials)("bridge term marks match core for the fold group %s", (...members) => {
+  // The bridge gives a text node that is not NFC no marks (a documented difference), and U+212A, U+0390's
+  // twin U+1FD3 and U+03B0's twin U+1FE3 change under NFC, so only members that are stable are compared.
+  const group = members.filter((member) => member.normalize("NFC") === member);
+  for (const form of group) {
+    const items = [
+      { term: `x${form}y`, aliases: [], definition: "One." },
+      { term: `${form}${form}`, aliases: [], definition: "Two." },
+      { term: form, aliases: [], definition: "Three." },
+    ];
+    // Each group member as text, with the s and es suffixes, as one text node.
+    const text = group.map((other) => `x${other}y ${other}${other} ${other}s ${other}es ${other}ES`).join(" | ");
+    expect(expectBridgeMatchesCore(items, text).length).toBeGreaterThan(0);
+  }
+});
+
+test("the bridge's fold exceptions stay in parity with core's", () => {
+  expect(bridgeSource).toContain(
+    "const foldExceptions = new Map([[0x131, 0x131], [0x1fd3, 0x390], [0x1fe3, 0x3b0], [0xfb05, 0xfb06]]);",
+  );
+  expect([0x131, 0x1fd3, 0x1fe3, 0xfb05].map(foldCodePoint)).toEqual([0x131, 0x390, 0x3b0, 0xfb06]);
+});
+
+test("the bridge matches multiword forms across every whitespace character, as core does", () => {
+  const items = [{ term: "hub node", aliases: [], definition: "Machine." }];
+  const gaps = ["\t", "\n", " ", "　", "    ", "﻿", "​", "᠎", ""];
+  expect(gaps.map((gap) => expectBridgeMatchesCore(items, `hub${gap}node`).length)).toEqual([
+    1, 1, 1, 1, 1, 1, 0, 0, 0,
+  ]);
 });
 
 test("issue links and comment anchors keep working in a doc with marks", () => {

@@ -1,5 +1,6 @@
 import { normalizeGlossaryForm } from "@emend/contract";
 import { type HtmlElement, type HtmlRoot, renderData } from "./blocks.ts";
+import { type DocTermMatcher, scanDocTerms } from "./doc-terms.ts";
 
 // Matches stay in one text node; word boundaries include neighbours across inline elements.
 // Letters, marks, digits and _ are word characters. Match edges must also be grapheme boundaries.
@@ -82,9 +83,12 @@ export const runBreaks = new Set([
 let segmenter: Intl.Segmenter | undefined;
 
 export const TERM_MATCH_WORK_BUDGET = 400_000_000;
-// A doc's own budget, about half a second at worst (measured about 0.29 s per 10,000,000 units on one
-// shared-prefix text node); the writeup keeps TERM_MATCH_WORK_BUDGET.
-export const DOC_TERM_MATCH_WORK_BUDGET = 20_000_000;
+// A doc does not use the regex matcher above: it walks a prefix tree (doc-terms.ts) and stops after this many
+// steps, each one a character compared. Measured here, 10,000,000 steps of the hostile 450-form shapes take
+// 0.1 to 0.3 s (one-byte, U+3000 and CJK text, refused acronyms, 450 forms on one tree node); ordinary prose
+// costs 1.2 to 2.3 steps per character. Not counted: the grapheme segmentation of a text node that holds a
+// match (about 0.4 microseconds per character, once per node) and building the tree (linear in the forms).
+export const DOC_TERM_MATCH_STEP_BUDGET = 10_000_000;
 
 export function termMatcher(entries: { term: string; aliases?: string[] }[], budget = TERM_MATCH_WORK_BUDGET) {
   let weight = 0;
@@ -157,7 +161,7 @@ function inlineNeighbours(tree: HtmlRoot) {
 
 export function markTerms() {
   return (tree: HtmlRoot, file: { data: Record<string, unknown> }) => {
-    const matcher = file.data.terms as TermMatcher | undefined;
+    const matcher = file.data.terms as TermMatcher | DocTermMatcher | undefined;
     if (!matcher?.forms.length || matcher.remaining <= 0) return;
     const neighbours = inlineNeighbours(tree);
     const seen = new Set<number>();
@@ -199,8 +203,6 @@ export function markTerms() {
           view = clusters.join("");
           offsets.set(view.length, node.value.length);
         }
-        // The same matcher carries the remaining work across every writeup section.
-        if (!charge(matcher, view.length * matcher.weight)) return;
         const edges = neighbours.get(node);
         const rangeAt = (index: number, length: number) => {
           const start = offsets?.get(index);
@@ -214,22 +216,59 @@ export function markTerms() {
             return;
           return { start, finish };
         };
+        // Unchanged NFC nodes need segmentation only once a candidate exists.
+        const segmentOnDemand = () => {
+          if (offsets) return;
+          segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
+          offsets = new Map();
+          for (const { index } of segmenter.segment(node.value)) offsets.set(index, index);
+          offsets.set(view.length, node.value.length);
+        };
         const advance = (index: number) => index + ((view.codePointAt(index) ?? 0) > 0xffff ? 2 : 1);
         const replacements: HtmlElement["children"] = [];
         let end = 0;
+        const place = (entry: number, start: number, finish: number) => {
+          if (start > end) replacements.push({ type: "text", value: node.value.slice(end, start) });
+          replacements.push({
+            type: "element",
+            tagName: "span",
+            properties: { className: ["emend-term"], dataEmendTerm: String(entry) },
+            children: [{ type: "text", value: node.value.slice(start, finish) }],
+          });
+          end = finish;
+          seen.add(entry);
+        };
+        if ("trie" in matcher) {
+          // A doc: the prefix tree counts its own steps, and marks nothing once the budget is spent.
+          const scanned = scanDocTerms(
+            matcher,
+            view,
+            (index, length) => {
+              segmentOnDemand();
+              return rangeAt(index, length);
+            },
+            seen,
+            (entry, { start, finish }) => {
+              place(entry, start, finish);
+              return seen.size === matcher.count;
+            },
+          );
+          if (!scanned) return;
+          if (!replacements.length) continue;
+          if (end < node.value.length) replacements.push({ type: "text", value: node.value.slice(end) });
+          frame.parent.children.splice(frame.index - 1, 1, ...replacements);
+          frame.index += replacements.length - 1;
+          continue;
+        }
+        // The same matcher carries the remaining work across every writeup section.
+        if (!charge(matcher, view.length * matcher.weight)) return;
         matcher.pattern.lastIndex = 0;
         for (let match = matcher.pattern.exec(view); match; match = matcher.pattern.exec(view)) {
           if (!charge(matcher, matcher.forms.length)) return;
           let form = matcher.forms[match.findIndex((value, index) => index > 0 && value !== undefined) - 1];
           let length = match[0].length;
           if (!form) continue;
-          // Unchanged NFC nodes need segmentation only once a candidate exists.
-          if (!offsets) {
-            segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
-            offsets = new Map();
-            for (const { index } of segmenter.segment(node.value)) offsets.set(index, index);
-            offsets.set(view.length, node.value.length);
-          }
+          segmentOnDemand();
           let range = rangeAt(match.index, length);
           if (form.acronym || !range) {
             // Recheck case and boundaries together so a refused form cannot hide a shorter one.
@@ -253,16 +292,7 @@ export function markTerms() {
           }
           matcher.pattern.lastIndex = match.index + length;
           if (seen.has(form.entry)) continue;
-          const { start, finish } = range;
-          if (start > end) replacements.push({ type: "text", value: node.value.slice(end, start) });
-          replacements.push({
-            type: "element",
-            tagName: "span",
-            properties: { className: ["emend-term"], dataEmendTerm: String(form.entry) },
-            children: [{ type: "text", value: node.value.slice(start, finish) }],
-          });
-          end = finish;
-          seen.add(form.entry);
+          place(form.entry, range.start, range.finish);
           if (seen.size === matcher.count) break;
         }
         if (!replacements.length) continue;

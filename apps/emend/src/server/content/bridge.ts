@@ -561,13 +561,13 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   }
   // The glossary of an HTML doc: the first dl after a heading named Glossary. It is read, marked and drawn
   // inside the frame; nothing about it crosses to the parent.
-  // Kept in parity with LIMITS (glossary*) and core's DOC_TERM_MATCH_WORK_BUDGET by the bridge glossary tests.
+  // Kept in parity with LIMITS (glossary*) and core's DOC_TERM_MATCH_STEP_BUDGET by the bridge glossary tests.
   const GLOSSARY_TERMS_MAX = 50;
   const GLOSSARY_ALIASES_MAX = 8;
   const GLOSSARY_FORM_MAX = 100;
   const GLOSSARY_DEFINITION_MAX = 2000;
   const GLOSSARY_VISITS_MAX = 100000;
-  const GLOSSARY_WORK_MAX = 20000000;
+  const GLOSSARY_STEP_MAX = 10000000;
   const htmlElement = node => nodeType(node) === 1 && namespace(node) === "http://www.w3.org/1999/xhtml";
   const createText = text => dom(window.Document.prototype, "createTextNode", document, text);
   const phrasingTags = new Set(["a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "i", "ins",
@@ -675,25 +675,179 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     finish();
     if (glossary.length) glossaryList = list;
   }
-  // Ported from termMatcher and markTerms (packages/core/src/render/terms.ts), on one text node at a time.
-  // The marks may differ from core's: a text node that is not NFC gets none, and a word boundary is not
-  // checked across inline elements. The bridge tests hold the single-text-node cases in parity.
-  const escapePattern = text => text.replace(/[\^$\\.*+?()[\]{}|/]/g, "\\$&");
-  const termBoundary = "[\\p{L}\\p{M}\\p{N}_]";
+  // Ported from docTermMatcher, scanDocTerms and markTerms (packages/core/src/render/doc-terms.ts and
+  // terms.ts), on one text node at a time. The marks may differ from core's: a text node that is not NFC gets
+  // none, and a word boundary is not checked across inline elements. The bridge tests hold the
+  // single-text-node cases in parity with core's doc matcher, which the regex matcher of the writeup (the
+  // reference) agrees with.
+  // The forms live in a prefix tree keyed by a case fold, so a position costs at most the depth of the tree
+  // and nothing is compiled. Every step is counted: one per code point compared, per whitespace character a
+  // space consumes, per start position tried, per form that ends on the way and per code point of an
+  // acronym's exact check. Measured here: 10,000,000 steps take 0.1 to 0.3 s of matching, at 1 to 2.5 steps
+  // per character of ordinary prose. Finding the grapheme boundaries of a text node that holds a match costs
+  // about 0.4 microseconds per character and is not counted.
+  // Kept in parity with foldCodePoint (packages/core/src/render/doc-terms.ts) by the bridge glossary tests.
+  const foldExceptions = new Map([[0x131, 0x131], [0x1fd3, 0x390], [0x1fe3, 0x3b0], [0xfb05, 0xfb06]]);
+  const oneCodePoint = text => {
+    const code = text.codePointAt(0) ?? 0;
+    return text.length === (code > 0xffff ? 2 : 1) ? code : undefined;
+  };
+  function foldCodePoint(code) {
+    const exception = foldExceptions.get(code);
+    if (exception !== undefined) return exception;
+    const text = String.fromCodePoint(code);
+    const upper = oneCodePoint(text.toUpperCase());
+    if (upper !== undefined) {
+      const lower = oneCodePoint(String.fromCodePoint(upper).toLowerCase());
+      if (lower !== undefined) return lower;
+    }
+    return oneCodePoint(text.toLowerCase()) ?? code;
+  }
+  const isSpaceUnit = unit => unit === 32 || (unit >= 9 && unit <= 13) || unit === 0xa0 || unit === 0x1680 ||
+    (unit >= 0x2000 && unit <= 0x200a) || unit === 0x2028 || unit === 0x2029 || unit === 0x202f ||
+    unit === 0x205f || unit === 0x3000 || unit === 0xfeff;
+  const wordPattern = /^[\p{L}\p{M}\p{N}_]$/u;
   function termMatcher(entries) {
-    let weight = 0;
+    const folds = new Map(), words = new Map();
+    const fold = code => {
+      let folded = folds.get(code);
+      if (folded === undefined) folds.set(code, folded = foldCodePoint(code));
+      return folded;
+    };
+    const word = code => {
+      let is = words.get(code);
+      if (is === undefined) words.set(code, is = wordPattern.test(String.fromCodePoint(code)));
+      return is;
+    };
     const forms = entries
       .flatMap((entry, index) => [entry.term, ...entry.aliases].map(form => ({ form: glossaryForm(form), entry: index })))
       .filter(({ form }) => form.length > 0)
       .sort((a, b) => b.form.length - a.form.length)
-      .map(({ form, entry }) => {
-        weight += form.length;
-        const source = form.split(" ").map(escapePattern).join("\\s+") + "(?:es|s)?(?!" + termBoundary + ")";
-        const acronym = !/\p{Ll}/u.test(form) && (form.match(/\p{Lu}/gu)?.length ?? 0) >= 2;
-        return { entry, source, acronym, at: new RegExp(source, acronym ? "uy" : "iuy") };
-      });
-    return { forms, weight, remaining: GLOSSARY_WORK_MAX,
-      pattern: new RegExp("(?<!" + termBoundary + ")(?:" + forms.map(({ source }) => "(" + source + ")").join("|") + ")", "giu") };
+      .map(({ form, entry }, rank) => ({ entry, rank, codes: Array.from(form, char => char.codePointAt(0) ?? 0),
+        acronym: !/\p{Ll}/u.test(form) && (form.match(/\p{Lu}/gu)?.length ?? 0) >= 2 }));
+    const root = { next: new Map() };
+    for (const form of forms) {
+      let node = root;
+      for (const code of form.codes) {
+        if (code === 32) node = node.space ??= { next: new Map() };
+        else {
+          const key = fold(code);
+          let child = node.next.get(key);
+          if (!child) node.next.set(key, child = { next: new Map() });
+          node = child;
+        }
+      }
+      (node.forms ??= []).push(form);
+    }
+    return { forms, root, fold, word, remaining: GLOSSARY_STEP_MAX };
+  }
+  // Marks the first use of each entry in value. accept(index, length) is the grapheme check of a range;
+  // mark(entry, index, length) returns true when no entry is left. Returns false when a step did not fit.
+  function scanTerms(matcher, value, accept, seen, mark) {
+    const { root, fold, word } = matcher;
+    const size = value.length;
+    const foldE = fold(101), foldS = fold(115);
+    let left = matcher.remaining;
+    const wordBefore = index => {
+      if (index <= 0) return false;
+      let code = value.charCodeAt(index - 1);
+      if (code >= 0xdc00 && code <= 0xdfff && index >= 2) {
+        const high = value.charCodeAt(index - 2);
+        if (high >= 0xd800 && high <= 0xdbff) code = (high - 0xd800) * 0x400 + (code - 0xdc00) + 0x10000;
+      }
+      return word(code);
+    };
+    const wordAt = index => index < size && word(value.codePointAt(index) ?? 0);
+    const exactEnd = (form, start) => {
+      let index = start;
+      for (const code of form.codes) {
+        if (index >= size) return -1;
+        if (code === 32) {
+          if (!isSpaceUnit(value.charCodeAt(index))) return -1;
+          do { index++; left--; } while (index < size && isSpaceUnit(value.charCodeAt(index)) && left >= 0);
+        } else {
+          left--;
+          const here = value.codePointAt(index) ?? 0;
+          if (here !== code) return -1;
+          index += here > 0xffff ? 2 : 1;
+        }
+        if (left < 0) return -1;
+      }
+      return index;
+    };
+    const withSuffix = (end, exact) => {
+      if (end < size) {
+        left--;
+        const first = value.codePointAt(end) ?? 0;
+        if ((exact ? first === 101 : fold(first) === foldE) && end + 1 < size) {
+          left--;
+          const second = value.codePointAt(end + 1) ?? 0;
+          if ((exact ? second === 115 : fold(second) === foldS) && !wordAt(end + 2)) return end + 2;
+        }
+        if ((exact ? first === 115 : fold(first) === foldS) && !wordAt(end + 1)) return end + 1;
+      }
+      return wordAt(end) ? -1 : end;
+    };
+    const find = start => {
+      let node = root, index = start, ends;
+      while (index < size) {
+        const unit = value.charCodeAt(index);
+        if (isSpaceUnit(unit)) {
+          left--;
+          if (!node.space) break;
+          do { index++; left--; } while (index < size && isSpaceUnit(value.charCodeAt(index)) && left >= 0);
+          node = node.space;
+        } else {
+          const code = value.codePointAt(index) ?? 0;
+          left--;
+          const child = node.next.get(fold(code));
+          if (!child) break;
+          node = child;
+          index += code > 0xffff ? 2 : 1;
+        }
+        if (left < 0) return;
+        if (node.forms) {
+          left -= node.forms.length;
+          ends ??= [];
+          for (const form of node.forms) ends.push({ form, end: index });
+        }
+      }
+      if (left < 0 || !ends) return;
+      if (ends.length > 1) ends.sort((a, b) => a.form.rank - b.form.rank);
+      for (const { form, end } of ends) {
+        let literal = end;
+        if (form.acronym) {
+          literal = exactEnd(form, start);
+          if (left < 0) return;
+          if (literal < 0) continue;
+        }
+        const finish = withSuffix(literal, form.acronym);
+        if (left < 0) return;
+        if (finish < 0) continue;
+        if (accept(start, finish - start)) return { entry: form.entry, length: finish - start };
+      }
+    };
+    let index = 0, previousWord = false;
+    while (index < size) {
+      left--;
+      if (left < 0) break;
+      const code = value.codePointAt(index) ?? 0;
+      if (!previousWord) {
+        const hit = find(index);
+        if (left < 0) break;
+        if (hit) {
+          const start = index;
+          index += hit.length;
+          previousWord = wordBefore(index);
+          if (!seen.has(hit.entry) && mark(hit.entry, start, hit.length)) break;
+          continue;
+        }
+      }
+      previousWord = word(code);
+      index += code > 0xffff ? 2 : 1;
+    }
+    matcher.remaining = left >= 0 ? left : 0;
+    return left >= 0;
   }
   function termMark(text, index) {
     const mark = createElement("span");
@@ -727,58 +881,32 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         pending.push(children(node)[Symbol.iterator]());
     }
     const seen = new Set();
-    const charge = units => {
-      if (units > matcher.remaining) { matcher.remaining = 0; return false; }
-      matcher.remaining -= units;
-      return true;
-    };
     let segmenter;
     for (const node of textNodes) {
       if (seen.size === glossary.length) break;
       const value = textData(node);
       const parent = nodeValue("parentNode", node);
       if (!parent || value !== value.normalize("NFC")) continue;
-      if (!charge(value.length * matcher.weight)) break;
+      // Grapheme boundaries are found only once a form matches in this text node.
       let boundaries;
-      const fits = (start, length) => boundaries.has(start) && boundaries.has(start + length);
-      const advance = index => index + ((value.codePointAt(index) ?? 0) > 0xffff ? 2 : 1);
-      const replacements = [];
-      let end = 0;
-      matcher.pattern.lastIndex = 0;
-      for (let match = matcher.pattern.exec(value); match; match = matcher.pattern.exec(value)) {
-        if (!charge(matcher.forms.length)) break;
-        let form = matcher.forms[match.findIndex((part, index) => index > 0 && part !== undefined) - 1];
-        let length = match[0].length;
-        if (!form) continue;
+      const accept = (start, length) => {
         if (!boundaries) {
           segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
           boundaries = new Set([value.length]);
           for (const { index } of segmenter.segment(value)) boundaries.add(index);
         }
-        let accepted = fits(match.index, length);
-        if (form.acronym || !accepted) {
-          // Recheck case and boundaries together so a refused form cannot hide a shorter one.
-          if (!charge(matcher.weight)) break;
-          accepted = false;
-          for (const candidate of matcher.forms) {
-            candidate.at.lastIndex = match.index;
-            const exact = candidate.at.exec(value);
-            if (!exact || !fits(match.index, exact[0].length)) continue;
-            form = candidate;
-            length = exact[0].length;
-            accepted = true;
-            break;
-          }
-        }
-        if (!accepted) { matcher.pattern.lastIndex = advance(match.index); continue; }
-        matcher.pattern.lastIndex = match.index + length;
-        if (seen.has(form.entry)) continue;
-        if (match.index > end) replacements.push(createText(value.slice(end, match.index)));
-        replacements.push(termMark(value.slice(match.index, match.index + length), form.entry));
-        end = match.index + length;
-        seen.add(form.entry);
-        if (seen.size === glossary.length) break;
-      }
+        return boundaries.has(start) && boundaries.has(start + length);
+      };
+      const replacements = [];
+      let end = 0;
+      const scanned = scanTerms(matcher, value, accept, seen, (entry, start, length) => {
+        if (start > end) replacements.push(createText(value.slice(end, start)));
+        replacements.push(termMark(value.slice(start, start + length), entry));
+        end = start + length;
+        seen.add(entry);
+        return seen.size === glossary.length;
+      });
+      if (!scanned) break;
       if (!replacements.length) continue;
       if (end < value.length) replacements.push(createText(value.slice(end)));
       const fragment = dom(window.Document.prototype, "createDocumentFragment", document);

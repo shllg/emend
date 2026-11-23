@@ -187,13 +187,12 @@ test("a glossary whose forms share a long prefix lists every term and marks noth
     const aliases = Array.from({ length: 8 }, (_, alias) => form(alias + 1));
     return `- **${form(0)}** (also: ${aliases.join(", ")}): Def.`;
   });
-  // Compiling the 450-form pattern takes about 1.5 s here; before the doc budget, matching this shape took about 13 s, so the timeout still catches that.
   const { terms, html } = await render(doc(items.join("\n"), "a ".repeat(4400)));
   expect(terms).toHaveLength(50);
   expect(marks(html)).toHaveLength(0);
-}, 10_000);
+});
 
-test("the doc's smaller work budget still marks a late first use in a long ordinary doc", async () => {
+test("the doc's step budget still marks a late first use in a long ordinary doc", async () => {
   const words = [
     "alpha",
     "bravo",

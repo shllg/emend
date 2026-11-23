@@ -1,8 +1,9 @@
 import { GlossaryForm, LIMITS, normalizeGlossaryForm } from "@emend/contract";
 import { type HtmlElement, type HtmlRoot, renderData } from "./blocks.ts";
+import { docTermMatcher } from "./doc-terms.ts";
 import { limitDefinition } from "./glossary-definition.ts";
 import { normalizeText } from "./normalize.ts";
-import { DOC_TERM_MATCH_WORK_BUDGET, runBreaks, termMatcher } from "./terms.ts";
+import { DOC_TERM_MATCH_STEP_BUDGET, runBreaks } from "./terms.ts";
 
 export type DocGlossaryEntry = { term: string; aliases: string[]; definition: string };
 
@@ -139,6 +140,6 @@ export function docGlossary() {
     const found = extractDocGlossary(tree);
     if (!found?.entries.length) return;
     file.data.docGlossaryEntries = found.entries;
-    file.data.terms = termMatcher(found.entries, DOC_TERM_MATCH_WORK_BUDGET);
+    file.data.terms = docTermMatcher(found.entries, DOC_TERM_MATCH_STEP_BUDGET);
   };
 }
