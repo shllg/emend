@@ -1,5 +1,8 @@
 import { LIMITS } from "@emend/contract";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+import type { HtmlElement, HtmlRoot } from "./blocks.ts";
+import { extractDocGlossary } from "./doc-glossary.ts";
+import { longMarkRun } from "./doc-terms.ts";
 import { type RenderEffects, renderDoc } from "./markdown.ts";
 
 async function render(markdown: string) {
@@ -234,4 +237,66 @@ test("a line break inside a term reads as one space", async () => {
   const { terms, html } = await render(doc("- **Hub\nnode** (also: edge\nbox):\n  A machine.", "An edge box here."));
   expect(terms?.map((term) => term.term)).toEqual(["Hub node"]);
   expect(marks(html).map((m) => [m[1], m[2]])).toEqual([["0", "edge box"]]);
+});
+
+// Marks in NFC order after a letter that does not compose with them: a run of exactly `count` marks.
+const markRun = (count: number) => `x${"̖".repeat(Math.ceil(count / 2))}${"́".repeat(Math.floor(count / 2))}`;
+
+test("a glossary item with a run of more than 30 combining marks is skipped, with 30 it is kept", async () => {
+  const items = (run: string) =>
+    [`- **Hub${run}:** Machine.`, `- **Lease:** A claim${run} here.`, "- **Budget:** Money."].join("\n");
+  const kept = await render(doc(items(markRun(30)), "Nothing here."));
+  expect(kept.terms?.map((term) => term.term)).toEqual([`Hub${markRun(30)}`, "Lease", "Budget"]);
+  const skipped = await render(doc(items(markRun(31)), "Nothing here."));
+  expect(skipped.terms?.map((term) => term.term)).toEqual(["Budget"]);
+});
+
+test("an alias with a run of more than 30 combining marks is dropped and the entry stays", async () => {
+  const entry = (run: string) => `- **Hub** (also: edge${run}, box): Machine.`;
+  // The alias shows only as a mark of the entry's first use, so the text carries the 30-mark spelling.
+  const body = `An edge${markRun(30)} here, then a hub.`;
+  const kept = await render(doc(entry(markRun(30)), body));
+  expect(marks(kept.html).map((m) => m[2])).toEqual([`edge${markRun(30)}`]);
+  // With 31 marks the alias is dropped, but the entry stays and its term is marked.
+  const dropped = await render(doc(entry(markRun(31)), body));
+  expect(dropped.terms?.map((term) => term.term)).toEqual(["Hub"]);
+  expect(marks(dropped.html).map((m) => m[2])).toEqual(["hub"]);
+});
+
+test("a heading with a run of more than 30 combining marks is never normalized", () => {
+  const original = String.prototype.normalize;
+  const receivers: string[] = [];
+  vi.spyOn(String.prototype, "normalize").mockImplementation(function (this: string, form?: string) {
+    receivers.push(String(this));
+    return original.call(this, form);
+  });
+  const text = (value: string) => ({ type: "text" as const, value });
+  const element = (tagName: string, ...children: HtmlElement["children"]): HtmlElement => ({
+    type: "element",
+    tagName,
+    properties: {},
+    children,
+  });
+  const tree = (heading: string): HtmlRoot => ({
+    type: "root",
+    children: [
+      element("h2", text(heading)),
+      element("ul", element("li", element("strong", text("Hub:")), text(" Machine."))),
+    ],
+  });
+  expect(extractDocGlossary(tree("Glossary"))?.entries).toHaveLength(1);
+  receivers.length = 0;
+  expect(extractDocGlossary(tree(`Glossary${markRun(31)}`))).toBeUndefined();
+  expect(receivers.some((receiver) => longMarkRun(receiver))).toBe(false);
+  vi.restoreAllMocks();
+});
+
+test("a text node with a run of more than 30 combining marks gets no marks, the next paragraph does", async () => {
+  const body = (run: string) => `A hub ${run} and a hub.\n\nThe hub again.`;
+  const { html } = await render(doc("- **Hub:** Machine.", body(markRun(31))));
+  expect(marks(html).map((m) => m[2])).toEqual(["hub"]);
+  expect(html).toContain("The <span");
+  const within = await render(doc("- **Hub:** Machine.", body(markRun(30))));
+  expect(marks(within.html).map((m) => m[2])).toEqual(["hub"]);
+  expect(within.html).not.toContain("The <span");
 });

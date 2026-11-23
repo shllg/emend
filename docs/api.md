@@ -2211,13 +2211,20 @@ of the terms and aliases and stops after 10,000,000 steps. A step is charged for
 character compared, each whitespace character a space in a term consumes, each start position tried,
 each form that ends on the way, each character of the `s`/`es` suffix check and each character of an
 acronym's exact check. The first time a character is case-folded and the first time it is classified
-as a word character cost 32 steps each, and a text node that must be split into graphemes costs 32
-steps per character; ordinary ASCII text does not need that split, but a match with a non-ASCII
-character at its edge does. Ordinary English prose costs about 1.2 steps per character, so the budget
-covers about 8,000,000 characters. Non-ASCII prose in paragraphs of about 1,000 characters that each
-hold a match with a non-ASCII edge costs about 33 steps per character, so the budget covers about
-300,000 characters of it. Building the tree and normalizing each text node to NFC are not charged.
-The budget takes 0.26 s or less to spend on every shape measured. When the budget
+as a word character cost 32 steps each. A text node that must be split into graphemes costs 256 steps
+plus 32 steps per character; ordinary ASCII text does not need that split, but a match with a
+non-ASCII character at its edge does, and a Markdown text node that is not in NFC is charged the same
+up front, even without a match. Ordinary English prose costs about 1.2 to 2 steps per character (1.2
+when few words start a term, about 1.9 against 50 terms made of common words), so the budget covers
+about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of about 1,000 characters
+that each hold a match with a non-ASCII edge costs about 33 steps per character, so the budget covers
+about 300,000 characters of it. Spending the budget takes about 0.25 s or less on every shape measured
+(median of five runs). Not charged, each linear in the text: building the tree (3 to 6 ms for 450
+forms), the check for a run of more than 30 combining marks (at most 23 ns per character, so 24 ms for
+a 1 MiB doc) and normalizing each text node to NFC (at most 25 ns per character, 26 ms at 1 MiB).
+A text node with a run of more than 30 combining marks in a row gets no marks, and a glossary item
+whose term or definition has such a run is skipped (an alias with one is dropped): normalizing a
+longer run in the wrong order takes quadratic time, and real text never has one. When the budget
 is spent, marking stops for the rest of the doc: the text node being read gets no marks, earlier
 text nodes keep theirs, and later first uses stay unmarked. `RevisionView.docs[].terms` lists
 the entries in marking order; the app opens the same card as the writeup's, whose "Glossary" link
@@ -2258,7 +2265,10 @@ with more headings before its Glossary heading gets no glossary. Its other limit
   6,400 nodes. "Glossary" must end within those 800 characters, so a heading with 793 or more
   characters before the word gets no glossary, and text after those 800 characters is ignored.
 - Each `dt` and each `dd` yields at most 20,000 characters of text, read from at most 20,000 nodes.
-- The same 10,000,000-step marking budget as a Markdown doc.
+- The same 10,000,000-step marking budget as a Markdown doc, with the same charges. The checks that are
+  not charged cost at most 0.19 s (mark runs) and 0.21 s (NFC) at the 8 MiB HTML limit.
+- A text node with a run of more than 30 combining marks in a row gets no marks, and a `dt` or `dd`
+  with such a run makes its entry invalid (an alias with one is dropped), as in a Markdown doc.
 
 The bridge inside the frame does all of the work. At ready it reads the glossary, marks the first use
 of each term and alias in its own spans (dotted underline, focusable, never inside the glossary, a

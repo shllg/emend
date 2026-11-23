@@ -4,10 +4,12 @@ import { generator } from "./doc-terms.cases.ts";
 import {
   certainBoundary,
   DOC_TERM_LOOKUP_STEPS,
+  DOC_TERM_SEGMENT_FIXED_STEPS,
   DOC_TERM_SEGMENT_STEPS,
   docTermMatcher,
   foldCodePoint,
   isSpaceUnit,
+  longMarkRun,
 } from "./doc-terms.ts";
 import { DOC_TERM_MATCH_STEP_BUDGET, markTerms } from "./terms.ts";
 
@@ -301,6 +303,7 @@ test("certainBoundary holds at every index of plain ASCII prose, which therefore
 // test fails. L is DOC_TERM_LOOKUP_STEPS and S is DOC_TERM_SEGMENT_STEPS.
 const L = DOC_TERM_LOOKUP_STEPS;
 const S = DOC_TERM_SEGMENT_STEPS;
+const F = DOC_TERM_SEGMENT_FIXED_STEPS;
 const HUGE = Number.MAX_SAFE_INTEGER;
 
 test("the charge for each form that ends on the way: 450 forms on one tree node", () => {
@@ -363,7 +366,7 @@ test("the charge for segmenting a text node: non-ASCII candidates in 1,000-chara
   // Per paragraph: 998 positions, 5 tree lookups, 1 form end and 1 suffix step. The first one looks up
   // 5 characters, and zebra costs 7 steps and one lookup (a). The CJK paragraphs also pay S per unit, each.
   const base = paragraphCount * 1005 + 6 * L + 7;
-  expect(run(entries, doc(cjk), HUGE).steps).toBe(base + paragraphCount * S * 1000);
+  expect(run(entries, doc(cjk), HUGE).steps).toBe(base + paragraphCount * (F + S * 1000));
   // The budget of the same doc without segmentation, plus a little, is spent by the segmentation alone.
   const budget = base + 100;
   const spent = run(entries, doc(cjk), budget);
@@ -382,11 +385,62 @@ test("a text node that is not NFC was split into graphemes up front, so the scan
   const view = `cafe${chars(0x301)}${" x".repeat(50)}`.normalize("NFC");
   const entries = [{ term: "zebra" }];
   const text = () => paragraphs(`cafe${chars(0x301)}${" x".repeat(50)}`);
-  const spent = run(entries, text(), S * view.length - 1);
+  const spent = run(entries, text(), F + S * view.length - 1);
   expect(spent.matcher.remaining).toBe(0);
-  expect(run(entries, text(), HUGE).steps).toBeGreaterThanOrEqual(S * view.length);
+  expect(run(entries, text(), HUGE).steps).toBeGreaterThanOrEqual(F + S * view.length);
   // The same text already in NFC pays nothing for it.
   expect(run(entries, paragraphs(view), HUGE).steps).toBeLessThan(S * view.length);
+});
+
+test("the fixed charge for a segmentation: many tiny nodes that each need a split spend the budget", () => {
+  const entries = [{ term: "a" }, { term: "zebra" }];
+  // Two units per node: "a" and a full stop of the ideographic kind, so the candidate's edge is uncertain.
+  const tiny = `a${chars(0x3002)}`;
+  const nodes = (count: number) => paragraphs(...Array(count).fill(tiny), "zebra");
+  // Per node: 2 positions, 2 tree lookups (one failing), 1 form end and 1 suffix step; the first node adds
+  // lookups. The split costs F + 2 * S.
+  const per = F + 2 * S + 6;
+  const one = run(entries, nodes(1), HUGE).steps;
+  expect(run(entries, nodes(11), HUGE).steps - one).toBe(10 * per);
+  // Without the fixed charge each node costs F fewer steps. A budget that fits 100 such nodes plus the
+  // real term spends out on the same doc with the fixed charge, and the term is not marked.
+  const budget = one + 99 * (per - F) + 100;
+  const spent = run(entries, nodes(100), budget);
+  expect(spent.matcher.remaining).toBe(0);
+  expect(spent.marks).toEqual([["0", "a"]]);
+});
+
+test("longMarkRun: more than 30 combining marks in a row, counted in code points", () => {
+  const marks = (count: number) => chars(0x301, 0x316).repeat(count / 2);
+  expect(longMarkRun(`e${marks(30)}`)).toBe(false);
+  expect(longMarkRun(`e${marks(32).slice(0, 31)}`)).toBe(true);
+  expect(longMarkRun(`e${marks(32)}`)).toBe(true);
+  // A starter splits runs: 30 marks, a letter, 30 marks is fine.
+  expect(longMarkRun(`e${marks(30)}e${marks(30)}`)).toBe(false);
+  expect(longMarkRun(`${marks(30)} ${marks(30)}`)).toBe(false);
+  expect(longMarkRun("")).toBe(false);
+  expect(longMarkRun("plain text")).toBe(false);
+  // A mark outside the BMP is one code point of a run, not two.
+  const astral = chars(0x1d165);
+  expect(longMarkRun(`e${astral.repeat(30)}`)).toBe(false);
+  expect(longMarkRun(`e${astral.repeat(31)}`)).toBe(true);
+  expect(longMarkRun(`e${marks(30)}${astral}`)).toBe(true);
+  // The regex has no state that leaks between calls.
+  expect(longMarkRun(`e${marks(32)}`)).toBe(true);
+  expect(longMarkRun(`e${marks(30)}`)).toBe(false);
+});
+
+test("\\p{M} covers every non-starter: a character that is not a mark never moves in front of U+0345", () => {
+  // U+0345 has the highest combining class (240), so a non-starter, or a character whose decomposition
+  // starts with one, would move in front of it when the text is put into NFD.
+  const exceptions: string[] = [];
+  const mark = /^\p{M}$/u;
+  for (let code = 0; code <= 0x10ffff; code++) {
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    const char = String.fromCodePoint(code);
+    if (!mark.test(char) && !`ͅ${char}`.normalize("NFD").startsWith("ͅ")) exceptions.push(code.toString(16));
+  }
+  expect(exceptions).toEqual([]);
 });
 
 test("coverage with non-ASCII prose: 50 terms with 3 aliases each, paragraphs of about 1,000 characters", () => {
@@ -422,4 +476,29 @@ test("coverage with non-ASCII prose: 50 terms with 3 aliases each, paragraphs of
   // The segmentation path ran: each paragraph was split into graphemes and charged for it, and all fit.
   expect(steps).toBeGreaterThan(50 * S * 900);
   expect(steps).toBeLessThan(DOC_TERM_MATCH_STEP_BUDGET);
+});
+
+test("a text node with a run of more than 30 combining marks gets no marks and is not normalized", () => {
+  const entries = [{ term: "budget" }];
+  // Alternating U+0301 and U+0316 is in the wrong order for NFC: normalizing 100,000 of them takes seconds.
+  const hostile = `x${chars(0x301, 0x316).repeat(50_000)} budget`;
+  const { marks, matcher } = run(entries, paragraphs(hostile, "and a budget again"));
+  // The next paragraph still marks the term, and the hostile node cost the budget nothing.
+  expect(marks).toEqual([["0", "budget"]]);
+  const alone = run(entries, paragraphs("and a budget again"));
+  expect(DOC_TERM_MATCH_STEP_BUDGET - matcher.remaining).toBe(alone.steps);
+});
+
+test("a run of exactly 30 combining marks in NFC order still gets its mark, 31 does not", () => {
+  const entries = [{ term: "budget" }];
+  // x, then marks of class 220 before marks of class 230, which is canonical order, so the node is NFC.
+  const run30 = `x${chars(0x316).repeat(15)}${chars(0x301).repeat(15)}`;
+  expect(run30.normalize("NFC")).toBe(run30);
+  const with30 = run(entries, paragraphs(`${run30} budget`));
+  expect(with30.marks).toEqual([["0", "budget"]]);
+  const with31 = run(entries, paragraphs(`${run30}${chars(0x301)} budget`));
+  expect(with31.marks).toEqual([]);
+  // A starter between two runs of 30 splits them.
+  const split = run(entries, paragraphs(`${run30}x${run30} budget`));
+  expect(split.marks).toEqual([["0", "budget"]]);
 });

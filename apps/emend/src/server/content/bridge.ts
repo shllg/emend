@@ -569,6 +569,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const GLOSSARY_VISITS_MAX = 100000;
   const GLOSSARY_STEP_MAX = 10000000;
   const GLOSSARY_SEGMENT_STEPS = 32;
+  const GLOSSARY_SEGMENT_FIXED_STEPS = 256;
   const GLOSSARY_LOOKUP_STEPS = 32;
   const htmlElement = node => nodeType(node) === 1 && namespace(node) === "http://www.w3.org/1999/xhtml";
   const createText = text => dom(window.Document.prototype, "createTextNode", document, text);
@@ -577,8 +578,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     "tt", "u", "var"]);
   let glossary = [], glossaryList;
   const termMarks = new WeakMap();
-  // Kept in parity with normalizeGlossaryForm and GlossaryForm (packages/contract/src/manifest.ts).
-  const glossaryForm = text => text.normalize("NFC").replace(/\s+/gu, " ").trim();
+  // Kept in parity with normalizeGlossaryForm and GlossaryForm (packages/contract/src/manifest.ts), except
+  // that text with a run of more than 30 combining marks is not normalized (that takes quadratic time) and
+  // reads as empty, so validForm refuses it: the entry, or the alias, is skipped.
+  const glossaryForm = text => longMarkRun(text) ? "" : text.normalize("NFC").replace(/\s+/gu, " ").trim();
   const validForm = text => text.length > 0 && text.length <= GLOSSARY_FORM_MAX && text.isWellFormed() &&
     !Array.from(text).some(char => {
       const code = char.charCodeAt(0);
@@ -682,20 +685,42 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   // none, and a word boundary is not checked across inline elements. The bridge tests hold the
   // single-text-node cases in parity with core's doc matcher, which the regex matcher of the writeup (the
   // reference) agrees with.
-  // The forms live in a prefix tree keyed by a case fold, so a position costs at most the depth of the tree
-  // and nothing is compiled. The steps counted: 1 per code point compared (each tree lookup), per whitespace
-  // character a space consumes, per start position tried, per form that ends on the way, per character of
-  // the s/es suffix check and per character of an acronym's exact check; GLOSSARY_LOOKUP_STEPS for the first
-  // fold and the first word lookup of a character; GLOSSARY_SEGMENT_STEPS per character when a text node
-  // must be split into graphemes (ordinary ASCII text does not need it). Measured on this machine,
-  // 10,000,000 steps take 0.26 s or less on every shape tried. Ordinary English prose costs about 1.2 steps
-  // per character (the budget covers about 8,000,000 characters); non-ASCII prose in paragraphs of about
-  // 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33 (about 300,000
-  // characters). Not counted: building the tree (3 to 6 ms for 450 forms) and the NFC normalization of each
-  // text node (at most 13 ns per character).
+  // The forms live in a prefix tree keyed by a case fold. A position costs the characters the walk compares
+  // (at most 100, the longest form), one step for each form that ends on the way (up to 450 when every form
+  // ends on one path) with the suffix check of each, and, once per text node, a split into graphemes when a
+  // candidate has an uncertain edge. Nothing is compiled. The steps counted: 1 per code point compared (each
+  // tree lookup), per whitespace character a space consumes, per start position tried, per form that ends on
+  // the way, per character of the s/es suffix check and per character of an acronym's exact check;
+  // GLOSSARY_LOOKUP_STEPS for the first fold and the first word lookup of a character;
+  // GLOSSARY_SEGMENT_FIXED_STEPS plus GLOSSARY_SEGMENT_STEPS per character when a text node must be split
+  // into graphemes (ordinary ASCII text does not need it). Measured on this machine (median of five runs),
+  // 10,000,000 steps take about 0.25 s or less on every shape tried: the hostile 450-form shapes, 450 forms
+  // on one tree node (the slowest), refused acronyms, 150,000 tiny text nodes that each need a split, a budget
+  // spent through segmentation alone and one spent through first-seen lookups alone. Ordinary English prose
+  // costs about 1.2 to 2 steps per character (1.2 when few words start a term, about 1.9 against 50 terms
+  // made of common words), so the budget covers about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose
+  // in paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33
+  // steps per character (about 300,000 characters). Not counted, each linear in the text: building the tree
+  // (3 to 6 ms for 450 forms), the check for a run of more than 30 combining marks (at most 23 ns per
+  // character: 24 ms for a 1 MiB doc and 0.19 s for 8 MiB) and the NFC normalization of each text node (at
+  // most 25 ns per character, on runs of 30 marks in the worst order: 26 ms and 0.21 s). A text node with a
+  // longer run of marks gets no marks, and a glossary item with one is skipped.
   // The parity tests evaluate the slice between "term matcher: start" and "term matcher: end" against core's
   // doc matcher, charge by charge, so the slice uses only glossaryForm and the GLOSSARY_* constants.
   // term matcher: start
+  // Kept in parity with longMarkRun (packages/core/src/render/doc-terms.ts) by the bridge glossary tests.
+  const markRun = /\p{M}+/gu;
+  function longMarkRun(text) {
+    markRun.lastIndex = 0;
+    for (let match = markRun.exec(text); match; match = markRun.exec(text)) {
+      const run = match[0];
+      if (run.length <= 30) continue;
+      let count = 0;
+      for (let index = 0; index < run.length; index += (run.codePointAt(index) ?? 0) > 0xffff ? 2 : 1)
+        if (++count > 30) return true;
+    }
+    return false;
+  }
   // Kept in parity with foldCodePoint (packages/core/src/render/doc-terms.ts) by the bridge glossary tests.
   const foldExceptions = new Map([[0x131, 0x131], [0x1fd3, 0x390], [0x1fe3, 0x3b0], [0xfb05, 0xfb06]]);
   const oneCodePoint = text => {
@@ -784,7 +809,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     // A candidate's grapheme check; segmenting the node is charged once, and only when an edge is not certain.
     const check = (start, length) => {
       if (!segmented && !(certainBoundary(value, start) && certainBoundary(value, start + length))) {
-        left -= GLOSSARY_SEGMENT_STEPS * size;
+        left -= GLOSSARY_SEGMENT_FIXED_STEPS + GLOSSARY_SEGMENT_STEPS * size;
         if (left < 0) return false;
         segment();
         segmented = true;
@@ -933,7 +958,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       if (seen.size === glossary.length) break;
       const value = textData(node);
       const parent = nodeValue("parentNode", node);
-      if (!parent || value !== value.normalize("NFC")) continue;
+      if (!parent || longMarkRun(value) || value !== value.normalize("NFC")) continue;
       // Grapheme boundaries are found only when a candidate range has an edge scanTerms cannot be sure of.
       let boundaries;
       const segment = () => {

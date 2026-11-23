@@ -4,9 +4,11 @@ import { normalizeGlossaryForm } from "@emend/contract";
 // regex matcher in terms.ts, which stays the reference: for every input the marks are the same.
 //
 // A regex alternation of up to 450 forms costs, at each position, up to the summed length of all forms, and
-// compiling it can take seconds. This matcher walks a prefix tree of the forms instead. A position costs at
-// most the depth of the tree (a form is at most 100 characters) plus the forms that end on the way, nothing is
-// compiled, and every step is counted against the budget as it is taken.
+// compiling it can take seconds. This matcher walks a prefix tree of the forms instead. A position costs the
+// characters the walk compares (at most 100, the longest form), one step for each form that ends on the way
+// (up to 450 when every form ends on one path) with the suffix check of each, and, once per text node, a
+// split into graphemes when a candidate has an uncertain edge. Nothing is compiled, and every step is
+// counted against the budget as it is taken.
 //
 // Rules, the same as the regex path's (terms.ts):
 // - A match starts only where the code point before is not a letter, mark, digit or _.
@@ -66,8 +68,10 @@ export type DocTermMatcher = {
   remaining: number;
   forms: Form[];
   root: Node;
-  // The caches and the computing functions behind them. Building the tree fills `folds` for the forms' own
-  // characters without a charge; the scan charges DOC_TERM_LOOKUP_STEPS for each code point it finds missing.
+  // The caches and the computing functions behind them. Building the tree fills `folds` (not `words`) for the
+  // forms' own characters without a charge; the scan charges DOC_TERM_LOOKUP_STEPS for each code point it
+  // finds missing in either cache, so a form's characters cost nothing to fold but the first word lookup of
+  // each one is charged.
   folds: Map<number, number>;
   words: Map<number, boolean>;
   fold: (code: number) => number;
@@ -76,6 +80,31 @@ export type DocTermMatcher = {
 
 /** Steps charged per UTF-16 unit of a text node that must be split into graphemes (measured, see scanDocTerms). */
 export const DOC_TERM_SEGMENT_STEPS = 32;
+/** Steps charged once per text node that is split into graphemes, whatever its length (measured, see scanDocTerms). */
+export const DOC_TERM_SEGMENT_FIXED_STEPS = 256;
+
+const markRun = /\p{M}+/gu;
+/**
+ * True when the text has more than 30 combining marks (`\p{M}`) in a row, which Unicode's Stream-Safe Text
+ * Format (UAX #15) does not allow and real text never has. `String.prototype.normalize` reorders marks by
+ * combining class, and on a longer run of marks in the wrong order its time grows with the square of the
+ * run (80,000 units took 2.4 s), so a doc path checks this first and treats such text as unmarkable.
+ * `\p{M}` covers every non-starter: for every code point c that is not `\p{M}`, ("ͅ" + c) in NFD still
+ * starts with U+0345, the mark of the highest combining class (the test in doc-terms.test.ts checks all of
+ * Unicode). The check reads each code point once.
+ */
+export function longMarkRun(text: string) {
+  markRun.lastIndex = 0;
+  for (let match = markRun.exec(text); match; match = markRun.exec(text)) {
+    const run = match[0];
+    if (run.length <= 30) continue;
+    // Code points, not units: a mark outside the BMP takes two.
+    let count = 0;
+    for (let index = 0; index < run.length; index += (run.codePointAt(index) ?? 0) > 0xffff ? 2 : 1)
+      if (++count > 30) return true;
+  }
+  return false;
+}
 /** Steps charged the first time a code point is folded, and the first time it is classified as a word character. */
 export const DOC_TERM_LOOKUP_STEPS = 32;
 
@@ -154,20 +183,27 @@ export function docTermMatcher(entries: { term: string; aliases?: string[] }[], 
  * - 1 per form that ends on the way, and 1 per code point of the s/es suffix check;
  * - 1 per code point of an acronym's exact check;
  * - DOC_TERM_LOOKUP_STEPS the first time a code point is folded and the first time it is classified as a
- *   word character (once per matcher; the forms' own characters are cached when the tree is built);
- * - DOC_TERM_SEGMENT_STEPS per UTF-16 unit of the text node when it must be split into graphemes. That
- *   happens once per node, when a candidate range has an edge that is not certainBoundary (ordinary ASCII
- *   text never needs it), or at the start when `segmented` says the caller already split the node.
+ *   word character (once per matcher; the forms' own characters are folded, so cached, when the tree is
+ *   built, but not classified);
+ * - DOC_TERM_SEGMENT_FIXED_STEPS plus DOC_TERM_SEGMENT_STEPS per UTF-16 unit of the text node when it must be
+ *   split into graphemes. That happens once per node, when a candidate range has an edge that is not
+ *   certainBoundary (ordinary ASCII text never needs it), or at the start when `segmented` says the caller
+ *   already split the node.
  * Returns false when a step did not fit the budget: the budget is then spent, and the caller drops the
  * marks of this text node. `segment()` splits the node for `rangeAt`; until it is called `rangeAt` may
  * treat every certainBoundary index as a boundary.
  *
- * Measured with standalone scripts on this machine, 10,000,000 steps take 0.26 s or less on every shape tried
- * (the hostile 450-form shapes, 450 forms on one tree node, a budget spent through segmentation alone, and
- * one spent through first-seen lookups alone). Ordinary English prose costs about 1.2 steps per character;
- * non-ASCII prose in paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge
- * costs about 33. Not counted: building the tree (3 to 6 ms for 450 forms) and the NFC normalization of
- * each text node (at most 13 ns per character).
+ * Measured with standalone scripts on this machine (median of five runs), 10,000,000 steps take about 0.25 s
+ * or less on every shape tried: the hostile 450-form shapes, 450 forms on one tree node (the slowest),
+ * refused acronyms, 150,000 tiny text nodes that each need a split, a budget spent through segmentation
+ * alone and one spent through first-seen lookups alone. Ordinary English prose costs about 1.2 to 2 steps per
+ * character (1.2 when few words start a term, about 1.9 against 50 terms made of common words), so the budget
+ * covers about 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of about 1,000
+ * characters that each hold a candidate with a non-ASCII edge costs about 33 steps per character (about
+ * 300,000 characters). Not counted, each linear in the text: building the tree (3 to 6 ms for 450 forms), the
+ * check for a run of more than 30 combining marks (at most 23 ns per character: 24 ms for a 1 MiB doc and
+ * 0.19 s for 8 MiB) and the NFC normalization of each text node (at most 25 ns per character, on runs of 30
+ * marks in the worst order: 26 ms and 0.21 s). A text node with a longer run of marks gets no marks.
  */
 export function scanDocTerms(
   matcher: DocTermMatcher,
@@ -200,14 +236,14 @@ export function scanDocTerms(
   // boundaries needs no segmentation.
   const accept = (start: number, finish: number) => {
     if (!segmented && !(certainBoundary(view, start) && certainBoundary(view, finish))) {
-      left -= DOC_TERM_SEGMENT_STEPS * size;
+      left -= DOC_TERM_SEGMENT_FIXED_STEPS + DOC_TERM_SEGMENT_STEPS * size;
       if (left < 0) return;
       segment();
       segmented = true;
     }
     return rangeAt(start, finish - start);
   };
-  if (segmented) left -= DOC_TERM_SEGMENT_STEPS * size;
+  if (segmented) left -= DOC_TERM_SEGMENT_FIXED_STEPS + DOC_TERM_SEGMENT_STEPS * size;
 
   const wordBefore = (index: number) => {
     if (index <= 0) return false;

@@ -1,6 +1,6 @@
 import { normalizeGlossaryForm } from "@emend/contract";
 import { type HtmlElement, type HtmlRoot, renderData } from "./blocks.ts";
-import { type DocTermMatcher, scanDocTerms } from "./doc-terms.ts";
+import { type DocTermMatcher, longMarkRun, scanDocTerms } from "./doc-terms.ts";
 
 // Matches stay in one text node; word boundaries include neighbours across inline elements.
 // Letters, marks, digits and _ are word characters. Match edges must also be grapheme boundaries.
@@ -87,14 +87,19 @@ export const TERM_MATCH_WORK_BUDGET = 400_000_000;
 // steps. Charged: 1 per code point compared (each tree lookup), per whitespace character a space consumes,
 // per start position tried, per form that ends on the way, per character of the s/es suffix check and per
 // character of an acronym's exact check; DOC_TERM_LOOKUP_STEPS for the first fold and the first word lookup of
-// a character; DOC_TERM_SEGMENT_STEPS per character when a text node must be split into graphemes (ordinary
-// ASCII text does not need it). Measured here, 10,000,000 steps take 0.26 s or less on every shape tried
-// (one-byte, U+3000, CJK and astral text, refused acronyms, 450 forms on one tree node, a budget spent
-// through segmentation alone and one spent through first-seen lookups alone). Ordinary English prose costs
-// about 1.2 steps per character (the budget covers about 8,000,000 characters); non-ASCII prose in
-// paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33
-// (about 300,000 characters). Not counted: building the tree (3 to 6 ms for 450 forms) and the NFC
-// normalization of each text node (at most 13 ns per character).
+// a character; DOC_TERM_SEGMENT_FIXED_STEPS plus DOC_TERM_SEGMENT_STEPS per character when a text node must
+// be split into graphemes (ordinary ASCII text does not need it; a Markdown text node that is not NFC is
+// charged this up front). Measured here (median of five runs), 10,000,000 steps take about 0.25 s or less on
+// every shape tried: the hostile 450-form shapes, 450 forms on one tree node (the slowest), refused acronyms,
+// 150,000 tiny text nodes that each need a split, a budget spent through segmentation alone and one spent
+// through first-seen lookups alone. Ordinary English prose costs about 1.2 to 2 steps per character (1.2 when
+// few words start a term, about 1.9 against 50 terms made of common words), so the budget covers about
+// 5,000,000 to 8,000,000 characters of it. Non-ASCII prose in paragraphs of about 1,000 characters that each
+// hold a candidate with a non-ASCII edge costs about 33 steps per character (about 300,000 characters).
+// Not counted, each linear in the text: building the tree (3 to 6 ms for 450 forms), the check for a run of
+// more than 30 combining marks (at most 23 ns per character: 24 ms for a 1 MiB doc and 0.19 s for 8 MiB) and
+// the NFC normalization of each text node (at most 25 ns per character, on runs of 30 marks in the worst
+// order: 26 ms and 0.21 s). A text node with a longer run of marks gets no marks.
 export const DOC_TERM_MATCH_STEP_BUDGET = 10_000_000;
 
 export function termMatcher(entries: { term: string; aliases?: string[] }[], budget = TERM_MATCH_WORK_BUDGET) {
@@ -194,6 +199,9 @@ export function markTerms() {
           continue;
         stack.push({ parent: node, index: 0 });
       } else if (node.type === "text") {
+        // A doc: text with a run of more than 30 combining marks costs quadratic time to normalize, so it
+        // gets no marks and is not normalized. The writeup's regex path does not check.
+        if ("trie" in matcher && longMarkRun(node.value)) continue;
         let view = node.value.normalize("NFC");
         let offsets: Map<number, number> | undefined;
         if (view !== node.value) {

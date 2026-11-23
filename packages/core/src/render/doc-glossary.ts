@@ -1,6 +1,6 @@
 import { GlossaryForm, LIMITS, normalizeGlossaryForm } from "@emend/contract";
 import { type HtmlElement, type HtmlRoot, renderData } from "./blocks.ts";
-import { docTermMatcher } from "./doc-terms.ts";
+import { docTermMatcher, longMarkRun } from "./doc-terms.ts";
 import { limitDefinition } from "./glossary-definition.ts";
 import { normalizeText } from "./normalize.ts";
 import { DOC_TERM_MATCH_STEP_BUDGET, runBreaks } from "./terms.ts";
@@ -85,7 +85,13 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
       .map((alias) => alias.trim())
       .filter((alias) => alias !== "");
   }
-  const text = limitDefinition(normalizeText(`${lead}${textOf(definition)} ${textOf(rest)}`));
+  // A run of more than 30 combining marks costs quadratic time to normalize, so a term or definition with
+  // one skips the item and an alias with one is dropped, as an invalid form is. The bridge reads the same.
+  if (longMarkRun(term)) return;
+  aliases = aliases.filter((alias) => !longMarkRun(alias));
+  const raw = `${lead}${textOf(definition)} ${textOf(rest)}`;
+  if (longMarkRun(raw)) return;
+  const text = limitDefinition(normalizeText(raw));
   return { term, aliases, definition: text };
 }
 
@@ -94,12 +100,12 @@ function parseItem(item: HtmlElement): DocGlossaryEntry | undefined {
  * list. Each entry carries the list item it came from, in the same order as the returned entries.
  */
 export function extractDocGlossary(tree: HtmlRoot): { entries: DocGlossaryEntry[]; items: HtmlElement[] } | undefined {
-  const at = tree.children.findIndex(
-    (node) =>
-      node.type === "element" &&
-      headingTags.has(node.tagName) &&
-      normalizeText(textOf(node.children)).toLowerCase() === "glossary",
-  );
+  const at = tree.children.findIndex((node) => {
+    if (node.type !== "element" || !headingTags.has(node.tagName)) return false;
+    // Normalizing never removes a mark, so a heading with a run of more than 30 of them is not "Glossary".
+    const text = textOf(node.children);
+    return !longMarkRun(text) && normalizeText(text).toLowerCase() === "glossary";
+  });
   if (at < 0) return;
   const list = tree.children.slice(at + 1).find((node) => !blank(node));
   if (list?.type !== "element" || (list.tagName !== "ul" && list.tagName !== "ol")) return;

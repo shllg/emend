@@ -9,9 +9,11 @@ import { generator, randomTermCase } from "../../../packages/core/src/render/doc
 import {
   certainBoundary,
   DOC_TERM_LOOKUP_STEPS,
+  DOC_TERM_SEGMENT_FIXED_STEPS,
   DOC_TERM_SEGMENT_STEPS,
   docTermMatcher,
   foldCodePoint,
+  longMarkRun,
   scanDocTerms,
 } from "../../../packages/core/src/render/doc-terms.ts";
 import { DOC_TERM_MATCH_STEP_BUDGET, markTerms } from "../../../packages/core/src/render/terms.ts";
@@ -133,6 +135,7 @@ test("bridge glossary limits stay in parity with the contract", () => {
 test("the bridge's marking budget stays in parity with core's doc budget", () => {
   expect(bridgeSource).toContain(`const GLOSSARY_STEP_MAX = ${DOC_TERM_MATCH_STEP_BUDGET};`);
   expect(bridgeSource).toContain(`const GLOSSARY_SEGMENT_STEPS = ${DOC_TERM_SEGMENT_STEPS};`);
+  expect(bridgeSource).toContain(`const GLOSSARY_SEGMENT_FIXED_STEPS = ${DOC_TERM_SEGMENT_FIXED_STEPS};`);
   expect(bridgeSource).toContain(`const GLOSSARY_LOOKUP_STEPS = ${DOC_TERM_LOOKUP_STEPS};`);
 });
 
@@ -230,10 +233,10 @@ type Scan = { marks: Mark[]; done: boolean; remaining: number; segments: number 
 type ScanEntry = { term: string; aliases: string[] };
 const bridgeTerms = (
   runInNewContext(
-    `(glossaryForm, GLOSSARY_STEP_MAX, GLOSSARY_SEGMENT_STEPS, GLOSSARY_LOOKUP_STEPS) => {\n${bridgeSource.slice(
+    `(glossaryForm, GLOSSARY_STEP_MAX, GLOSSARY_SEGMENT_STEPS, GLOSSARY_SEGMENT_FIXED_STEPS, GLOSSARY_LOOKUP_STEPS) => {\n${bridgeSource.slice(
       bridgeSource.indexOf("// term matcher: start"),
       bridgeSource.indexOf("// term matcher: end"),
-    )}\nreturn { termMatcher, scanTerms, certainBoundary };\n}`,
+    )}\nreturn { termMatcher, scanTerms, certainBoundary, longMarkRun };\n}`,
   ) as (...args: unknown[]) => {
     termMatcher: (entries: ScanEntry[]) => { remaining: number };
     scanTerms: (
@@ -245,8 +248,15 @@ const bridgeTerms = (
       segment: () => void,
     ) => boolean;
     certainBoundary: (value: string, index: number) => boolean;
+    longMarkRun: (text: string) => boolean;
   }
-)(normalizeGlossaryForm, DOC_TERM_MATCH_STEP_BUDGET, DOC_TERM_SEGMENT_STEPS, DOC_TERM_LOOKUP_STEPS);
+)(
+  normalizeGlossaryForm,
+  DOC_TERM_MATCH_STEP_BUDGET,
+  DOC_TERM_SEGMENT_STEPS,
+  DOC_TERM_SEGMENT_FIXED_STEPS,
+  DOC_TERM_LOOKUP_STEPS,
+);
 
 type Refuse = (start: number, length: number) => boolean;
 function scanInCore(entries: ScanEntry[], view: string, budget: number, refuse: Refuse, seenAtStart: number[]): Scan {
@@ -368,6 +378,71 @@ test("the bridge's step accounting equals core's on the hostile shapes, with bud
   }
   // Every shape both finishes and runs out of budget somewhere in the list.
   for (const [name] of shapes) expect(results.has(`${name} true`) && results.has(`${name} false`)).toBe(true);
+});
+
+// A run of exactly `count` combining marks in NFC order (class 220, then 230) after a letter that does not
+// compose with them.
+const markRun = (count: number) => `x${"̖".repeat(Math.ceil(count / 2))}${"́".repeat(Math.floor(count / 2))}`;
+
+test("the bridge's longMarkRun equals core's", () => {
+  const samples = [
+    "",
+    "plain",
+    markRun(30),
+    markRun(31),
+    `${markRun(30)} ${markRun(30)}`,
+    `${markRun(30)}x${markRun(30)}`,
+    `e${"\u{1d165}".repeat(30)}`,
+    `e${"\u{1d165}".repeat(31)}`,
+    `e${markRun(30)}\u{1d165}`,
+    "́".repeat(100_000),
+    `${"̖́".repeat(50_000)} budget`,
+  ];
+  for (const sample of samples) expect(bridgeTerms.longMarkRun(sample)).toBe(longMarkRun(sample));
+  expect(bridgeTerms.longMarkRun(markRun(30))).toBe(false);
+  expect(bridgeTerms.longMarkRun(markRun(31))).toBe(true);
+  // The same text on the second call: no state leaks between calls.
+  expect(bridgeTerms.longMarkRun(markRun(31))).toBe(true);
+  expect(bridgeTerms.longMarkRun(markRun(30))).toBe(false);
+});
+
+test("the bridge marks nothing in a text node with a run of more than 30 combining marks, the next one it marks", () => {
+  const page = (run: string) =>
+    `<body><main><p id="t">A budget ${run} and a budget.</p><p>Another budget here.</p>${entries(entry("Budget", "Money."))}</main></body>`;
+  const hostile = bridge(page(`x${"̖́".repeat(50_000)}`));
+  expect(markTexts(hostile)).toEqual(["budget"]);
+  expect(hostile.window.document.querySelector("#t")?.querySelector("span[aria-haspopup]")).toBeNull();
+  expect(hostile.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  const within = bridge(page(markRun(30)));
+  expect(within.window.document.querySelector("#t")?.querySelector("span[aria-haspopup]")?.textContent).toBe("budget");
+  const beyond = bridge(page(markRun(31)));
+  expect(beyond.window.document.querySelector("#t")?.querySelector("span[aria-haspopup]")).toBeNull();
+  expect(markTexts(beyond)).toEqual(["budget"]);
+});
+
+test("the bridge skips a glossary entry whose term or definition has a run of more than 30 marks, and drops such an alias", () => {
+  const glossary = (run: string) =>
+    entries(
+      entry(`Hub${run}`, "Machine."),
+      entry("Lease", `A claim${run} here.`),
+      entry("Budget", "Money.", `box${run}`),
+    );
+  // The text carries 30-mark runs only, so the node itself is markable.
+  const run30 = markRun(30);
+  const text = `A hub${run30}, a lease, a box${run30} and a budget.`;
+  const kept = bridge(page(text, glossary(run30)));
+  expect(markTexts(kept)).toEqual([`hub${run30}`, "lease", `box${run30}`]);
+  // With 31 marks the term and the definition are invalid, the entry of the alias stays without it.
+  const skipped = bridge(page(text, glossary(markRun(31))));
+  expect(markTexts(skipped)).toEqual(["budget"]);
+  expect(skipped.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+});
+
+test("a 20,000-character dt of alternating combining marks makes its entry invalid, without stalling", () => {
+  const term = `x${"̖́".repeat(10_000)}`;
+  const b = bridge(page("A budget and a hub.", entries(entry(term, "Defined."), entry("Budget", "Money."))));
+  expect(markTexts(b)).toEqual(["budget"]);
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
 });
 
 test("a doc without a glossary does not change at all", () => {
