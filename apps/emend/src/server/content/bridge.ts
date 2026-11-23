@@ -568,6 +568,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   const GLOSSARY_DEFINITION_MAX = 2000;
   const GLOSSARY_VISITS_MAX = 100000;
   const GLOSSARY_STEP_MAX = 10000000;
+  const GLOSSARY_SEGMENT_STEPS = 32;
+  const GLOSSARY_LOOKUP_STEPS = 32;
   const htmlElement = node => nodeType(node) === 1 && namespace(node) === "http://www.w3.org/1999/xhtml";
   const createText = text => dom(window.Document.prototype, "createTextNode", document, text);
   const phrasingTags = new Set(["a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "i", "ins",
@@ -681,11 +683,19 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   // single-text-node cases in parity with core's doc matcher, which the regex matcher of the writeup (the
   // reference) agrees with.
   // The forms live in a prefix tree keyed by a case fold, so a position costs at most the depth of the tree
-  // and nothing is compiled. Every step is counted: one per code point compared, per whitespace character a
-  // space consumes, per start position tried, per form that ends on the way and per code point of an
-  // acronym's exact check. Measured here: 10,000,000 steps take 0.1 to 0.3 s of matching, at 1 to 2.5 steps
-  // per character of ordinary prose. Finding the grapheme boundaries of a text node that holds a match costs
-  // about 0.4 microseconds per character and is not counted.
+  // and nothing is compiled. The steps counted: 1 per code point compared (each tree lookup), per whitespace
+  // character a space consumes, per start position tried, per form that ends on the way, per character of
+  // the s/es suffix check and per character of an acronym's exact check; GLOSSARY_LOOKUP_STEPS for the first
+  // fold and the first word lookup of a character; GLOSSARY_SEGMENT_STEPS per character when a text node
+  // must be split into graphemes (ordinary ASCII text does not need it). Measured on this machine,
+  // 10,000,000 steps take 0.26 s or less on every shape tried. Ordinary English prose costs about 1.2 steps
+  // per character (the budget covers about 8,000,000 characters); non-ASCII prose in paragraphs of about
+  // 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33 (about 300,000
+  // characters). Not counted: building the tree (3 to 6 ms for 450 forms) and the NFC normalization of each
+  // text node (at most 13 ns per character).
+  // The parity tests evaluate the slice between "term matcher: start" and "term matcher: end" against core's
+  // doc matcher, charge by charge, so the slice uses only glossaryForm and the GLOSSARY_* constants.
+  // term matcher: start
   // Kept in parity with foldCodePoint (packages/core/src/render/doc-terms.ts) by the bridge glossary tests.
   const foldExceptions = new Map([[0x131, 0x131], [0x1fd3, 0x390], [0x1fe3, 0x3b0], [0xfb05, 0xfb06]]);
   const oneCodePoint = text => {
@@ -739,15 +749,48 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       }
       (node.forms ??= []).push(form);
     }
-    return { forms, root, fold, word, remaining: GLOSSARY_STEP_MAX };
+    return { forms, root, folds, words, fold, word, remaining: GLOSSARY_STEP_MAX };
   }
-  // Marks the first use of each entry in value. accept(index, length) is the grapheme check of a range;
-  // mark(entry, index, length) returns true when no entry is left. Returns false when a step did not fit.
-  function scanTerms(matcher, value, accept, seen, mark) {
-    const { root, fold, word } = matcher;
+  // True when value has a grapheme boundary at index for certain, without segmenting (UAX #29: both ends,
+  // and between two ASCII code units except CR LF). Kept in parity with certainBoundary in core's doc-terms.ts.
+  function certainBoundary(value, index) {
+    if (index <= 0 || index >= value.length) return true;
+    const before = value.charCodeAt(index - 1), after = value.charCodeAt(index);
+    return before < 0x80 && after < 0x80 && !(before === 13 && after === 10);
+  }
+  // Marks the first use of each entry in value. accept(index, length) is the grapheme check of a range, and
+  // segment() splits the node so that accept can use the boundaries; until then it treats every
+  // certainBoundary index as a boundary. mark(entry, index, length) returns true when no entry is left.
+  // Returns false when a step did not fit. Kept in step with scanDocTerms in core's doc-terms.ts, which the
+  // bridge glossary tests compare charge by charge.
+  function scanTerms(matcher, value, accept, seen, mark, segment) {
+    const { root, folds, words } = matcher;
     const size = value.length;
-    const foldE = fold(101), foldS = fold(115);
-    let left = matcher.remaining;
+    const foldE = matcher.fold(101), foldS = matcher.fold(115);
+    let left = matcher.remaining, segmented = false;
+    // The first use of a code point costs steps; later uses read the cache.
+    const fold = code => {
+      const cached = folds.get(code);
+      if (cached !== undefined) return cached;
+      left -= GLOSSARY_LOOKUP_STEPS;
+      return matcher.fold(code);
+    };
+    const word = code => {
+      const cached = words.get(code);
+      if (cached !== undefined) return cached;
+      left -= GLOSSARY_LOOKUP_STEPS;
+      return matcher.word(code);
+    };
+    // A candidate's grapheme check; segmenting the node is charged once, and only when an edge is not certain.
+    const check = (start, length) => {
+      if (!segmented && !(certainBoundary(value, start) && certainBoundary(value, start + length))) {
+        left -= GLOSSARY_SEGMENT_STEPS * size;
+        if (left < 0) return false;
+        segment();
+        segmented = true;
+      }
+      return accept(start, length);
+    };
     const wordBefore = index => {
       if (index <= 0) return false;
       let code = value.charCodeAt(index - 1);
@@ -824,7 +867,9 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         const finish = withSuffix(literal, form.acronym);
         if (left < 0) return;
         if (finish < 0) continue;
-        if (accept(start, finish - start)) return { entry: form.entry, length: finish - start };
+        const accepted = check(start, finish - start);
+        if (left < 0) return;
+        if (accepted) return { entry: form.entry, length: finish - start };
       }
     };
     let index = 0, previousWord = false;
@@ -839,6 +884,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
           const start = index;
           index += hit.length;
           previousWord = wordBefore(index);
+          if (left < 0) break;
           if (!seen.has(hit.entry) && mark(hit.entry, start, hit.length)) break;
           continue;
         }
@@ -849,6 +895,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     matcher.remaining = left >= 0 ? left : 0;
     return left >= 0;
   }
+  // term matcher: end
   function termMark(text, index) {
     const mark = createElement("span");
     const style = styleOf(mark);
@@ -887,16 +934,14 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       const value = textData(node);
       const parent = nodeValue("parentNode", node);
       if (!parent || value !== value.normalize("NFC")) continue;
-      // Grapheme boundaries are found only once a form matches in this text node.
+      // Grapheme boundaries are found only when a candidate range has an edge scanTerms cannot be sure of.
       let boundaries;
-      const accept = (start, length) => {
-        if (!boundaries) {
-          segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
-          boundaries = new Set([value.length]);
-          for (const { index } of segmenter.segment(value)) boundaries.add(index);
-        }
-        return boundaries.has(start) && boundaries.has(start + length);
+      const segment = () => {
+        segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
+        boundaries = new Set([value.length]);
+        for (const { index } of segmenter.segment(value)) boundaries.add(index);
       };
+      const accept = (start, length) => !boundaries || (boundaries.has(start) && boundaries.has(start + length));
       const replacements = [];
       let end = 0;
       const scanned = scanTerms(matcher, value, accept, seen, (entry, start, length) => {
@@ -905,7 +950,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
         end = start + length;
         seen.add(entry);
         return seen.size === glossary.length;
-      });
+      }, segment);
       if (!scanned) break;
       if (!replacements.length) continue;
       if (end < value.length) replacements.push(createText(value.slice(end)));

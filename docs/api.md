@@ -2207,9 +2207,17 @@ space; duplicates compared case-insensitively after normalization). At most
 
 The renderer marks the first use of each term and alias elsewhere in the doc, with the same rules
 as the writeup, and never inside the glossary list or headings. Marking in a doc walks a prefix tree
-of the terms and aliases and stops after 10,000,000 steps; each step is one character compared (a
-tree lookup, a whitespace character a space consumes, a start position tried, or a character of an
-acronym's exact check). Ordinary prose costs about one or two steps per character. When the budget
+of the terms and aliases and stops after 10,000,000 steps. A step is charged for each tree lookup per
+character compared, each whitespace character a space in a term consumes, each start position tried,
+each form that ends on the way, each character of the `s`/`es` suffix check and each character of an
+acronym's exact check. The first time a character is case-folded and the first time it is classified
+as a word character cost 32 steps each, and a text node that must be split into graphemes costs 32
+steps per character; ordinary ASCII text does not need that split, but a match with a non-ASCII
+character at its edge does. Ordinary English prose costs about 1.2 steps per character, so the budget
+covers about 8,000,000 characters. Non-ASCII prose in paragraphs of about 1,000 characters that each
+hold a match with a non-ASCII edge costs about 33 steps per character, so the budget covers about
+300,000 characters of it. Building the tree and normalizing each text node to NFC are not charged.
+The budget takes 0.26 s or less to spend on every shape measured. When the budget
 is spent, marking stops for the rest of the doc: the text node being read gets no marks, earlier
 text nodes keep theirs, and later first uses stay unmarked. `RevisionView.docs[].terms` lists
 the entries in marking order; the app opens the same card as the writeup's, whose "Glossary" link

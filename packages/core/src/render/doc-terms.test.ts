@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
 import type { HtmlElement, HtmlRoot } from "./blocks.ts";
-import { docTermMatcher, foldCodePoint, isSpaceUnit } from "./doc-terms.ts";
+import { generator } from "./doc-terms.cases.ts";
+import {
+  certainBoundary,
+  DOC_TERM_LOOKUP_STEPS,
+  DOC_TERM_SEGMENT_STEPS,
+  docTermMatcher,
+  foldCodePoint,
+  isSpaceUnit,
+} from "./doc-terms.ts";
 import { DOC_TERM_MATCH_STEP_BUDGET, markTerms } from "./terms.ts";
 
 type Entry = { term: string; aliases?: string[] };
@@ -200,7 +208,9 @@ test("budget accounting: marking stops at a deterministic step and keeps the ear
   expect(first.steps).toBeGreaterThan(0);
   expect(second.steps).toBeGreaterThan(0);
   const both = () => paragraphs("a hub", "the lease");
-  const total = first.steps + second.steps;
+  // The second node reads characters the first one already looked up, so the total is its own measurement.
+  const total = run(entries, both()).steps;
+  expect(total).toBeLessThan(first.steps + second.steps);
   const exact = run(entries, both(), total);
   expect(exact.marks).toEqual([
     ["0", "hub"],
@@ -224,4 +234,192 @@ test("budget accounting: a budget that is spent stays spent for the next doc nod
   const { matcher, marks } = run(entries, paragraphs("x".repeat(100), "hub"), 50);
   expect(marks).toEqual([]);
   expect(matcher.remaining).toBe(0);
+});
+
+const chars = (...codes: number[]) => String.fromCodePoint(...codes);
+
+test("certainBoundary holds only where a grapheme boundary really is", () => {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const parts = [
+    "a",
+    "Z",
+    "7",
+    " ",
+    "\t",
+    "\r",
+    "\n",
+    "\r\n",
+    ".",
+    chars(0x65, 0x301),
+    chars(0x301),
+    chars(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467),
+    chars(0x1f44d, 0x1f3fd),
+    chars(0x1f1e9, 0x1f1ea),
+    chars(0x1f1eb),
+    chars(0x1f1f7, 0x1f1fa, 0x1f1fa),
+    chars(0x1100, 0x1161, 0x11a8),
+    chars(0xd55c),
+    chars(0x6f22),
+    chars(0xfc),
+    chars(0x200d),
+    chars(0xfe0f),
+    chars(0x31, 0xfe0f, 0x20e3),
+    chars(0x3002),
+  ];
+  const failures: string[] = [];
+  let certain = 0;
+  for (let seed = 1; seed <= 400; seed++) {
+    const next = generator(seed);
+    const view = Array.from({ length: 1 + next(30) }, () => parts[next(parts.length)]).join("");
+    const boundaries = new Set<number>([view.length]);
+    for (const { index } of segmenter.segment(view)) boundaries.add(index);
+    for (let index = 0; index <= view.length; index++)
+      if (certainBoundary(view, index)) {
+        certain++;
+        if (!boundaries.has(index)) failures.push(`seed ${seed} index ${index}`);
+      }
+  }
+  expect(failures).toEqual([]);
+  // The fast path is real, not vacuous.
+  expect(certain).toBeGreaterThan(1000);
+  expect(certainBoundary("a\r\nb", 1)).toBe(true);
+  expect(certainBoundary("a\r\nb", 2)).toBe(false);
+  expect(certainBoundary("a\r\nb", 3)).toBe(true);
+  expect(certainBoundary(`e${chars(0x301)}`, 1)).toBe(false);
+  expect(certainBoundary(`${chars(0x1f600)}a`, 1)).toBe(false);
+  expect(certainBoundary("", 0)).toBe(true);
+});
+
+test("certainBoundary holds at every index of plain ASCII prose, which therefore needs no segmentation", () => {
+  const prose = "Plain words fill this paragraph with ordinary prose, numbers like 42 and (punctuation)! ".repeat(20);
+  for (let index = 0; index <= prose.length; index++) if (!certainBoundary(prose, index)) throw new Error(`${index}`);
+  expect(prose.length).toBeGreaterThan(1000);
+});
+
+// Charges, one at a time. Each test spends the budget on one charge alone: the budget is what the doc costs
+// without that charge, by a hand count, so removing the charge from the matcher makes the doc fit and the
+// test fails. L is DOC_TERM_LOOKUP_STEPS and S is DOC_TERM_SEGMENT_STEPS.
+const L = DOC_TERM_LOOKUP_STEPS;
+const S = DOC_TERM_SEGMENT_STEPS;
+const HUGE = Number.MAX_SAFE_INTEGER;
+
+test("the charge for each form that ends on the way: 450 forms on one tree node", () => {
+  // 9-letter forms of s and long s: all fold to the same node, and the glossary's dedupe keeps all 450.
+  const forms = Array.from({ length: 450 }, (_, index) =>
+    Array.from({ length: 9 }, (_, bit) => ((index >> bit) & 1 ? chars(0x17f) : "s")).join(""),
+  );
+  const entries: Entry[] = Array.from({ length: 50 }, (_, entry) => ({
+    term: forms[entry * 9] as string,
+    aliases: forms.slice(entry * 9 + 1, entry * 9 + 9),
+  }));
+  entries.push({ term: "zebra" });
+  const probe = docTermMatcher(entries, 1);
+  expect(probe.forms).toHaveLength(450 + 1);
+  let node = probe.root;
+  for (let depth = 0; depth < 9; depth++) node = node.next.get(probe.fold(115)) ?? node;
+  expect(node.forms).toHaveLength(450);
+  // One filler unit: 9 s then x. At its first position the walk takes 9 lookups and a failing one, the 450
+  // forms that end there cost 450, and each fails the suffix check for 1 step; 11 positions are tried.
+  const unit = 11 + 10 + 450 + 450;
+  const filler = (units: number) => paragraphs("sssssssssx ".repeat(units), "zebra");
+  // First-seen lookups: word(s), word(x), fold(x), word(space), then word(a) at the end of zebra.
+  const fixed = 5 * L + 7;
+  expect(run(entries, filler(100), HUGE).steps).toBe(unit * 100 + fixed);
+  // Without the form-end charge the doc costs 450 steps fewer per unit, and fits.
+  const budget = (unit - 450) * 100 + fixed;
+  const spent = run(entries, filler(100), budget);
+  expect(spent.matcher.remaining).toBe(0);
+  expect(spent.marks).toEqual([]);
+  // The same budget with half the filler is enough, and the real term after it is marked.
+  const half = run(entries, filler(50), budget);
+  expect(half.matcher.remaining).toBeGreaterThan(0);
+  expect(half.marks).toEqual([["50", "zebra"]]);
+});
+
+test("the charge for a first-seen character: 2,000 distinct CJK characters", () => {
+  const entries = [{ term: "zebra" }];
+  const count = 2000;
+  const cjk = Array.from({ length: count }, (_, index) => chars(0x4e00 + index)).join(" ");
+  const doc = () => paragraphs(cjk, "zebra");
+  // Per character: its position, its failing tree lookup, a fold and a word lookup; per space: its position.
+  // word(space) is looked up once, and zebra costs 1 + 5 + 1 steps and one word lookup (a).
+  expect(run(entries, doc(), HUGE).steps).toBe(count * (2 + 2 * L) + (count - 1) + L + 7 + L);
+  // Without lookups the doc costs the positions and tree lookups only, and fits.
+  const budget = count * 2 + (count - 1) + 7;
+  const spent = run(entries, doc(), budget);
+  expect(spent.matcher.remaining).toBe(0);
+  expect(spent.marks).toEqual([]);
+  // A doc of one repeated character looks it up once, and fits the same budget.
+  const same = run(entries, paragraphs(chars(0x4e00).repeat(count), "zebra"), budget);
+  expect(same.marks).toEqual([["0", "zebra"]]);
+});
+
+test("the charge for segmenting a text node: non-ASCII candidates in 1,000-character paragraphs", () => {
+  const entries = [{ term: "abc" }, { term: "zebra" }];
+  const paragraphCount = 50;
+  const cjk = `abc${chars(0x3002)}${chars(0x6f22).repeat(996)}`;
+  const ascii = `abc ${"x".repeat(996)}`;
+  const doc = (paragraph: string) => paragraphs(...Array(paragraphCount).fill(paragraph), "zebra");
+  // Per paragraph: 998 positions, 5 tree lookups, 1 form end and 1 suffix step. The first one looks up
+  // 5 characters, and zebra costs 7 steps and one lookup (a). The CJK paragraphs also pay S per unit, each.
+  const base = paragraphCount * 1005 + 6 * L + 7;
+  expect(run(entries, doc(cjk), HUGE).steps).toBe(base + paragraphCount * S * 1000);
+  // The budget of the same doc without segmentation, plus a little, is spent by the segmentation alone.
+  const budget = base + 100;
+  const spent = run(entries, doc(cjk), budget);
+  expect(spent.matcher.remaining).toBe(0);
+  expect(spent.marks).toEqual([["0", "abc"]]);
+  // The same doc in ASCII has certain edges and needs no segmentation: the real term is marked.
+  const fast = run(entries, doc(ascii), budget);
+  expect(fast.marks).toEqual([
+    ["0", "abc"],
+    ["1", "zebra"],
+  ]);
+  expect(fast.matcher.remaining).toBeGreaterThan(0);
+});
+
+test("a text node that is not NFC was split into graphemes up front, so the scan charges it first", () => {
+  const view = `cafe${chars(0x301)}${" x".repeat(50)}`.normalize("NFC");
+  const entries = [{ term: "zebra" }];
+  const text = () => paragraphs(`cafe${chars(0x301)}${" x".repeat(50)}`);
+  const spent = run(entries, text(), S * view.length - 1);
+  expect(spent.matcher.remaining).toBe(0);
+  expect(run(entries, text(), HUGE).steps).toBeGreaterThanOrEqual(S * view.length);
+  // The same text already in NFC pays nothing for it.
+  expect(run(entries, paragraphs(view), HUGE).steps).toBeLessThan(S * view.length);
+});
+
+test("coverage with non-ASCII prose: 50 terms with 3 aliases each, paragraphs of about 1,000 characters", () => {
+  const letters = "bcdfghjklmnpqrstvwxz";
+  const lead = [chars(0xdc), chars(0xd6), chars(0xc4), chars(0xdf)];
+  const name = (index: number, variant: number) =>
+    `${lead[variant]}${index}${Array.from({ length: 9 }, (_, at) => letters[(index + at * 3 + variant) % letters.length]).join("")}`;
+  const entries: Entry[] = Array.from({ length: 50 }, (_, index) => ({
+    term: name(index, 0),
+    aliases: [name(index, 1), name(index, 2), name(index, 3)],
+  }));
+  const words =
+    `Die Gr${chars(0xf6, 0xdf)}e der ${chars(0xc4)}nderungen ${chars(0xe4)}ndert sich f${chars(0xfc)}r gr${chars(0xf6, 0xdf)}ere ${chars(0xdc)}bungen w${chars(0xe4)}hrend wir sprechen`.split(
+      " ",
+    );
+  const next = generator(5);
+  const prose = (length: number) => {
+    let text = "";
+    while (text.length < length) text += `${words[next(words.length)]}${next(10) === 0 ? ". " : " "}`;
+    return text.slice(0, length);
+  };
+  // Each paragraph holds the first use of one entry, a candidate with a non-ASCII edge.
+  const used: string[] = [];
+  const values = Array.from({ length: 50 }, (_, paragraph) => {
+    const entry = entries[paragraph] as Required<Entry>;
+    const form = [entry.term, ...entry.aliases][paragraph % 4] as string;
+    used.push(form);
+    return `${prose(980)} ${form} ${prose(5)}`;
+  });
+  const { marks, steps } = run(entries, paragraphs(...values));
+  expect(marks.map(([entry]) => Number(entry))).toEqual(Array.from({ length: 50 }, (_, index) => index));
+  expect(marks.map(([, text]) => text)).toEqual(used);
+  // The segmentation path ran: each paragraph was split into graphemes and charged for it, and all fit.
+  expect(steps).toBeGreaterThan(50 * S * 900);
+  expect(steps).toBeLessThan(DOC_TERM_MATCH_STEP_BUDGET);
 });

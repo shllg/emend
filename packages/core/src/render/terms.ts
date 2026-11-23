@@ -84,10 +84,17 @@ let segmenter: Intl.Segmenter | undefined;
 
 export const TERM_MATCH_WORK_BUDGET = 400_000_000;
 // A doc does not use the regex matcher above: it walks a prefix tree (doc-terms.ts) and stops after this many
-// steps, each one a character compared. Measured here, 10,000,000 steps of the hostile 450-form shapes take
-// 0.1 to 0.3 s (one-byte, U+3000 and CJK text, refused acronyms, 450 forms on one tree node); ordinary prose
-// costs 1.2 to 2.3 steps per character. Not counted: the grapheme segmentation of a text node that holds a
-// match (about 0.4 microseconds per character, once per node) and building the tree (linear in the forms).
+// steps. Charged: 1 per code point compared (each tree lookup), per whitespace character a space consumes,
+// per start position tried, per form that ends on the way, per character of the s/es suffix check and per
+// character of an acronym's exact check; DOC_TERM_LOOKUP_STEPS for the first fold and the first word lookup of
+// a character; DOC_TERM_SEGMENT_STEPS per character when a text node must be split into graphemes (ordinary
+// ASCII text does not need it). Measured here, 10,000,000 steps take 0.26 s or less on every shape tried
+// (one-byte, U+3000, CJK and astral text, refused acronyms, 450 forms on one tree node, a budget spent
+// through segmentation alone and one spent through first-seen lookups alone). Ordinary English prose costs
+// about 1.2 steps per character (the budget covers about 8,000,000 characters); non-ASCII prose in
+// paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge costs about 33
+// (about 300,000 characters). Not counted: building the tree (3 to 6 ms for 450 forms) and the NFC
+// normalization of each text node (at most 13 ns per character).
 export const DOC_TERM_MATCH_STEP_BUDGET = 10_000_000;
 
 export function termMatcher(entries: { term: string; aliases?: string[] }[], budget = TERM_MATCH_WORK_BUDGET) {
@@ -205,8 +212,10 @@ export function markTerms() {
         }
         const edges = neighbours.get(node);
         const rangeAt = (index: number, length: number) => {
-          const start = offsets?.get(index);
-          const finish = offsets?.get(index + length);
+          // Without offsets the node is NFC and not yet segmented: only the doc matcher asks then, for a
+          // range whose edges are certain boundaries, so the index is its own offset.
+          const start = offsets ? offsets.get(index) : index;
+          const finish = offsets ? offsets.get(index + length) : index + length;
           if (
             start === undefined ||
             finish === undefined ||
@@ -239,19 +248,19 @@ export function markTerms() {
           seen.add(entry);
         };
         if ("trie" in matcher) {
-          // A doc: the prefix tree counts its own steps, and marks nothing once the budget is spent.
+          // A doc: the prefix tree counts its own steps, and marks nothing once the budget is spent. A node
+          // that is not NFC was segmented above, so the scan charges that work first.
           const scanned = scanDocTerms(
             matcher,
             view,
-            (index, length) => {
-              segmentOnDemand();
-              return rangeAt(index, length);
-            },
+            rangeAt,
             seen,
             (entry, { start, finish }) => {
               place(entry, start, finish);
               return seen.size === matcher.count;
             },
+            segmentOnDemand,
+            offsets !== undefined,
           );
           if (!scanned) return;
           if (!replacements.length) continue;

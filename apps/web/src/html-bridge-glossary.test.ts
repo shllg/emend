@@ -1,11 +1,19 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { LIMITS } from "@emend/contract";
+import { LIMITS, normalizeGlossaryForm } from "@emend/contract";
 import { type Element, type Node, type ShadowRoot, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { HtmlRoot } from "../../../packages/core/src/render/blocks.ts";
-import { docTermMatcher, foldCodePoint } from "../../../packages/core/src/render/doc-terms.ts";
+import { generator, randomTermCase } from "../../../packages/core/src/render/doc-terms.cases.ts";
+import {
+  certainBoundary,
+  DOC_TERM_LOOKUP_STEPS,
+  DOC_TERM_SEGMENT_STEPS,
+  docTermMatcher,
+  foldCodePoint,
+  scanDocTerms,
+} from "../../../packages/core/src/render/doc-terms.ts";
 import { DOC_TERM_MATCH_STEP_BUDGET, markTerms } from "../../../packages/core/src/render/terms.ts";
 
 const bridgeSource = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
@@ -124,6 +132,8 @@ test("bridge glossary limits stay in parity with the contract", () => {
 
 test("the bridge's marking budget stays in parity with core's doc budget", () => {
   expect(bridgeSource).toContain(`const GLOSSARY_STEP_MAX = ${DOC_TERM_MATCH_STEP_BUDGET};`);
+  expect(bridgeSource).toContain(`const GLOSSARY_SEGMENT_STEPS = ${DOC_TERM_SEGMENT_STEPS};`);
+  expect(bridgeSource).toContain(`const GLOSSARY_LOOKUP_STEPS = ${DOC_TERM_LOOKUP_STEPS};`);
 });
 
 test("a glossary whose forms share a long prefix cannot stall the doc: ready is posted and nothing is marked", () => {
@@ -197,6 +207,167 @@ test("coverage: 50 terms with 3 aliases each are all marked in a 60,000-characte
   const b = bridge(page(prose, entries(...items.map(({ item }) => item))));
   expect(prose.length).toBeGreaterThanOrEqual(60_000);
   expect(markTexts(b)).toEqual(used);
+});
+
+test("a doc whose filler spends the whole step budget leaves a later real term unmarked and still posts ready", () => {
+  // 49 hostile entries (441 forms) and a real one. Each filler paragraph costs about 29,000 steps.
+  const items = [...hostileItems("a").slice(0, 49), entry("Zebra", "Defined.")];
+  const doc = (filler: number) =>
+    `<body><main>${`<p>${"a ".repeat(220)}</p>`.repeat(filler)}<p>A zebra here.</p>${entries(...items)}</main></body>`;
+  const spent = bridge(doc(400));
+  expect(spent.marks()).toEqual([]);
+  expect(spent.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  // With less filler the same real term is marked.
+  const less = bridge(doc(100));
+  expect(markTexts(less)).toEqual(["zebra"]);
+  expect(less.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+});
+
+// The bridge's matcher, taken from BRIDGE_SOURCE between its two marker comments and run beside core's, so
+// that every charge is compared: the same marks, the same return value and the same steps left.
+type Mark = [entry: number, start: number, finish: number];
+type Scan = { marks: Mark[]; done: boolean; remaining: number; segments: number };
+type ScanEntry = { term: string; aliases: string[] };
+const bridgeTerms = (
+  runInNewContext(
+    `(glossaryForm, GLOSSARY_STEP_MAX, GLOSSARY_SEGMENT_STEPS, GLOSSARY_LOOKUP_STEPS) => {\n${bridgeSource.slice(
+      bridgeSource.indexOf("// term matcher: start"),
+      bridgeSource.indexOf("// term matcher: end"),
+    )}\nreturn { termMatcher, scanTerms, certainBoundary };\n}`,
+  ) as (...args: unknown[]) => {
+    termMatcher: (entries: ScanEntry[]) => { remaining: number };
+    scanTerms: (
+      matcher: { remaining: number },
+      value: string,
+      accept: (start: number, length: number) => boolean,
+      seen: Set<number>,
+      mark: (entry: number, start: number, length: number) => boolean,
+      segment: () => void,
+    ) => boolean;
+    certainBoundary: (value: string, index: number) => boolean;
+  }
+)(normalizeGlossaryForm, DOC_TERM_MATCH_STEP_BUDGET, DOC_TERM_SEGMENT_STEPS, DOC_TERM_LOOKUP_STEPS);
+
+type Refuse = (start: number, length: number) => boolean;
+function scanInCore(entries: ScanEntry[], view: string, budget: number, refuse: Refuse, seenAtStart: number[]): Scan {
+  const matcher = docTermMatcher(entries, budget);
+  const seen = new Set(seenAtStart);
+  const marks: Mark[] = [];
+  let segments = 0;
+  const done = scanDocTerms(
+    matcher,
+    view,
+    (start, length) => (refuse(start, length) ? undefined : { start, finish: start + length }),
+    seen,
+    (entry, { start, finish }) => {
+      marks.push([entry, start, finish]);
+      seen.add(entry);
+      return seen.size === entries.length;
+    },
+    () => {
+      segments++;
+    },
+    false,
+  );
+  return { marks, done, remaining: matcher.remaining, segments };
+}
+function scanInBridge(entries: ScanEntry[], view: string, budget: number, refuse: Refuse, seenAtStart: number[]): Scan {
+  const matcher = bridgeTerms.termMatcher(entries);
+  matcher.remaining = budget;
+  const seen = new Set(seenAtStart);
+  const marks: Mark[] = [];
+  let segments = 0;
+  const done = bridgeTerms.scanTerms(
+    matcher,
+    view,
+    (start, length) => !refuse(start, length),
+    seen,
+    (entry, start, length) => {
+      marks.push([entry, start, start + length]);
+      seen.add(entry);
+      return seen.size === entries.length;
+    },
+    () => {
+      segments++;
+    },
+  );
+  return { marks, done, remaining: matcher.remaining, segments };
+}
+const refuseSome: Refuse = (start, length) => (start * 7 + length * 3) % 5 === 0;
+const refuseNone: Refuse = () => false;
+function sameScan(entries: ScanEntry[], view: string, budget: number, refuse: Refuse, seenAtStart: number[] = []) {
+  const core = scanInCore(entries, view, budget, refuse, seenAtStart);
+  expect(scanInBridge(entries, view, budget, refuse, seenAtStart)).toEqual(core);
+  return core;
+}
+
+test("the bridge's step accounting equals core's on the seeded random cases, with small budgets", () => {
+  let spent = 0;
+  let marked = 0;
+  let segmented = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const { entries, values } = randomTermCase(seed);
+    const next = generator(seed + 1000);
+    for (const view of values) {
+      for (const budget of [Number.MAX_SAFE_INTEGER, next(3000), next(9000), next(30000)]) {
+        const seenAtStart = entries.flatMap((_, index) => (next(4) === 0 ? [index] : []));
+        const result = sameScan(entries, view, budget, next(2) === 0 ? refuseSome : refuseNone, seenAtStart);
+        if (!result.done) spent++;
+        if (result.marks.length) marked++;
+        if (result.segments) segmented++;
+      }
+    }
+  }
+  // The comparison is only worth something when the cases cover the budget running out, marks and segmentation.
+  expect(spent).toBeGreaterThan(30);
+  expect(marked).toBeGreaterThan(100);
+  expect(segmented).toBeGreaterThan(30);
+});
+
+test("the bridge's grapheme fast path equals core's on the seeded random texts", () => {
+  for (let seed = 1; seed <= 60; seed++)
+    for (const view of randomTermCase(seed).values)
+      for (let index = 0; index <= view.length; index++)
+        expect(bridgeTerms.certainBoundary(view, index)).toBe(certainBoundary(view, index));
+});
+
+test("the bridge's step accounting equals core's on the hostile shapes, with budgets that run out on each charge", () => {
+  const hostile = (word: string): ScanEntry[] =>
+    Array.from({ length: 50 }, (_, term) => {
+      const form = (alias: number) => `${Array(48).fill(word).join(" ")} ${String(term * 9 + alias).padStart(3, "0")}`;
+      return { term: form(0), aliases: Array.from({ length: 8 }, (_, alias) => form(alias + 1)) };
+    });
+  const longS = String.fromCodePoint(0x17f);
+  const sForms = Array.from({ length: 450 }, (_, index) =>
+    Array.from({ length: 9 }, (_, bit) => ((index >> bit) & 1 ? longS : "s")).join(""),
+  );
+  const onNode: ScanEntry[] = Array.from({ length: 50 }, (_, entry) => ({
+    term: sForms[entry * 9] as string,
+    aliases: sForms.slice(entry * 9 + 1, entry * 9 + 9),
+  }));
+  const zebra: ScanEntry = { term: "zebra", aliases: [] };
+  const candidate = `abc${String.fromCodePoint(0x3002)}${String.fromCodePoint(0x6f22).repeat(996)}`;
+  const shapes: [string, ScanEntry[], string][] = [
+    ["one-byte words", hostile("a"), "a ".repeat(500)],
+    ["U+3000 words", hostile("a"), `a${String.fromCodePoint(0x3000)}`.repeat(500)],
+    ["refused acronyms", hostile("A"), `${"a ".repeat(48)}000 `.repeat(8)],
+    ["450 forms on one node", [...onNode, zebra], `${"sssssssssx ".repeat(40)}zebra`],
+    [
+      "distinct characters",
+      [zebra],
+      `${Array.from({ length: 600 }, (_, index) => String.fromCodePoint(0x4e00 + index)).join(" ")} zebra`,
+    ],
+    ["segmentation", [{ term: "abc", aliases: [] }, zebra], `${candidate}${candidate}${candidate} zebra`],
+  ];
+  const results = new Set<string>();
+  for (const [name, entries, view] of shapes) {
+    for (const budget of [Number.MAX_SAFE_INTEGER, 200_000, 50_000, 20_000, 5000, 1000, 100, 0]) {
+      const result = sameScan(entries, view, budget, budget % 2 === 0 ? refuseNone : refuseSome);
+      results.add(`${name} ${result.done}`);
+    }
+  }
+  // Every shape both finishes and runs out of budget somewhere in the list.
+  for (const [name] of shapes) expect(results.has(`${name} true`) && results.has(`${name} false`)).toBe(true);
 });
 
 test("a doc without a glossary does not change at all", () => {

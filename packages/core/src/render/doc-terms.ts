@@ -66,9 +66,30 @@ export type DocTermMatcher = {
   remaining: number;
   forms: Form[];
   root: Node;
+  // The caches and the computing functions behind them. Building the tree fills `folds` for the forms' own
+  // characters without a charge; the scan charges DOC_TERM_LOOKUP_STEPS for each code point it finds missing.
+  folds: Map<number, number>;
+  words: Map<number, boolean>;
   fold: (code: number) => number;
   word: (code: number) => boolean;
 };
+
+/** Steps charged per UTF-16 unit of a text node that must be split into graphemes (measured, see scanDocTerms). */
+export const DOC_TERM_SEGMENT_STEPS = 32;
+/** Steps charged the first time a code point is folded, and the first time it is classified as a word character. */
+export const DOC_TERM_LOOKUP_STEPS = 32;
+
+/**
+ * True when the text has a grapheme cluster boundary at `index` for certain, without segmenting: at either
+ * end, and between two ASCII code units except CR LF (UAX #29: GB1, GB2, GB3 to GB5; no ASCII character is
+ * Extend, ZWJ, SpacingMark, Prepend, Regional_Indicator, Hangul or Extended_Pictographic).
+ */
+export function certainBoundary(view: string, index: number) {
+  if (index <= 0 || index >= view.length) return true;
+  const before = view.charCodeAt(index - 1);
+  const after = view.charCodeAt(index);
+  return before < 0x80 && after < 0x80 && !(before === 13 && after === 10);
+}
 
 export function docTermMatcher(entries: { term: string; aliases?: string[] }[], budget: number): DocTermMatcher {
   const folds = new Map<number, number>();
@@ -119,17 +140,34 @@ export function docTermMatcher(entries: { term: string; aliases?: string[] }[], 
     node.forms ??= [];
     node.forms.push(form);
   }
-  return { trie: true, count: entries.length, remaining: budget, forms, root, fold, word };
+  return { trie: true, count: entries.length, remaining: budget, forms, root, folds, words, fold, word };
 }
 
 /**
  * Marks the first use of each entry in `view`, left to right. `rangeAt` is markTerms' own check of a
  * candidate range; `mark` takes each new mark and returns true when no entry is left.
  *
- * Counts one step per code point compared (each tree lookup), per whitespace character a space consumes,
- * per start position tried (also one refused by the word-boundary rule), per form that ends on the way
- * and per code point of an acronym's exact check. Returns false when a step did not fit the budget: the
- * budget is then spent, and the caller drops the marks of this text node.
+ * The charges, all in steps (the same list in docs/api.md and in the bridge's copy):
+ * - 1 per code point compared (each tree lookup), including the failing one;
+ * - 1 per whitespace character a space of a form consumes;
+ * - 1 per start position tried, also one the word-boundary rule refuses;
+ * - 1 per form that ends on the way, and 1 per code point of the s/es suffix check;
+ * - 1 per code point of an acronym's exact check;
+ * - DOC_TERM_LOOKUP_STEPS the first time a code point is folded and the first time it is classified as a
+ *   word character (once per matcher; the forms' own characters are cached when the tree is built);
+ * - DOC_TERM_SEGMENT_STEPS per UTF-16 unit of the text node when it must be split into graphemes. That
+ *   happens once per node, when a candidate range has an edge that is not certainBoundary (ordinary ASCII
+ *   text never needs it), or at the start when `segmented` says the caller already split the node.
+ * Returns false when a step did not fit the budget: the budget is then spent, and the caller drops the
+ * marks of this text node. `segment()` splits the node for `rangeAt`; until it is called `rangeAt` may
+ * treat every certainBoundary index as a boundary.
+ *
+ * Measured with standalone scripts on this machine, 10,000,000 steps take 0.26 s or less on every shape tried
+ * (the hostile 450-form shapes, 450 forms on one tree node, a budget spent through segmentation alone, and
+ * one spent through first-seen lookups alone). Ordinary English prose costs about 1.2 steps per character;
+ * non-ASCII prose in paragraphs of about 1,000 characters that each hold a candidate with a non-ASCII edge
+ * costs about 33. Not counted: building the tree (3 to 6 ms for 450 forms) and the NFC normalization of
+ * each text node (at most 13 ns per character).
  */
 export function scanDocTerms(
   matcher: DocTermMatcher,
@@ -137,12 +175,39 @@ export function scanDocTerms(
   rangeAt: (index: number, length: number) => Range | undefined,
   seen: Set<number>,
   mark: (entry: number, range: Range) => boolean,
+  segment: () => void,
+  segmented: boolean,
 ): boolean {
-  const { root, fold, word } = matcher;
+  const { root, folds, words } = matcher;
   const size = view.length;
-  const foldE = fold(101);
-  const foldS = fold(115);
+  const foldE = matcher.fold(101);
+  const foldS = matcher.fold(115);
   let left = matcher.remaining;
+  // The first use of a code point costs steps; later uses read the cache.
+  const fold = (code: number) => {
+    const cached = folds.get(code);
+    if (cached !== undefined) return cached;
+    left -= DOC_TERM_LOOKUP_STEPS;
+    return matcher.fold(code);
+  };
+  const word = (code: number) => {
+    const cached = words.get(code);
+    if (cached !== undefined) return cached;
+    left -= DOC_TERM_LOOKUP_STEPS;
+    return matcher.word(code);
+  };
+  // A candidate's grapheme check. Segmenting the node is charged once; a range whose edges are certain
+  // boundaries needs no segmentation.
+  const accept = (start: number, finish: number) => {
+    if (!segmented && !(certainBoundary(view, start) && certainBoundary(view, finish))) {
+      left -= DOC_TERM_SEGMENT_STEPS * size;
+      if (left < 0) return;
+      segment();
+      segmented = true;
+    }
+    return rangeAt(start, finish - start);
+  };
+  if (segmented) left -= DOC_TERM_SEGMENT_STEPS * size;
 
   const wordBefore = (index: number) => {
     if (index <= 0) return false;
@@ -233,7 +298,8 @@ export function scanDocTerms(
       const finish = withSuffix(literal, form.acronym);
       if (left < 0) return;
       if (finish < 0) continue;
-      const range = rangeAt(start, finish - start);
+      const range = accept(start, finish);
+      if (left < 0) return;
       if (range) return { entry: form.entry, length: finish - start, range };
     }
   };
@@ -250,6 +316,7 @@ export function scanDocTerms(
       if (hit) {
         index += hit.length;
         previousWord = wordBefore(index);
+        if (left < 0) break;
         if (!seen.has(hit.entry) && mark(hit.entry, hit.range)) break;
         continue;
       }
