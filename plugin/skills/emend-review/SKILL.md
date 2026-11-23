@@ -214,8 +214,8 @@ Write the opening fields below. The app groups them for the reviewer.
   Show what you claim, as the writing reference says under "Pictures" and "Tables": a screenshot
   for a visible change, a table for a config, schema, number or query-plan change.
 
-The app adds Risk, Undo, Read and Since to Facts from the topics, diff and earlier revisions.
-Write nothing for them.
+The app adds three rows itself: Undo from the topics' **Undo:** paragraphs, Changed from earlier
+revisions, and Further down from the sections below the topics. Write nothing for them.
 
 ## Pin a few agent notes
 
