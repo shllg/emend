@@ -2177,7 +2177,8 @@ letters, which require exact case. A trailing `s` or `es` also matches; aliases 
 Spaces match whitespace runs; the longest form wins at the same position. Marks have a dotted
 underline and show a definition card on hover, focus or tap, with a link to the glossary entry.
 The glossary starts folded even when changed; navigation to an entry opens it. Old Markdown
-glossaries render as before and get no marks. HTML docs get no marks.
+glossaries render as before and get no marks. HTML docs declare their own glossary; see "Glossary in an
+HTML doc".
 
 #### Glossary in a Markdown doc
 
@@ -2209,6 +2210,39 @@ the entries in marking order; the app opens the same card as the writeup's, whos
 jumps to the entry's block. A doc without such a section has no `terms` and no marks. Terms are
 stored beside the doc row, are not part of the export bundle, and the import re-renders them from
 the doc source.
+
+#### Glossary in an HTML doc
+
+An HTML doc (a pub, or a code review's doc) declares its own glossary inside the doc:
+
+```
+<h2>Glossary</h2>
+<dl>
+  <dt>Budget</dt>
+  <dt>allowance</dt>
+  <dd>Attempts a worker may spend.</dd>
+  <dt>Hub</dt>
+  <dd>The machine the phone reaches.</dd>
+</dl>
+```
+
+The glossary is the first `<dl>` after the first `h1`-`h6` heading whose text, whitespace collapsed
+and trimmed, equals "Glossary" ignoring case. A `<dl>` may group its `dt` and `dd` in `div` children.
+A run of `dt` followed by one or more `dd` is one entry: the first `dt` is the term, each further `dt` an
+alias, and the `dd` texts joined with a space the definition, as plain text, whitespace-normalized
+and cut to `glossaryDefinitionChars` with a closing `…`. Terms and aliases follow the manifest
+glossary's rules (`GlossaryForm`). An entry with a blank definition or an invalid or repeated term
+is skipped; an invalid or repeated alias is dropped; at most `glossaryTerms` entries and
+`glossaryAliases` aliases per entry count.
+
+The bridge inside the frame does all of the work. At ready it reads the glossary, marks the first use
+of each term and alias in its own spans (dotted underline, focusable, never inside the glossary, a
+heading, `a`, `code`, `pre`, `kbd`, `samp`, `textarea`, `title`, `button`, `select`, `option`,
+scripts, styles or non-HTML elements), and opens the same short card as the writeup on hover (after
+500 ms), focus, tap and Enter or Space, with a "Glossary" control that scrolls to the entry's first
+`dt`. Marking follows the writeup's rules per text node; it can differ on text that is not NFC and
+across inline elements. The card is plain text in a closed shadow root. No frame message carries the
+glossary, and the parent app does not change. A doc without such a `<dl>` looks as it did.
 
 #### Links and repoUrl
 

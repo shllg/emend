@@ -67,6 +67,9 @@ to it. Any change here needs `emend-security-reviewer`.
 - `emend:repo` carries only a checked repo URL to a ready frame. The bridge wraps `#123` text in
   its own links, never in code, pre, a or non-HTML elements; a click posts `emend:issue` with only
   the number. The parent opens only its own `repoUrl` with that number, never a URL from the frame.
+- At ready the bridge reads the doc's own glossary (the first `dl` after a "Glossary" heading),
+  wraps each entry's first use in its own spans (never in the elements above, headings or the `dl`),
+  and draws the card as text in a closed shadow root. Nothing about the glossary crosses the frame.
 - Titles and Contents labels pass `cleanDocTitle` on the server and render as isolated text
   (`dir="auto"`). The filename always shows.
 - Position memory holds only the app's own block, thread and HTML-doc frame ids or declared

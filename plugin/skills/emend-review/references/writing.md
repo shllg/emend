@@ -341,7 +341,11 @@ A review writeup holds it in `glossary` as a list of entries with `term`, `defin
 emend marks each term's first use in every section.
 It shows the definition when the reader points at it.
 Add an alias for another form the text uses, such as an abbreviation.
-A document keeps its glossary as a list under a "Glossary" heading, one term per item.
+A Markdown document keeps its glossary as one list under a "Glossary" heading, one term per item:
+`- **Term** (also: a, b): definition`, or `- **Term:** definition`.
+An HTML document keeps it in the first `<dl>` after a "Glossary" heading: a `<dt>` for the term, an
+extra `<dt>` for each alias, then a `<dd>` with the definition.
+emend marks each term's first use in the document and shows the same card.
 
 ## Pictures
 

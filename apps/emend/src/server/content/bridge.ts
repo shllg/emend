@@ -418,10 +418,16 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     return { text, range, boundary };
   }
-  function capture() {
+  function capture(event) {
+    // The glossary card is emend's own: events and selections inside it never become comment anchors.
+    if (card && event && dom(window.Event.prototype, "composedPath", event).includes(card.host)) return;
     const selection = dom(window.Document.prototype, "getSelection", document);
     if (!selection || read(window.Selection.prototype, "isCollapsed", selection) || read(window.Selection.prototype, "rangeCount", selection) !== 1 || !body()) return;
     const range = dom(window.Selection.prototype, "getRangeAt", selection, 0);
+    const inCard = node => card && (node === card.host || dom(window.Node.prototype, "contains", card.host, node) ||
+      dom(window.Node.prototype, "contains", card.dialog, node));
+    if (inCard(read(window.Range.prototype, "startContainer", range)) || inCard(read(window.Range.prototype, "endContainer", range)) ||
+        inCard(read(window.Selection.prototype, "focusNode", selection))) return;
     if (!dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "startContainer", range)) || !dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "endContainer", range))) return;
     const value = model();
     let start = value.boundary(read(window.Range.prototype, "startContainer", range), read(window.Range.prototype, "startOffset", range), false);
@@ -552,6 +558,403 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       dom(window.Node.prototype, "replaceChild", nodeValue("parentNode", node), fragment, node);
     }
     if (lastAnchors) highlight(lastAnchors);
+  }
+  // The glossary of an HTML doc: the first dl after a heading named Glossary. It is read, marked and drawn
+  // inside the frame; nothing about it crosses to the parent.
+  // Kept in parity with LIMITS (glossary*) by the bridge glossary tests.
+  const GLOSSARY_TERMS_MAX = 50;
+  const GLOSSARY_ALIASES_MAX = 8;
+  const GLOSSARY_FORM_MAX = 100;
+  const GLOSSARY_DEFINITION_MAX = 2000;
+  const GLOSSARY_VISITS_MAX = 100000;
+  const GLOSSARY_WORK_MAX = 400000000;
+  const htmlElement = node => nodeType(node) === 1 && namespace(node) === "http://www.w3.org/1999/xhtml";
+  const createText = text => dom(window.Document.prototype, "createTextNode", document, text);
+  const phrasingTags = new Set(["a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "del", "dfn", "em", "i", "ins",
+    "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small", "span", "strike", "strong", "sub", "sup", "time",
+    "tt", "u", "var"]);
+  let glossary = [], glossaryList;
+  const termMarks = new WeakMap();
+  // Kept in parity with normalizeGlossaryForm and GlossaryForm (packages/contract/src/manifest.ts).
+  const glossaryForm = text => text.normalize("NFC").replace(/\s+/gu, " ").trim();
+  const validForm = text => text.length > 0 && text.length <= GLOSSARY_FORM_MAX && text.isWellFormed() &&
+    !Array.from(text).some(char => {
+      const code = char.charCodeAt(0);
+      return code < 32 || (code >= 127 && code <= 159) || code === 0x2028 || code === 0x2029;
+    });
+  // Kept in parity with limitDefinition (packages/core/src/render/glossary-definition.ts).
+  function limitDefinition(text) {
+    if (text.length <= GLOSSARY_DEFINITION_MAX) return text;
+    let cut = GLOSSARY_DEFINITION_MAX - 1;
+    if ((text.codePointAt(cut - 1) ?? 0) > 0xffff) cut--;
+    return text.slice(0, cut) + "…";
+  }
+  // Text of an element with a space around block elements, so neighbouring paragraphs do not run together.
+  function glossaryText(root) {
+    const parts = [];
+    const pending = [{ nodes: children(root)[Symbol.iterator](), block: false }];
+    let left = 20000, visits = 20000;
+    while (pending.length && left > 0 && visits > 0) {
+      const entry = pending[pending.length - 1];
+      const next = entry.nodes.next();
+      if (next.done) { pending.pop(); if (entry.block) parts.push(" "); continue; }
+      visits--;
+      const node = next.value;
+      if (nodeType(node) === 3) {
+        const part = textData(node).slice(0, left);
+        parts.push(part);
+        left -= part.length;
+      } else if (nodeType(node) === 1 && !omitted.has(localName(node))) {
+        const block = !(htmlElement(node) && phrasingTags.has(localName(node)));
+        if (block) parts.push(" ");
+        pending.push({ nodes: children(node)[Symbol.iterator](), block });
+      }
+    }
+    return parts.join("");
+  }
+  function readGlossary() {
+    glossary = [];
+    glossaryList = undefined;
+    if (!body()) return;
+    let heading, list;
+    for (const node of nodes(body(), GLOSSARY_VISITS_MAX)) {
+      if (!htmlElement(node)) continue;
+      const name = localName(node);
+      if (!heading) {
+        if (/^h[1-6]$/.test(name) && label(node).toLowerCase() === "glossary") heading = node;
+      } else if (name === "dl" && !dom(window.Node.prototype, "contains", heading, node)) { list = node; break; }
+    }
+    if (!list) return;
+    // A dl holds dt and dd children, or div groups of them.
+    const items = [];
+    for (const child of children(list)) {
+      if (!htmlElement(child)) continue;
+      const name = localName(child);
+      if (name === "dt" || name === "dd") items.push(child);
+      else if (name === "div") {
+        for (const inner of children(child))
+          if (htmlElement(inner) && (localName(inner) === "dt" || localName(inner) === "dd")) items.push(inner);
+      }
+      if (items.length >= 10000) break;
+    }
+    const seen = new Set();
+    const key = form => form.toLowerCase();
+    let run;
+    const finish = () => {
+      const current = run;
+      run = undefined;
+      if (!current || !current.dds.length || glossary.length >= GLOSSARY_TERMS_MAX) return;
+      const term = glossaryForm(glossaryText(current.dts[0]));
+      const definition = limitDefinition(glossaryForm(current.dds.map(dd => glossaryText(dd)).join(" ")));
+      if (definition === "" || !validForm(term) || seen.has(key(term))) return;
+      seen.add(key(term));
+      const aliases = [];
+      for (const dt of current.dts.slice(1)) {
+        if (aliases.length >= GLOSSARY_ALIASES_MAX) break;
+        const alias = glossaryForm(glossaryText(dt));
+        if (!validForm(alias) || seen.has(key(alias))) continue;
+        seen.add(key(alias));
+        aliases.push(alias);
+      }
+      glossary.push({ term, aliases, definition, dt: current.dts[0] });
+    };
+    for (const item of items) {
+      if (localName(item) === "dt") {
+        if (run && run.dds.length) finish();
+        if (!run) run = { dts: [], dds: [] };
+        run.dts.push(item);
+      } else if (run) run.dds.push(item);
+    }
+    finish();
+    if (glossary.length) glossaryList = list;
+  }
+  // Ported from termMatcher and markTerms (packages/core/src/render/terms.ts), on one text node at a time.
+  // The marks may differ from core's: a text node that is not NFC gets none, and a word boundary is not
+  // checked across inline elements. The bridge tests hold the single-text-node cases in parity.
+  const escapePattern = text => text.replace(/[\^$\\.*+?()[\]{}|/]/g, "\\$&");
+  const termBoundary = "[\\p{L}\\p{M}\\p{N}_]";
+  function termMatcher(entries) {
+    let weight = 0;
+    const forms = entries
+      .flatMap((entry, index) => [entry.term, ...entry.aliases].map(form => ({ form: glossaryForm(form), entry: index })))
+      .filter(({ form }) => form.length > 0)
+      .sort((a, b) => b.form.length - a.form.length)
+      .map(({ form, entry }) => {
+        weight += form.length;
+        const source = form.split(" ").map(escapePattern).join("\\s+") + "(?:es|s)?(?!" + termBoundary + ")";
+        const acronym = !/\p{Ll}/u.test(form) && (form.match(/\p{Lu}/gu)?.length ?? 0) >= 2;
+        return { entry, source, acronym, at: new RegExp(source, acronym ? "uy" : "iuy") };
+      });
+    return { forms, weight, remaining: GLOSSARY_WORK_MAX,
+      pattern: new RegExp("(?<!" + termBoundary + ")(?:" + forms.map(({ source }) => "(" + source + ")").join("|") + ")", "giu") };
+  }
+  function termMark(text, index) {
+    const mark = createElement("span");
+    const style = styleOf(mark);
+    styleCall("setProperty", style, "text-decoration", "underline dotted");
+    styleCall("setProperty", style, "text-underline-offset", "0.15em");
+    styleCall("setProperty", style, "cursor", "help");
+    for (const [name, value] of [["tabindex", "0"], ["role", "button"], ["aria-haspopup", "dialog"], ["aria-expanded", "false"]])
+      elementCall("setAttribute", mark, name, value);
+    dom(window.Node.prototype, "appendChild", mark, createText(text));
+    termMarks.set(mark, index);
+    return mark;
+  }
+  function markTerms() {
+    if (!glossary.length) return;
+    const matcher = termMatcher(glossary);
+    if (!matcher.forms.length) return;
+    const skipped = new Set([...omitted, "a", "code", "pre", "kbd", "samp", "h1", "h2", "h3", "h4", "h5", "h6",
+      "textarea", "title", "button", "select", "option"]);
+    const textNodes = [];
+    const pending = body() ? [[body()][Symbol.iterator]()] : [];
+    let visits = GLOSSARY_VISITS_MAX;
+    // Collect before replacing: childNodes is live, so mutations must not revisit new text nodes.
+    while (pending.length && visits) {
+      const next = pending[pending.length - 1].next();
+      if (next.done) { pending.pop(); continue; }
+      visits--;
+      const node = next.value;
+      if (nodeType(node) === 3) textNodes.push(node);
+      else if (htmlElement(node) && !skipped.has(localName(node)) && node !== glossaryList)
+        pending.push(children(node)[Symbol.iterator]());
+    }
+    const seen = new Set();
+    const charge = units => {
+      if (units > matcher.remaining) { matcher.remaining = 0; return false; }
+      matcher.remaining -= units;
+      return true;
+    };
+    let segmenter;
+    for (const node of textNodes) {
+      if (seen.size === glossary.length) break;
+      const value = textData(node);
+      const parent = nodeValue("parentNode", node);
+      if (!parent || value !== value.normalize("NFC")) continue;
+      if (!charge(value.length * matcher.weight)) break;
+      let boundaries;
+      const fits = (start, length) => boundaries.has(start) && boundaries.has(start + length);
+      const advance = index => index + ((value.codePointAt(index) ?? 0) > 0xffff ? 2 : 1);
+      const replacements = [];
+      let end = 0;
+      matcher.pattern.lastIndex = 0;
+      for (let match = matcher.pattern.exec(value); match; match = matcher.pattern.exec(value)) {
+        if (!charge(matcher.forms.length)) break;
+        let form = matcher.forms[match.findIndex((part, index) => index > 0 && part !== undefined) - 1];
+        let length = match[0].length;
+        if (!form) continue;
+        if (!boundaries) {
+          segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
+          boundaries = new Set([value.length]);
+          for (const { index } of segmenter.segment(value)) boundaries.add(index);
+        }
+        let accepted = fits(match.index, length);
+        if (form.acronym || !accepted) {
+          // Recheck case and boundaries together so a refused form cannot hide a shorter one.
+          if (!charge(matcher.weight)) break;
+          accepted = false;
+          for (const candidate of matcher.forms) {
+            candidate.at.lastIndex = match.index;
+            const exact = candidate.at.exec(value);
+            if (!exact || !fits(match.index, exact[0].length)) continue;
+            form = candidate;
+            length = exact[0].length;
+            accepted = true;
+            break;
+          }
+        }
+        if (!accepted) { matcher.pattern.lastIndex = advance(match.index); continue; }
+        matcher.pattern.lastIndex = match.index + length;
+        if (seen.has(form.entry)) continue;
+        if (match.index > end) replacements.push(createText(value.slice(end, match.index)));
+        replacements.push(termMark(value.slice(match.index, match.index + length), form.entry));
+        end = match.index + length;
+        seen.add(form.entry);
+        if (seen.size === glossary.length) break;
+      }
+      if (!replacements.length) continue;
+      if (end < value.length) replacements.push(createText(value.slice(end)));
+      const fragment = dom(window.Document.prototype, "createDocumentFragment", document);
+      for (const part of replacements) dom(window.Node.prototype, "appendChild", fragment, part);
+      dom(window.Node.prototype, "replaceChild", parent, fragment, node);
+    }
+  }
+  // The card: text only, in a closed shadow root on a host the doc's markup cannot reach.
+  let card, openTerm, hoverTimer, leaveTimer, pointerTarget = null, restoringFocus = false;
+  const markFor = node => {
+    for (let current = node; current; current = nodeValue("parentNode", current)) if (termMarks.has(current)) return current;
+    return null;
+  };
+  const isNode = value => value instanceof window.Node;
+  const insideCard = target => !!card && isNode(target) &&
+    (target === card.host || dom(window.Node.prototype, "contains", card.host, target) ||
+      dom(window.Node.prototype, "contains", card.dialog, target));
+  const insideOpen = target => !!openTerm && isNode(target) &&
+    (dom(window.Node.prototype, "contains", openTerm.mark, target) || insideCard(target));
+  const activeElement = () => documentValue("activeElement");
+  const focusedOpen = (target = activeElement()) => insideOpen(target);
+  const cardFocused = () => !!card && activeElement() === card.host;
+  const hoveredOpen = () => !!pointerTarget && nodeValue("isConnected", pointerTarget) && insideOpen(pointerTarget);
+  const clearOpenTimer = () => { window.clearTimeout(hoverTimer); hoverTimer = undefined; };
+  const clearCloseTimer = () => { window.clearTimeout(leaveTimer); leaveTimer = undefined; };
+  const focusElement = (element, options) => dom(window.HTMLElement.prototype, "focus", element, options);
+  const eventTarget = event => read(window.Event.prototype, "target", event);
+  const pointerKind = event => event.pointerType === "mouse" || event.pointerType === "pen";
+  function ensureCard() {
+    if (card) return card;
+    const host = createElement("emend-term-card");
+    const hostStyle = styleOf(host);
+    for (const [name, value] of [["position", "fixed"], ["left", "0"], ["top", "0"], ["width", "0"], ["height", "0"],
+        ["margin", "0"], ["padding", "0"], ["border", "0"], ["display", "none"], ["z-index", "2147483647"]])
+      styleCall("setProperty", hostStyle, name, value, "important");
+    const shadow = elementCall("attachShadow", host, { mode: "closed" });
+    // The theme's variables where the frame defines them, the frame's own colour scheme otherwise.
+    const css = ".card{position:fixed;left:0;top:0;box-sizing:border-box;width:min(20rem,calc(100vw - 16px));" +
+      "max-height:calc(100vh - 16px);overflow:auto;margin:0;padding:12px;background:var(--bg-raised,Canvas);" +
+      "color:var(--fg-1,CanvasText);border:1px solid var(--border-1,GrayText);border-radius:8px;" +
+      "box-shadow:0 4px 16px rgba(0,0,0,.25);font:400 14px/1.5 var(--font-sans,system-ui,sans-serif);" +
+      "text-align:start;text-transform:none;letter-spacing:normal;text-indent:0;white-space:normal;overflow-wrap:anywhere}" +
+      "p{margin:6px 0}strong{font-weight:600}" +
+      "button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;text-decoration:underline;cursor:pointer}" +
+      "button:focus-visible{outline:2px solid currentColor;outline-offset:2px}";
+    try {
+      const sheet = new CSSStyleSheet();
+      dom(window.CSSStyleSheet.prototype, "replaceSync", sheet, css);
+      write(window.ShadowRoot.prototype, "adoptedStyleSheets", shadow, [sheet]);
+    } catch { /* The card stays usable, only plain, without constructed stylesheet support. */ }
+    const dialog = createElement("div");
+    elementCall("setAttribute", dialog, "class", "card");
+    elementCall("setAttribute", dialog, "role", "dialog");
+    elementCall("setAttribute", dialog, "aria-labelledby", "term");
+    const term = createElement("strong");
+    elementCall("setAttribute", term, "id", "term");
+    const definition = createElement("p");
+    const control = createElement("button");
+    elementCall("setAttribute", control, "type", "button");
+    write(window.Element.prototype, "textContent", control, "Glossary");
+    for (const element of [term, definition, control]) elementCall("setAttribute", element, "dir", "auto");
+    for (const element of [term, definition, control]) dom(window.Node.prototype, "appendChild", dialog, element);
+    dom(window.Node.prototype, "appendChild", shadow, dialog);
+    dom(window.Node.prototype, "appendChild", body(), host);
+    listen(control, "click", () => {
+      const entry = openTerm && glossary[openTerm.index];
+      if (!entry) return;
+      if (nodeValue("isConnected", entry.dt)) { scroll(entry.dt); schedulePosition(); }
+      closeCard();
+    });
+    return card = { host, dialog, term, definition, control };
+  }
+  function positionCard() {
+    if (!openTerm || !card) return;
+    const anchor = bounds(openTerm.mark);
+    const size = bounds(card.dialog);
+    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - size.width - 8));
+    const below = anchor.bottom + 6;
+    const top = below + size.height <= window.innerHeight - 8 ? below : anchor.top - size.height - 6;
+    const style = styleOf(card.dialog);
+    styleCall("setProperty", style, "left", left + "px");
+    styleCall("setProperty", style, "top", Math.max(8, Math.min(top, window.innerHeight - size.height - 8)) + "px");
+  }
+  function showCard(mark, focus = false) {
+    const index = termMarks.get(mark);
+    const entry = glossary[index];
+    if (!entry || !nodeValue("isConnected", mark)) return;
+    clearOpenTimer();
+    clearCloseTimer();
+    if (openTerm && openTerm.mark !== mark) elementCall("setAttribute", openTerm.mark, "aria-expanded", "false");
+    const view = ensureCard();
+    write(window.Element.prototype, "textContent", view.term, entry.term);
+    write(window.Element.prototype, "textContent", view.definition, entry.definition);
+    openTerm = { mark, index };
+    elementCall("setAttribute", mark, "aria-expanded", "true");
+    styleCall("setProperty", styleOf(view.host), "display", "block", "important");
+    positionCard();
+    if (focus) focusElement(view.control);
+  }
+  function closeCard(restore = false) {
+    clearOpenTimer();
+    clearCloseTimer();
+    const current = openTerm;
+    openTerm = undefined;
+    if (!current || !card) return;
+    elementCall("setAttribute", current.mark, "aria-expanded", "false");
+    styleCall("setProperty", styleOf(card.host), "display", "none", "important");
+    if (restore && nodeValue("isConnected", current.mark)) {
+      restoringFocus = true;
+      try { focusElement(current.mark); } finally { restoringFocus = false; }
+    }
+  }
+  function delayOpen(mark) {
+    clearOpenTimer();
+    if (openTerm && openTerm.mark === mark) return;
+    hoverTimer = window.setTimeout(() => { hoverTimer = undefined; showCard(mark); }, 500);
+  }
+  // Behaviour matches apps/web/src/components/reading/GlossaryTerms.tsx.
+  function startGlossary() {
+    listen(document, "pointerover", event => {
+      if (!pointerKind(event)) return;
+      const target = eventTarget(event);
+      pointerTarget = target;
+      if (insideCard(target)) { clearCloseTimer(); return; }
+      const mark = markFor(target);
+      if (!mark) return;
+      if (openTerm && openTerm.mark === mark) clearCloseTimer();
+      if (!(isNode(event.relatedTarget) && dom(window.Node.prototype, "contains", mark, event.relatedTarget))) delayOpen(mark);
+    }, true);
+    listen(document, "pointerout", event => {
+      if (!pointerKind(event)) return;
+      const target = eventTarget(event);
+      if (event.relatedTarget === null) pointerTarget = null;
+      if (!markFor(target) && !insideCard(target)) return;
+      clearOpenTimer();
+      if (insideOpen(event.relatedTarget)) { clearCloseTimer(); return; }
+      if (insideOpen(target) && !focusedOpen()) {
+        clearCloseTimer();
+        leaveTimer = window.setTimeout(() => {
+          leaveTimer = undefined;
+          if (!hoveredOpen() && !focusedOpen()) closeCard();
+        }, 300);
+      }
+    }, true);
+    listen(document, "focusin", event => {
+      if (restoringFocus) return;
+      const target = eventTarget(event);
+      if (focusedOpen(target)) clearCloseTimer();
+      const mark = markFor(target);
+      if (mark) delayOpen(mark);
+    }, true);
+    listen(document, "focusout", event => {
+      clearOpenTimer();
+      if (insideOpen(eventTarget(event)) && !focusedOpen(event.relatedTarget) && !hoveredOpen()) closeCard();
+    }, true);
+    listen(document, "click", event => {
+      if (event.defaultPrevented) return;
+      const mark = markFor(eventTarget(event));
+      if (!mark) return;
+      const selection = dom(window.Document.prototype, "getSelection", document);
+      if (!selection || read(window.Selection.prototype, "isCollapsed", selection)) showCard(mark);
+    });
+    listen(document, "keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const target = eventTarget(event);
+      if (!termMarks.has(target)) return;
+      dom(window.Event.prototype, "preventDefault", event);
+      showCard(target, true);
+    });
+    listen(document, "keydown", event => {
+      if (event.key !== "Escape" || !openTerm) return;
+      const inCard = cardFocused();
+      if (focusedOpen()) {
+        dom(window.Event.prototype, "preventDefault", event);
+        dom(window.Event.prototype, "stopPropagation", event);
+      }
+      closeCard(inCard);
+    }, true);
+    listen(document, "pointerdown", event => {
+      if (openTerm && !insideOpen(eventTarget(event))) closeCard();
+    }, true);
+    listen(window, "resize", positionCard, { passive: true });
+    listen(window, "scroll", positionCard, { capture: true, passive: true });
   }
   let keptMarks = [], marked = [], changeLabels = [];
   let themeMode = "light";
@@ -1119,6 +1522,9 @@ export const BRIDGE_SOURCE = String.raw`(() => {
   for (const type of ["transitionend", "transitioncancel", "animationend", "animationcancel"])
     listen(document, type, onDiagramMotionEnd, true);
   const ready = () => {
+    readGlossary();
+    markTerms();
+    if (glossary.length) startGlossary();
     headings = collectHeadings();
     parts = collectParts();
     post({ type: "emend:ready" });
