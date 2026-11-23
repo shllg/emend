@@ -166,29 +166,33 @@ const pieces = [
 ];
 const gaps = ["", "", " ", " ", "  ", "\t", "\n", " ", "　", "   ", "-", "_", "1", "́", "​"];
 
-test("doc matcher equals the reference on seeded random glossaries and texts", () => {
-  for (let seed = 1; seed <= 400; seed++) {
-    const next = generator(seed);
-    const pick = <T>(list: T[]) => list[next(list.length)] as T;
-    const form = () => Array.from({ length: 1 + next(3) }, () => pick(pieces)).join(pick([" ", " ", "  ", ""]));
-    const entries: Entry[] = Array.from({ length: 1 + next(6) }, () => ({
-      term: form(),
-      aliases: Array.from({ length: next(3) }, form),
-    }));
-    // Texts reuse the forms so that matches are common, with random gaps and suffixes around them.
-    const forms = entries.flatMap((entry) => [entry.term, ...(entry.aliases ?? [])]);
-    const piece = () => (next(3) === 0 ? pick(forms).replace(/ /g, pick(gaps)) : pick(pieces));
-    const values = Array.from({ length: 1 + next(3) }, () =>
-      Array.from(
-        { length: 2 + next(14) },
-        () => `${piece()}${next(4) === 0 ? pick(["s", "es", "S", "ES"]) : ""}`,
-      ).reduce((joined, part) => `${joined}${pick(gaps)}${part}`),
-    );
-    const tree = paragraphs(...values);
-    try {
-      same(entries, tree);
-    } catch (error) {
-      throw new Error(`seed ${seed}: ${JSON.stringify({ entries, values })}\n${String(error)}`);
+// Seeds 1 to 400 in 8 chunks, so no single test nears the default timeout under load.
+test.each(Array.from({ length: 8 }, (_, chunk) => chunk * 50 + 1))(
+  "doc matcher equals the reference on seeded random glossaries and texts, seeds %i and the next 49",
+  (first) => {
+    for (let seed = first; seed < first + 50; seed++) {
+      const next = generator(seed);
+      const pick = <T>(list: T[]) => list[next(list.length)] as T;
+      const form = () => Array.from({ length: 1 + next(3) }, () => pick(pieces)).join(pick([" ", " ", "  ", ""]));
+      const entries: Entry[] = Array.from({ length: 1 + next(6) }, () => ({
+        term: form(),
+        aliases: Array.from({ length: next(3) }, form),
+      }));
+      // Texts reuse the forms so that matches are common, with random gaps and suffixes around them.
+      const forms = entries.flatMap((entry) => [entry.term, ...(entry.aliases ?? [])]);
+      const piece = () => (next(3) === 0 ? pick(forms).replace(/ /g, pick(gaps)) : pick(pieces));
+      const values = Array.from({ length: 1 + next(3) }, () =>
+        Array.from(
+          { length: 2 + next(14) },
+          () => `${piece()}${next(4) === 0 ? pick(["s", "es", "S", "ES"]) : ""}`,
+        ).reduce((joined, part) => `${joined}${pick(gaps)}${part}`),
+      );
+      const tree = paragraphs(...values);
+      try {
+        same(entries, tree);
+      } catch (error) {
+        throw new Error(`seed ${seed}: ${JSON.stringify({ entries, values })}\n${String(error)}`);
+      }
     }
-  }
-});
+  },
+);

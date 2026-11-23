@@ -7,9 +7,8 @@ type Entry = { term: string; aliases?: string[] };
 const escapePattern = (text: string) => text.replace(/[\^$\\.*+?()[\]{}|/]/g, "\\$&");
 const single = (text: string) => ((text.codePointAt(0) ?? 0) > 0xffff ? text.length === 2 : text.length === 1);
 
-test("the fold equals /x/iu on the whole BMP and on the cased pairs", () => {
+test("the fold equals /x/iu on every BMP code point", () => {
   const failures: string[] = [];
-  const cased: number[] = [];
   for (let code = 0; code <= 0xffff; code++) {
     if (code >= 0xd800 && code <= 0xdfff) continue;
     const char = String.fromCodePoint(code);
@@ -20,22 +19,38 @@ test("the fold equals /x/iu on the whole BMP and on the cased pairs", () => {
     const lower = char.toLowerCase();
     const upper = char.toUpperCase();
     const around = [lower, upper, upper.toLowerCase(), lower.toUpperCase()].filter(single);
-    for (const other of around) {
-      if (
-        new RegExp(`^${escapePattern(char)}$`, "iu").test(other) &&
-        foldCodePoint(other.codePointAt(0) ?? 0) !== folded
-      )
-        failures.push(`${code}: ${other.codePointAt(0)} split`);
+    if (around.length) {
+      const own = new RegExp(`^${escapePattern(char)}$`, "iu");
+      for (const other of around) {
+        if (own.test(other) && foldCodePoint(other.codePointAt(0) ?? 0) !== folded)
+          failures.push(`${code}: ${other.codePointAt(0)} split`);
+      }
     }
-    if (lower !== char || upper !== char) cased.push(code);
   }
-  // Every pair of cased BMP characters falls in one class exactly when the regex says so.
-  for (const code of cased) {
-    const pattern = new RegExp(`^${escapePattern(String.fromCodePoint(code))}$`, "iu");
-    for (const other of cased)
-      if (pattern.test(String.fromCodePoint(other)) !== (foldCodePoint(code) === foldCodePoint(other)))
-        failures.push(`${code} vs ${other}`);
+  expect(failures).toEqual([]);
+});
+
+test("every pair of cased BMP characters falls in one class exactly when the regex says so", () => {
+  const failures: string[] = [];
+  const cased: number[] = [];
+  for (let code = 0; code <= 0xffff; code++) {
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    const char = String.fromCodePoint(code);
+    if (char.toLowerCase() !== char || char.toUpperCase() !== char) cased.push(code);
   }
+  const folds = cased.map((code) => foldCodePoint(code));
+  // One string of every cased character; each pattern is one literal code point and each member of the
+  // string is one code point, so a global scan finds exactly the members the pattern matches as a whole.
+  const all = String.fromCodePoint(...cased);
+  for (const [index, code] of cased.entries()) {
+    const found = Array.from(all.matchAll(new RegExp(escapePattern(String.fromCodePoint(code)), "giu")), (match) =>
+      match[0].codePointAt(0),
+    );
+    const expected = cased.filter((_, other) => folds[other] === folds[index]);
+    if (found.length !== expected.length || found.some((value, at) => value !== expected[at]))
+      failures.push(`${code}: regex ${found.join(",")} fold ${expected.join(",")}`);
+  }
+  expect(cased.length).toBeGreaterThan(2000);
   expect(failures).toEqual([]);
 });
 
