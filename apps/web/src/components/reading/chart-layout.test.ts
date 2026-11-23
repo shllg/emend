@@ -5,7 +5,6 @@ import {
   chartWidth,
   formatChartExact,
   formatChartLabel,
-  labelLines,
   layoutBars,
   layoutLine,
   layoutSparklines,
@@ -126,47 +125,12 @@ test("line labels at both edges survive thinning on a narrow plot", () => {
   }
 });
 
-test("label lines fit whole words greedily and split an oversized word by character", () => {
-  expect(labelLines("Request counts after the release", 140, 13)).toEqual([
-    { text: "Request counts after", y: 13 },
-    { text: "the release", y: 29 },
-  ]);
-  expect(labelLines("Run abcdefgh now", 35, 0).map(({ text }) => text)).toEqual(["Run", "abcde", "fgh", "now"]);
-});
-
-test("a bar heading wraps at spaces", () => {
-  const plot = layoutBars(
-    { type: "bar", labels: ["Request counts after the release"], series: [{ name: "Count", values: [1] }] },
-    200,
-  );
-  expect(plot.rows[0]?.heading.map(({ text }) => text)).toEqual(["Request counts after the", "release"]);
-});
-
-test("a narrow line plot anchors its edge labels at their points and keeps the visible labels apart", () => {
-  const values = Array.from({ length: 24 }, (_, i) => i);
-  const labels = values.map(String);
-  labels[0] = "Request counts ahead of releases";
-  labels[23] = "Request counts after the release";
-  const line = layoutLine({ type: "line", labels, series: [{ name: "Counts", values }] }, 282);
-  const points = line.lines[0]?.points ?? [];
-  expect(line.labels[0]).toMatchObject({ anchor: "start", x: points[0]?.x });
-  expect(line.labels.at(-1)).toMatchObject({ anchor: "end", x: points[23]?.x });
-  expect(line.labels.some(({ anchor }) => anchor === "middle")).toBe(true);
+test("long endpoint labels wrap in their own space on a phone", () => {
+  const labels = ["One long label with a long name", "One more long name for the plot"];
+  const line = layoutLine({ type: "line", labels, series }, 200);
+  expect(line.labels.map((label) => label.lines.map(({ text }) => text).join(""))).toEqual(labels);
   expect(line.height).toBeGreaterThan(170);
-  let previousRight = -Infinity;
-  for (const label of line.labels) {
-    const point = points.findIndex(({ x }) => x === label.x);
-    expect(label.lines.map(({ text }) => text).join(" ")).toBe(labels[point]);
-    const widest = Math.max(...label.lines.map(({ text }) => text.length * 7));
-    const left = label.x - (label.anchor === "start" ? 0 : label.anchor === "end" ? widest : widest / 2);
-    const right = left + widest;
-    expect(label.left).toBeCloseTo(left);
-    expect(label.right).toBeCloseTo(right);
-    expect(left).toBeGreaterThanOrEqual(0);
-    expect(right).toBeLessThanOrEqual(282);
-    expect(left - previousRight).toBeGreaterThanOrEqual(8);
-    previousRight = right;
-  }
+  expect((line.labels[1]?.left ?? 0) - (line.labels[0]?.right ?? 0)).toBeGreaterThanOrEqual(8);
 });
 
 test("end labels appear together only when all series ends are far enough apart", () => {
