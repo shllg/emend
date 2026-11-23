@@ -148,6 +148,20 @@ describe("issueRefs", () => {
       expect(PublishRequest.safeParse({ ...base, issueRefs: [{ ...ref, title }] }).success).toBe(false);
   });
 
+  test("a title made only of blank-looking characters is refused", () => {
+    const request = { reviewKey: "a".repeat(64), repo: null, branch: null, title: "T", base: null, head: null };
+    const base = { ...request, topics: [], writeup: manifest.writeup, files: [] };
+    for (const title of ["\u2800", "\u180B", "\u17B4", "\u2800\u180B\u17B4"])
+      expect(PublishRequest.safeParse({ ...base, issueRefs: [{ ...ref, title }] }).success).toBe(false);
+  });
+
+  test("the cleaner removes braille blank, Mongolian selectors and Khmer vowels inside a title", () => {
+    expect(plainIssueTitle("Fix\u2800 \u180Bbug\u17B4\u17B5")).toBe("Fix bug");
+    expect(plainIssueTitle("\u2800\u180B\u17B4")).toBe("");
+    const blank = { ...ref, title: "\u2800\u180B\u17B4" };
+    expect(PublishManifest.safeParse({ ...manifest, issueRefs: [blank] }).success).toBe(false);
+  });
+
   test("the manifest cleaner drops characters that render as nothing", () => {
     expect(plainIssueTitle("Fixㅤ bug️")).toBe("Fix bug");
     expect(plainIssueTitle("ㅤᅟᅠﾠ")).toBe("");

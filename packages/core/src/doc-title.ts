@@ -1,4 +1,4 @@
-import { isInvisibleChar, LIMITS } from "@emend/contract";
+import { LIMITS } from "@emend/contract";
 import { defaultTreeAdapter, html } from "parse5";
 import { docNodes, htmlPart, nodeText, parseDocHtml } from "./place/html.ts";
 import type { Block } from "./render/blocks.ts";
@@ -6,9 +6,33 @@ import { renderMetadataBlocks } from "./render/markdown.ts";
 
 export const TITLE_PREFIX_BYTES = 64 * 1024;
 
+// Terminal and bidi controls, and characters that render as nothing or reorder text.
+// It matches the CLI's terminal escape set (apps/emend/src/cli/escape.ts), except U+2028 and U+2029,
+// which the whitespace step turns into spaces first.
+const discardedRanges: readonly (readonly [number, number])[] = [
+  [0, 0x1f],
+  [0x7f, 0x9f],
+  [0x34f, 0x34f],
+  [0x61c, 0x61c],
+  [0x115f, 0x1160],
+  [0x200b, 0x200f],
+  [0x202a, 0x202e],
+  [0x2060, 0x206f],
+  [0x3164, 0x3164],
+  [0xfe00, 0xfe0f],
+  [0xfeff, 0xfeff],
+  [0xffa0, 0xffa0],
+  [0xfff9, 0xfffb],
+  [0xe0000, 0xe007f],
+  [0xe0100, 0xe01ef],
+];
+
 export function cleanDocTitle(value: string): string {
   return Array.from(value.replace(/[\s\x85]/gu, " "))
-    .filter((char) => !isInvisibleChar(char.codePointAt(0) ?? 0))
+    .filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return !discardedRanges.some(([from, to]) => code >= from && code <= to);
+    })
     .join("")
     .replace(/ +/g, " ")
     .trim()

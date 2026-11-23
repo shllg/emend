@@ -2307,10 +2307,11 @@ after the parent's `emend:repo`; clicks follow the `emend:issue` flow in the HTM
 `issueRefs?: IssueRef[]` holds at most 64 entries `{ number, title, state: "open" | "closed" | "merged" }`,
 one for each issue or pull request number the writeup names as `#123`. `number` is an integer from 1
 through 9999999, and each number appears at most once. `title` is 1 through 256 characters of visible
-text, without control, format or other characters that render as nothing (such as U+3164, variation
-selectors and tag characters), and not blank. An invalid entry in a `PublishRequest`
+text, not blank and without control characters (`Cc`), format characters (`Cf`), default-ignorable
+code points (Unicode `Default_Ignorable_Code_Point`: fillers such as U+3164, variation selectors, tag
+characters) or U+2800. An invalid entry in a `PublishRequest`
 refuses it (`400 invalid_request`). A manifest cleans each title first: each run of whitespace and
-control characters becomes one space, format characters and characters that render as nothing go,
+control characters becomes one space, format characters, default-ignorable code points and U+2800 go,
 spaces collapse, and the result is trimmed and cut to at
 most 256 UTF-16 code units without splitting a surrogate pair. An entry still invalid after that (a
 blank title, a bad number or state, a repeated number) fails the manifest, like an invalid link.
