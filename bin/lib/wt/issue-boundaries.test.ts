@@ -27,6 +27,10 @@ function historyOverrideLookup({ command, args }: Call): boolean {
   );
 }
 
+function worktreeListLookup({ command, args }: Call): boolean {
+  return command === "git" && isDeepStrictEqual(args, [...GIT_BASE, "worktree", "list", "--porcelain"]);
+}
+
 /** Replace only the subprocess boundary; exercise the real commands, validators and snapshot files. */
 async function boundary(
   fn: (ctx: {
@@ -112,6 +116,8 @@ async function boundary(
       return { stdout: JSON.stringify({ items: [approvedReview(branch, sha)] }) };
     }
     if (command === "git") {
+      if (worktreeListLookup({ command, args }))
+        return { stdout: `worktree ${repo.mainRoot}\nbranch refs/heads/main\n\n` };
       if (historyOverrideLookup({ command, args })) return { stdout: args.includes("--git-path") ? ".git/info" : "" };
       if (args.includes("config") && args.includes("--show-scope")) return { stdout: "global\tSynthetic User" };
       if (args.includes("symbolic-ref")) return { stdout: repo.callerBranch ?? "" };
@@ -408,7 +414,11 @@ for (const [name, headRefName] of [
         );
         assert.ok(
           calls.every(
-            (c) => historyOverrideLookup(c) || exactPrLookup(c) || (c.command === "gh" && c.args[1] === "view"),
+            (c) =>
+              historyOverrideLookup(c) ||
+              worktreeListLookup(c) ||
+              exactPrLookup(c) ||
+              (c.command === "gh" && c.args[1] === "view"),
           ),
         );
       }
@@ -428,7 +438,11 @@ test("pr merge requires the caller's branch except with --pr from the main check
         assert.throws(merge.bind(null, pr), /head branch does not match the caller/);
         assert.ok(
           calls.every(
-            (c) => historyOverrideLookup(c) || exactPrLookup(c) || (c.command === "gh" && c.args[1] === "view"),
+            (c) =>
+              historyOverrideLookup(c) ||
+              worktreeListLookup(c) ||
+              exactPrLookup(c) ||
+              (c.command === "gh" && c.args[1] === "view"),
           ),
         );
       }
@@ -2162,6 +2176,7 @@ for (const command of ["create", "edit", "merge", "land"]) {
             calls.every(
               (c) =>
                 historyOverrideLookup(c) ||
+                worktreeListLookup(c) ||
                 (c.command === "git" && ["config", "symbolic-ref", "rev-parse"].some((a) => c.args.includes(a))),
             ),
           );
@@ -2185,7 +2200,7 @@ for (const command of ["edit", "merge"] as const) {
           { code: 1, message: `${field}:1:1: private term (file line 1)` },
         );
         for (const call of calls) {
-          if (historyOverrideLookup(call) || readOnlyPrOrIssue(call)) continue;
+          if (historyOverrideLookup(call) || worktreeListLookup(call) || readOnlyPrOrIssue(call)) continue;
           assert.equal(call.command, "git");
           assert.deepEqual(call.args.slice(0, GIT_BASE.length), GIT_BASE);
           assert.ok(
@@ -2268,7 +2283,7 @@ for (const attack of [
         };
         assert.throws(invoke, (error: unknown) => error instanceof WtError && error.code === 2);
         for (const call of calls) {
-          if (historyOverrideLookup(call) || readOnlyPrOrIssue(call)) continue;
+          if (historyOverrideLookup(call) || worktreeListLookup(call) || readOnlyPrOrIssue(call)) continue;
           assert.equal(call.command, "git");
           assert.deepEqual(call.args.slice(0, GIT_BASE.length), GIT_BASE);
           assert.ok(
@@ -2398,7 +2413,7 @@ for (const attack of [
         };
         assert.throws(invoke, (error: unknown) => error instanceof WtError && error.code === 2);
         for (const call of calls) {
-          if (historyOverrideLookup(call) || readOnlyPrOrIssue(call)) continue;
+          if (historyOverrideLookup(call) || worktreeListLookup(call) || readOnlyPrOrIssue(call)) continue;
           assert.equal(call.command, "git");
           assert.deepEqual(call.args.slice(0, GIT_BASE.length), GIT_BASE);
           assert.ok(

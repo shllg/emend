@@ -61,7 +61,7 @@ restate them here.
   publish the next revision with `head` at the new commit, run
   `<main>/bin/wt notify review-ready`, and wait again.
 - `approve`: run `<main>/bin/wt approval` in the worktree.
-  - Exit 0: HEAD is approved. Keep the head from the output and go on.
+  - Exit 0: keep the approved head and the review id from the output for step 4.
   - Exit 1: report the reason and republish the current head for a new approval.
   - Exit 2 or 69: run `<main>/bin/wt notify blocked`, report the message and stop.
 - `closed` or a non-zero exit: report as `emend-feedback` says and stop.
@@ -86,6 +86,16 @@ restate them here.
    characters. The body has `## Summary` with one to three bullets, then every distinct `Sync:`
    trailer from the branch's commits. No attribution.
 3. Write the subject to `<top>/.wt/land-subject.txt` with the Write tool.
+   emend keeps an approval while a later owner answer waits and sets it aside only when that answer is taken.
+   Before landing, check the folder and its entries as `emend-feedback` says under "Read the hand-off".
+   List saved results as it says and handle any unhandled `go` as in step 3 before landing.
+   Run `emend feedback <review-id> --save "<top>/.wt/review"` with the review id from step 3's `bin/wt approval` output.
+   If a check fails or the command exits non-zero, report the failure and stop.
+   Check the entries again and read the newly saved file as `emend-feedback` says.
+   On `pending`, delete that file and land.
+   On `go`, return to step 3 to handle it and wait again.
+   On `closed`, report and record it as `emend-feedback` says and stop.
+   On a new `approve`, record it as `emend-feedback` says and land.
    For the approved head, run
    `<main>/bin/wt land --match-head <approved head> --subject-file <top>/.wt/land-subject.txt --body-file <top>/.wt/land-body.md`.
    When step 4.1 carried approval over, run

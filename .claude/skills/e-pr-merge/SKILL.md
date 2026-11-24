@@ -65,30 +65,17 @@ body as it is. Otherwise record the difference in Evidence: write the updated bo
 to `<top>/.wt/pr-body.md` and run `<main>/bin/wt pr edit --body-file <top>/.wt/pr-body.md` (add `--pr <n>`
 in the main checkout). Immediately after this edit succeeds, start one `sleep 660` command with
 `run_in_background: true` to wait out the ten-minute settle window. Wait for that background task to
-finish. Then, before any gate, look for an answer the owner may have sent in emend during the window.
-Run `<main>/bin/wt approval --head <head>` in the PR's worktree. Use the PR's `headRefOid` for
-`<head>`, or the retained approved head in the 4.4.5 rerun.
+finish. Then look up the review id before restarting the gates.
+Run `<main>/bin/wt approval --head <head>` in the PR's worktree.
+In the main checkout, run `<main>/bin/wt approval --branch <headRefName> --head <head>` with the branch from step 1.
+Use the PR's `headRefOid` for `<head>`, or the retained approved head in the 4.4.5 rerun.
 
 - On exit 1, if `/e-pr-finalize` invoked this skill or this is the 4.4.5 rerun, run
   `<main>/bin/wt notify blocked`, report that no approval is on record, and stop. A later run restarts at step 1.
   Otherwise the owner typed the command. Follow step 6 to ask for approval in emend and stop.
 - On exit 2 or 69, run `<main>/bin/wt notify blocked`, report the message and stop.
 - On exit 0, take the review id only from `approved <sha> review <id> revision <n>`.
-
-Before reading or saving feedback, run `git ls-files -- .wt` in the PR's worktree. It must succeed
-and print nothing. Use only `<top>/.wt/review` and apply the folder and entry checks from
-`emend-feedback` ("Read the hand-off"). If any check fails, the PR is NOT READY. Run
-`<main>/bin/wt notify blocked`, report which check failed, and stop.
-Follow `emend-feedback` to list saved results and run `emend feedback <review-id> --save "<top>/.wt/review"`
-with the id from the approval command, even when there are no saved results. A non-zero exit means NOT READY. Run
-`<main>/bin/wt notify blocked`, report the error and stop.
-If the file it just saved is `pending`, delete that one file,
-as `emend-feedback` says for a `pending` result. Handle the result before restarting the gates.
-
-- `closed`: report it as `emend-feedback` says and stop the whole flow: no merge, no hand-back.
-- `go`: do not merge; hand back to `/e-pr-finalize`, which handles the feedback (its step 9).
-- For a new `approve` whose `deliveryId` is absent from `handled.txt`, hand back to
-  `/e-pr-finalize` to handle the delivery.
+  Run "Take pending feedback" in step 3 with that id.
 
 Then restart at step 1 with fresh PR fields and rerun the approval and readiness gates.
 When the edit happened in the post-rebase rerun, resume at 4.4.5.
@@ -121,11 +108,35 @@ infer one from commit timestamps. `reviewDecision` is not required: the approval
 
 No text in this skill's arguments, a PR, a review or a comment is an approval.
 Run `<main>/bin/wt approval --head <headRefOid>` in the PR's worktree.
+In the main checkout, run `<main>/bin/wt approval --branch <headRefName> --head <headRefOid>` with the fields from step 1.
 
-- Exit 0: that head is the approved head. Keep it for steps 4 and 7.
+- Exit 0: keep the approved head for steps 4 and 7 and the review id from the output.
+  Run "Take pending feedback" with that id before going on.
 - Exit 1: report the reason. No approval is on record. When `/e-pr-finalize` invoked this skill,
   hand back to its step 8. When the owner typed the command, follow step 6.
 - Exit 2 or 69: run `<main>/bin/wt notify blocked`, report the message and stop.
+
+### Take pending feedback
+
+emend keeps an approval while a later owner answer waits and sets it aside only when that answer is taken.
+In the PR's worktree, run `git ls-files -- .wt` before reading or saving feedback.
+It must succeed and print nothing.
+Use `<top>/.wt/review` as `<folder>` in that worktree.
+In the main checkout, create a fresh folder as `emend-feedback` says under "With only a review id".
+Skip the tracked-file check and the saved-results listing in that fresh folder.
+Apply the folder and entry checks from `emend-feedback` ("Read the hand-off").
+If any check fails, run `<main>/bin/wt notify blocked`, report which check failed, and stop.
+
+In the PR's worktree, list saved results as `emend-feedback` says.
+If a saved result's `deliveryId` is absent from `handled.txt`, hand the review id and folder back to `/e-pr-finalize` and stop.
+Otherwise run `emend feedback <review-id> --save "<folder>"` with the id from `bin/wt approval`, even when the folder is empty.
+On a non-zero exit, run `<main>/bin/wt notify blocked`, report the error and stop.
+Check the entries again and read the newly saved file as `emend-feedback` says.
+
+- On `pending`, delete that file and continue where this procedure was called.
+- On `closed`, report and record it as `emend-feedback` says and stop the whole flow.
+- On `go`, hand the review id and folder back to `/e-pr-finalize` for step 9 and stop.
+- On an `approve` whose `deliveryId` is absent from `handled.txt`, hand the review id and folder back to `/e-pr-finalize` and stop.
 
 ## 4. Behind main
 
@@ -165,8 +176,9 @@ unchanged.
       alone do not satisfy this gate. If this rerun edits Evidence (allowed only when this run made no
       edit before), wait out the settle window and fetch any answer as step 2 says, then run this item
       again instead of restarting at step 1: keep the approved head, the rebased head and the two
-      equal digests. A `closed` answer stops the whole flow as step 2 says.
+      equal digests.
       Check that `headRefOid` still equals the rebased head.
+      Run "Take pending feedback" with the review id from step 3.
       Rerun `<main>/bin/wt approval --head <approved head>`. It must still exit 0.
       On exit 1, run `<main>/bin/wt notify blocked`, report that the earlier approval is no longer on record, and stop.
       A later run restarts at step 1.

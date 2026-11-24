@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { delimiter, join, relative } from "node:path";
 import { test } from "node:test";
 import { assertEmendEnv, emendProgram, readApproval } from "./approval.ts";
@@ -26,15 +26,8 @@ const otherBranch = { ...approved, branch: "feat-b" };
 function scenario(fn: (env: TestEnv, repo: Repo) => void): void {
   const env = makeTestEnv({ ports: false });
   try {
-    const mainRoot = join(env.root, "repo");
-    mkdirSync(mainRoot);
-    fn(env, {
-      mainRoot,
-      commonDir: join(mainRoot, ".git"),
-      worktreesDir: join(mainRoot, ".claude/worktrees"),
-      callerTop: mainRoot,
-      callerBranch: branch,
-    });
+    gitIn(env.root, "init", "--quiet", "repo");
+    fn(env, resolveRepo(join(env.root, "repo")));
   } finally {
     env.cleanup();
   }
@@ -137,7 +130,7 @@ test("approval runs the selected shim by its invoked name from HOME and honors E
     symlinkSync(shim, selected);
     installFakeEmend(env, sha, [approved]);
     process.env.PATH = ["", relative(process.cwd(), env.fakeBin), env.home, env.fakeBin].join(delimiter);
-    assert.equal(emendProgram(repo), selected);
+    assert.equal(emendProgram([repo.mainRoot]), selected);
     assert.deepEqual(readApproval(repo, branch, sha), { ok: false, reason: "no review of this commit" });
     process.env.EMEND_BIN = selected;
     process.env.PATH = env.fakeBin;
@@ -184,7 +177,7 @@ test("approval rejects the effective folders in the repository or under a symlin
         assert.throws(() => readApproval(repo, branch, sha), folderRefusal(folder));
       }
       process.env[name] = `${repo.mainRoot}-other`;
-      assert.doesNotThrow(() => assertEmendEnv(repo));
+      assert.doesNotThrow(() => assertEmendEnv([repo.mainRoot]));
       delete process.env[name];
     }
     assert.deepEqual(fakeCalls(env, "emend"), []);
@@ -196,15 +189,16 @@ test("approval checks the emend child of each XDG folder and honors the state ov
     mkdirSync(xdg);
     symlinkSync(repo.mainRoot, join(xdg, "emend"));
     process.env.XDG_CONFIG_HOME = xdg;
-    assert.throws(() => assertEmendEnv(repo), folderRefusal("config"));
+    const check = () => assertEmendEnv([repo.mainRoot]);
+    assert.throws(check, folderRefusal("config"));
     delete process.env.XDG_CONFIG_HOME;
     process.env.XDG_DATA_HOME = xdg;
-    if (process.platform === "darwin") assert.doesNotThrow(() => assertEmendEnv(repo));
-    else assert.throws(() => assertEmendEnv(repo), folderRefusal("state"));
+    if (process.platform === "darwin") assert.doesNotThrow(check);
+    else assert.throws(check, folderRefusal("state"));
     process.env.EMEND_HOME = join(env.home, "state");
-    assert.doesNotThrow(() => assertEmendEnv(repo));
+    assert.doesNotThrow(check);
     process.env.EMEND_HOME = "relative";
-    assert.throws(() => assertEmendEnv(repo), { code: 69, message: "EMEND_HOME must be an absolute path." });
+    assert.throws(check, { code: 69, message: "EMEND_HOME must be an absolute path." });
   }));
 
 test("approval checks the home defaults when XDG settings are missing or relative", () =>
@@ -212,9 +206,10 @@ test("approval checks the home defaults when XDG settings are missing or relativ
     const config = join(env.home, ".config");
     mkdirSync(config);
     symlinkSync(repo.mainRoot, join(config, "emend"));
-    assert.throws(() => assertEmendEnv(repo), folderRefusal("config"));
+    const check = () => assertEmendEnv([repo.mainRoot]);
+    assert.throws(check, folderRefusal("config"));
     process.env.XDG_CONFIG_HOME = "relative";
-    assert.throws(() => assertEmendEnv(repo), folderRefusal("config"));
+    assert.throws(check, folderRefusal("config"));
     process.env.XDG_CONFIG_HOME = env.root;
     const data =
       process.platform === "darwin"
@@ -222,9 +217,9 @@ test("approval checks the home defaults when XDG settings are missing or relativ
         : join(env.home, ".local", "share");
     mkdirSync(data, { recursive: true });
     symlinkSync(repo.mainRoot, join(data, "emend"));
-    assert.throws(() => assertEmendEnv(repo), folderRefusal("state"));
+    assert.throws(check, folderRefusal("state"));
     process.env.XDG_DATA_HOME = "relative";
-    assert.throws(() => assertEmendEnv(repo), folderRefusal("state"));
+    assert.throws(check, folderRefusal("state"));
   }));
 
 test("approval command checks HEAD or an explicit head in a linked worktree", async () => {
@@ -248,13 +243,98 @@ test("approval command checks HEAD or an explicit head in a linked worktree", as
       stdout: "not approved: no review of this commit\n",
       stderr: "",
     });
-    assert.deepEqual(await runWt(launcher, ["approval"], { cwd: main }), {
+    assert.deepEqual(await runWt(launcher, ["approval", "--branch", branch, "--head", head], { cwd: wt }), {
       code: 2,
       stdout: "",
-      stderr: "Run this from inside a linked worktree.\n",
+      stderr: "--branch is only for the main checkout.\n",
     });
     assert.deepEqual(fakeCalls(env, "emend"), [["ls", "--json", "--head", sha]]);
   } finally {
     env.cleanup();
   }
 });
+
+test("approval in the main checkout requires and checks the given branch and head", async () => {
+  const env = makeTestEnv({ ports: false });
+  try {
+    const { main } = makeFixture(env, { withBin: true });
+    const query = (...args: string[]) => runWt(join(main, "bin/wt"), ["approval", ...args], { cwd: main });
+    for (const args of [[], ["--branch", branch], ["--head", sha]]) {
+      assert.deepEqual(await query(...args), {
+        code: 2,
+        stdout: "",
+        stderr: "In the main checkout, run bin/wt approval --branch <name> --head <sha>.\n",
+      });
+    }
+    assert.deepEqual(await query("--branch", "main", "--head", sha), {
+      code: 2,
+      stdout: "",
+      stderr: "Invalid branch name.\n",
+    });
+    assert.deepEqual(await query("--branch", branch, "--head", "short"), {
+      code: 2,
+      stdout: "",
+      stderr: "Invalid commit id.\n",
+    });
+    installFakeEmend(env, sha, [approved]);
+    assert.deepEqual(await query("--branch", branch, "--head", sha), {
+      code: 0,
+      stdout: `approved ${sha} review ${approved.id} revision 1\n`,
+      stderr: "",
+    });
+    assert.deepEqual(await query("--branch", "feat-b", "--head", sha), {
+      code: 1,
+      stdout: "not approved: the review of this commit names another branch\n",
+      stderr: "",
+    });
+  } finally {
+    env.cleanup();
+  }
+});
+
+test("approval refuses programs and state in a linked worktree outside the main checkout", () =>
+  scenario((env, repo) => {
+    const linked = join(env.root, "linked");
+    gitIn(repo.mainRoot, "commit", "--allow-empty", "-qm", "init");
+    gitIn(repo.mainRoot, "worktree", "add", "-q", "-b", branch, linked);
+    installFakeEmend(env, sha, [approved]);
+    const lookup = () => readApproval(repo, branch, sha);
+    const executable = join(linked, "emend");
+    process.env.EMEND_BIN = executable;
+    writeFileSync(executable, "#!/bin/sh\nexit 7\n", { mode: 0o755 });
+    const programRefusal = {
+      code: 69,
+      message: "The emend program lies inside this repository. bin/wt reads approvals only through an installed emend.",
+    };
+    assert.throws(lookup, programRefusal);
+    rmSync(executable);
+    symlinkSync(join(env.fakeBin, "emend"), executable);
+    assert.throws(lookup, programRefusal);
+    delete process.env.EMEND_BIN;
+
+    const alias = join(env.root, "alias");
+    symlinkSync(linked, alias);
+    for (const path of [linked, alias]) {
+      process.env.EMEND_HOME = join(path, "new", "state");
+      assert.throws(lookup, folderRefusal("state"));
+    }
+    rmSync(linked, { recursive: true });
+    process.env.EMEND_HOME = join(linked, "state");
+    assert.throws(lookup, folderRefusal("state"));
+    const parentAlias = join(env.root, "parent-alias");
+    symlinkSync(env.root, parentAlias);
+    process.env.EMEND_HOME = join(parentAlias, "linked", "state");
+    assert.throws(lookup, folderRefusal("state"));
+    assert.deepEqual(fakeCalls(env, "emend"), []);
+  }));
+
+test("approval stops before calling emend if it cannot list the worktrees", () =>
+  scenario((env, repo) => {
+    installFakeEmend(env, sha, [approved]);
+    rmSync(join(env.fakeBin, "git"));
+    assert.throws(() => readApproval(repo, branch, sha), {
+      code: 69,
+      message: "Could not determine this repository's worktree paths. bin/wt cannot check the approval.",
+    });
+    assert.deepEqual(fakeCalls(env, "emend"), []);
+  }));

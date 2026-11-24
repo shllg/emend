@@ -107,10 +107,11 @@ test("the merge skill checks the approved review for late feedback before restar
   const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
   const readiness = skill.slice(skill.indexOf("## 2. Readiness"), skill.indexOf("## 3. The approval"));
   const approval = readiness.indexOf("<main>/bin/wt approval --head <head>");
-  const tracked = readiness.indexOf("git ls-files -- .wt");
-  const fetch = readiness.indexOf('emend feedback <review-id> --save "<top>/.wt/review"');
-  assert.ok(approval >= 0 && approval < tracked && tracked < fetch);
-  const lookup = readiness.slice(approval, tracked);
+  const take = readiness.indexOf('Run "Take pending feedback"');
+  const restart = readiness.indexOf("Then restart at step 1");
+  assert.ok(approval >= 0 && approval < take && take < restart);
+  const lookup = readiness.slice(approval, take);
+  assert.match(lookup, /In the main checkout, run `<main>\/bin\/wt approval --branch <headRefName> --head <head>`/);
   assert.match(lookup, /retained approved head/);
   const exitOne = lookup
     .slice(lookup.indexOf("- On exit 1,"), lookup.indexOf("- On exit 2 or 69,"))
@@ -127,13 +128,54 @@ test("the merge skill checks the approved review for late feedback before restar
   assert.doesNotMatch(exitOne, /before the settle window/);
   assert.match(lookup, /exit 2 or 69[^\n]*notify blocked[^\n]*stop/i);
   assert.match(lookup, /approved <sha> review <id> revision <n>/);
-  assert.match(readiness.slice(tracked, fetch), /Read the hand-off[\s\S]*notify blocked[^\n]*stop/);
-  assert.match(readiness.slice(fetch), /non-zero exit[\s\S]*notify blocked[^\n]*stop/);
-  const rerun = skill.slice(
-    skill.indexOf("Rerun `<main>/bin/wt approval --head <approved head>`"),
-    skill.indexOf("## 5."),
+});
+
+test("the merge skill takes pending feedback at the approval gate and before the post-rebase approval rerun", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
+  const gate = skill.slice(skill.indexOf("## 3. The approval"), skill.indexOf("### Take pending feedback"));
+  assert.match(gate, /In the main checkout, run `<main>\/bin\/wt approval --branch <headRefName> --head <headRefOid>`/);
+  assert.match(
+    gate,
+    /- Exit 0:[^\n]*approved head[^\n]*review id[^\n]*\n\s*Run "Take pending feedback"[^\n]*before going on/,
   );
+
+  const procedure = skill.slice(skill.indexOf("### Take pending feedback"), skill.indexOf("## 4. Behind main"));
+  const tracked = procedure.indexOf("git ls-files -- .wt");
+  const saved = procedure.indexOf("list saved results");
+  const fetch = procedure.indexOf('emend feedback <review-id> --save "<folder>"');
+  assert.ok(tracked >= 0 && tracked < saved && saved < fetch);
+  assert.match(procedure.slice(tracked, saved), /Read the hand-off[\s\S]*notify blocked[^\n]*stop/);
+  assert.match(procedure, /In the main checkout,[^\n]*fresh folder[^\n]*With only a review id/);
+  assert.match(
+    procedure.slice(saved, fetch),
+    /saved result's `deliveryId` is absent from `handled.txt`[^\n]*\/e-pr-finalize/,
+  );
+  const result = procedure.slice(fetch);
+  assert.match(result, /non-zero exit[\s\S]*notify blocked[^\n]*stop/);
+  assert.match(result, /On `pending`, delete that file and continue/);
+  assert.match(result, /On `closed`, [^\n]*stop the whole flow/);
+  assert.match(result, /On `go`, [^\n]*\/e-pr-finalize[^\n]*stop/);
+  assert.match(result, /On an `approve`[^\n]*handled.txt[^\n]*\/e-pr-finalize[^\n]*stop/);
+  const rerun = skill.slice(skill.indexOf("5. After the rebase, push and green CI"), skill.indexOf("## 5."));
+  assert.match(rerun, /Run "Take pending feedback"[^\n]*\n\s*Rerun `<main>\/bin\/wt approval --head <approved head>`/);
   assert.match(rerun, /On exit 1, run `<main>\/bin\/wt notify blocked`, report [^\n]*approval[^\n]* and stop\./);
   assert.match(rerun, /A later run restarts at step 1/);
   assert.match(skill, /Any other change from READY[^\n]*stops the merge[^\n]*e-pr-finalize/);
+});
+
+test("local landing takes feedback for the approved review after verification and before land", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-merge-local/SKILL.md"), "utf8");
+  const land = skill.slice(skill.indexOf("## 4. Land"), skill.indexOf("## 5."));
+  const verify = land.lastIndexOf("pnpm verify");
+  const check = land.indexOf("check the folder and its entries");
+  const fetch = land.indexOf('emend feedback <review-id> --save "<top>/.wt/review"');
+  const command = land.indexOf("<main>/bin/wt land");
+  assert.ok(verify >= 0 && verify < check && check < fetch && fetch < command);
+  assert.match(land.slice(check, fetch), /unhandled `go` as in step 3/);
+  const feedback = land.slice(fetch, command);
+  assert.match(feedback, /review id from step 3's `bin\/wt approval` output/);
+  assert.match(feedback, /On `pending`, delete that file and land/);
+  assert.match(feedback, /On `go`, return to step 3/);
+  assert.match(feedback, /On `closed`, [^\n]*stop/);
+  assert.match(feedback, /On a new `approve`, record it [^\n]* and land/);
 });

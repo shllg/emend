@@ -43,7 +43,8 @@ Local:
   setup [<branch>] [--from <ref>] [--issue <n>]
                                                create a worktree with a port and an EMEND_HOME;
                                                    copies the gitignored files .worktreeinclude lists
-  approval [--head <sha>]                          emend's approval of a head on this branch
+  approval [--head <sha>]                          emend's approval on this worktree's branch
+  approval --branch <name> --head <sha>            check a branch and head from the main checkout
   list [--json]  (alias: status)                   one row per worktree
                                                    JSON pr: {number,state}, "?" (lookup skipped), or null (no PR)
   cleanup [--discard] [--close-workspace] [<branch|path>]

@@ -4,12 +4,32 @@ import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "no
 import type { CommandTable } from "./command.ts";
 import { repoDiagnostic } from "./diagnostics.ts";
 import { run } from "./proc.ts";
-import { git, linkedTop, type Repo } from "./repo.ts";
-import { commitSha, parseFlags, WtError } from "./validate.ts";
+import { git, linkedTop, listGitWorktrees, type Repo } from "./repo.ts";
+import { branchName, commitSha, parseFlags, WtError } from "./validate.ts";
 
-function inside(root: string, path: string): boolean {
-  const rel = relative(root, path);
-  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+function worktreeRoots(repo: Repo): string[] {
+  try {
+    const roots = new Set([repo.mainRoot, ...listGitWorktrees(repo).map((worktree) => worktree.path)]);
+    for (const path of [...roots]) {
+      try {
+        roots.add(realpathSync.native(path));
+      } catch (error) {
+        // A missing worktree still owns its listed path until Git prunes it.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+      }
+    }
+    return [...roots];
+  } catch {
+    throw new WtError(69, "Could not determine this repository's worktree paths. bin/wt cannot check the approval.");
+  }
+}
+
+function inside(roots: string[], path: string): boolean {
+  return roots.some((root) => {
+    const rel = relative(root, path);
+    return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  });
 }
 
 function unavailable(): WtError {
@@ -21,7 +41,7 @@ function unavailable(): WtError {
   );
 }
 
-export function emendProgram(repo: Repo): string {
+export function emendProgram(roots: string[]): string {
   const override = process.env.EMEND_BIN;
   if (override && !isAbsolute(override)) throw new WtError(2, "EMEND_BIN must be an absolute path.");
   const candidates = override
@@ -30,7 +50,6 @@ export function emendProgram(repo: Repo): string {
         .split(delimiter)
         .filter(isAbsolute)
         .map((dir) => `${dir}${sep}emend`);
-  const root = realpathSync.native(repo.mainRoot);
   for (const program of candidates) {
     let real: string;
     try {
@@ -41,7 +60,7 @@ export function emendProgram(repo: Repo): string {
       continue;
     }
     // This catches an emend copy in the repository. A wrapper can still dispatch elsewhere.
-    if (inside(root, real)) {
+    if (inside(roots, program) || inside(roots, real)) {
       throw new WtError(
         69,
         "The emend program lies inside this repository. bin/wt reads approvals only through an installed emend.",
@@ -54,11 +73,13 @@ export function emendProgram(repo: Repo): string {
 }
 
 /** Check the nearest existing directory too, since emend can create its state on first use. */
-function realpathInside(root: string, path: string): boolean {
+function realpathInside(roots: string[], path: string): boolean {
   let dir = path;
   for (;;) {
     try {
-      return inside(root, realpathSync.native(dir));
+      const real = realpathSync.native(dir);
+      // A still-listed worktree may be among the missing directories below this ancestor.
+      return inside(roots, real) || (dir !== path && inside(roots, resolve(real, relative(dir, path))));
     } catch (error) {
       const parent = dirname(dir);
       if (parent === dir || (error as NodeJS.ErrnoException).code !== "ENOENT") return false;
@@ -67,7 +88,7 @@ function realpathInside(root: string, path: string): boolean {
   }
 }
 
-export function assertEmendEnv(repo: Repo): void {
+export function assertEmendEnv(roots: string[]): void {
   // Mirror stateDir and configDir in apps/emend/src/state/paths.ts.
   const home = homedir();
   const { EMEND_HOME, XDG_DATA_HOME, XDG_CONFIG_HOME } = process.env;
@@ -77,7 +98,6 @@ export function assertEmendEnv(repo: Repo): void {
   const state =
     EMEND_HOME ||
     (process.platform === "darwin" ? join(home, "Library", "Application Support", "emend") : join(dataHome, "emend"));
-  const root = realpathSync.native(repo.mainRoot);
   for (const [name, path] of [
     ["home", home],
     ["state", state],
@@ -85,9 +105,9 @@ export function assertEmendEnv(repo: Repo): void {
   ] as const) {
     const resolved = resolve(path);
     if (
-      inside(repo.mainRoot, resolved) ||
-      realpathInside(root, resolved) ||
-      (path !== resolved && realpathInside(root, path))
+      inside(roots, resolved) ||
+      realpathInside(roots, resolved) ||
+      (path !== resolved && realpathInside(roots, path))
     ) {
       throw new WtError(
         69,
@@ -158,8 +178,9 @@ type Approval = { ok: true; reviewId: string; revision: number } | { ok: false; 
 
 export function readApproval(repo: Repo, branch: string, sha: string): Approval {
   commitSha(sha);
-  const program = emendProgram(repo);
-  assertEmendEnv(repo);
+  const roots = worktreeRoots(repo);
+  const program = emendProgram(roots);
+  assertEmendEnv(roots);
   const { code, stdout, stderr } = run(program, ["ls", "--json", "--head", sha], { cwd: homedir(), timeoutMs: 30_000 });
   if (code === 127) throw unavailable();
   if (code === 124) throw new WtError(69, "emend did not answer within 30 seconds.");
@@ -196,11 +217,23 @@ export function readApproval(repo: Repo, branch: string, sha: string): Approval 
 
 export const commands: CommandTable = {
   approval: ({ repo, args }) => {
-    const { flags } = parseFlags(args, { head: "string" });
-    const top = linkedTop(repo);
-    if (!repo.callerBranch) throw new WtError(2, "HEAD is detached. Check out a branch first.");
-    const sha = typeof flags.head === "string" ? flags.head : git(repo, ["rev-parse", "HEAD"], { cwd: top });
-    const result = readApproval(repo, repo.callerBranch, sha);
+    const { flags } = parseFlags(args, { branch: "string", head: "string" });
+    let branch: string;
+    let sha: string;
+    if (repo.callerTop === repo.mainRoot) {
+      if (typeof flags.branch !== "string" || typeof flags.head !== "string") {
+        throw new WtError(2, "In the main checkout, run bin/wt approval --branch <name> --head <sha>.");
+      }
+      branch = branchName(flags.branch);
+      sha = flags.head;
+    } else {
+      const top = linkedTop(repo);
+      if (flags.branch !== undefined) throw new WtError(2, "--branch is only for the main checkout.");
+      if (!repo.callerBranch) throw new WtError(2, "HEAD is detached. Check out a branch first.");
+      branch = repo.callerBranch;
+      sha = typeof flags.head === "string" ? flags.head : git(repo, ["rev-parse", "HEAD"], { cwd: top });
+    }
+    const result = readApproval(repo, branch, sha);
     if (!result.ok) {
       process.stdout.write(`not approved: ${result.reason}\n`);
       return 1;
