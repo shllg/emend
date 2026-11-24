@@ -10,7 +10,7 @@ What was taken:
 - From `composition-patterns/rules/`, all 10 files.
 
 Nothing else was taken. Never edit these rule files. To update, copy the files from a newer
-commit and change the commit here. [docs/react.md](../../react.md) is emend's summary; the full
+commit and change the commit here. [docs/react.md](../../react.md) is recense's summary; the full
 rule texts are here.
 
 ## License

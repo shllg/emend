@@ -5,7 +5,7 @@ import {
   type RenderedBlock,
   type RevisionView,
   type ThreadView,
-} from "@emend/contract";
+} from "@recense/contract";
 import { expect, test } from "vitest";
 import { threadPlaces } from "./thread-places.ts";
 

@@ -313,17 +313,17 @@ test.each(["{", "null", "[]", '"text"'])("bad root %s uses defaults", (raw) => {
   expect(createLayoutStore().getSnapshot()).toEqual(defaultLayout);
 });
 test("migration reads all three old keys only when v1 is missing and leaves them intact", () => {
-  localStorage.setItem("emend.diff.layout", "unified");
-  localStorage.setItem("emend.diff.wrap", "true");
-  localStorage.setItem("emend.inbox.collapsed", "true");
+  localStorage.setItem("recense.diff.layout", "unified");
+  localStorage.setItem("recense.diff.wrap", "true");
+  localStorage.setItem("recense.inbox.collapsed", "true");
   const store = createLayoutStore();
   expect(store.getSnapshot()).toMatchObject({ diffStyle: "unified", wrap: true, inboxCollapsed: true });
   expect(JSON.parse(localStorage.getItem(layoutKey) ?? "{}")).toEqual({ ...store.getSnapshot(), codeSize: 12 });
   store.update({ diffStyle: "split", wrap: false, inboxCollapsed: false });
   expect(createLayoutStore().getSnapshot()).toMatchObject({ diffStyle: "split", wrap: false, inboxCollapsed: false });
-  expect(localStorage.getItem("emend.diff.layout")).toBe("unified");
-  expect(localStorage.getItem("emend.diff.wrap")).toBe("true");
-  expect(localStorage.getItem("emend.inbox.collapsed")).toBe("true");
+  expect(localStorage.getItem("recense.diff.layout")).toBe("unified");
+  expect(localStorage.getItem("recense.diff.wrap")).toBe("true");
+  expect(localStorage.getItem("recense.inbox.collapsed")).toBe("true");
 });
 test.each(["read", "write", "both"])("denied %s keeps preferences in memory", (denied) => {
   const storage = localStorage;
@@ -371,7 +371,7 @@ test("React subscribers receive other tabs' updates and storage clears", () => {
 });
 
 test("migration writes during store creation, never during snapshot reads", () => {
-  localStorage.setItem("emend.diff.wrap", "true");
+  localStorage.setItem("recense.diff.wrap", "true");
   const write = vi.spyOn(localStorage, "setItem");
   const store = createLayoutStore();
   expect(write).toHaveBeenCalledTimes(2);

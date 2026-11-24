@@ -1,5 +1,5 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import type { FileView, InboxItem, RenderedBlock, RevisionView, Target, ThreadView } from "@emend/contract";
+import type { FileView, InboxItem, RenderedBlock, RevisionView, Target, ThreadView } from "@recense/contract";
 import { focusManager, QueryClient, QueryObserver } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -91,7 +91,7 @@ function resize(widthPx: number) {
 let newest = 1;
 const initialUrl = window.location.href;
 const signInInstructions =
-  "Run emend in a terminal on the machine that runs emend. It opens this page signed in, or prints a one-time link you can open here.";
+  "Run recense in a terminal on the machine that runs recense. It opens this page signed in, or prints a one-time link you can open here.";
 let fetchMock: ReturnType<typeof vi.fn<(path: string, init?: RequestInit) => Promise<Response>>>;
 let client: QueryClient;
 function mount(path = "/") {
@@ -342,7 +342,7 @@ test("revision picker keeps the visible opening tab even when no tab was in the 
 afterEach(async () => {
   cleanup();
   try {
-    localStorage.removeItem("emend:inbox-kind");
+    localStorage.removeItem("recense:inbox-kind");
   } catch {
     // A test that stubs storage as unavailable has nothing to clear.
   }
@@ -364,8 +364,8 @@ test.each(["127.0.0.1", "localhost", "[::1]", "::1"])(
     const instructions = screen.getByText(
       (_, element) => element?.tagName === "P" && element.textContent === signInInstructions,
     );
-    expect(instructions.querySelector("code")?.textContent).toBe("emend");
-    expect(screen.getByText("emend", { selector: "p" })).toBeTruthy();
+    expect(instructions.querySelector("code")?.textContent).toBe("recense");
+    expect(screen.getByText("recense", { selector: "p" })).toBeTruthy();
     expect(screen.queryByLabelText("Pairing code")).toBeNull();
     expect(screen.queryByRole("button", { name: "Pair" })).toBeNull();
     expect(screen.queryByText(/The app on your home screen/)).toBeNull();
@@ -528,7 +528,7 @@ test("inbox collapse survives reload and unavailable localStorage", async () => 
   const first = mount(`/r/${id}`);
   await screen.findByText("Overview");
   fireEvent.click(screen.getByRole("button", { name: "Collapse inbox" }));
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").inboxCollapsed).toBe(true);
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").inboxCollapsed).toBe(true);
   expect(screen.queryByTestId("inbox-pane")).toBeNull();
   first.unmount();
   const second = mount(`/r/${id}`);
@@ -1134,7 +1134,7 @@ test("reload discovers drafts without a supplied target; Resume restores text an
   expect(screen.queryByRole("region", { name: "Unsaved comments" })).toBeNull();
 });
 test("unreadable draft targets offer only Discard and other reviews' drafts stay hidden", async () => {
-  const key = `emend.draft.${id}.not-json`;
+  const key = `recense.draft.${id}.not-json`;
   localStorage.setItem(key, "Unreadable draft");
   localStorage.setItem(draftKey("22222222-2222-4222-8222-222222222222", draftTarget), "Other review");
   mount(`/r/${id}?tab=comments`);
@@ -1634,9 +1634,9 @@ test.each(
     Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
     expect(post).not.toHaveBeenCalled();
     await act(async () => {
-      fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+      fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "recense:ready" } }));
     });
-    if (kind !== "draft") expect(post).toHaveBeenCalledWith({ type: "emend:scroll", threadId: id }, "*");
+    if (kind !== "draft") expect(post).toHaveBeenCalledWith({ type: "recense:scroll", threadId: id }, "*");
     if (kind === "draft" || kind === "reply")
       expect(
         ((await screen.findByRole("textbox", { name: kind === "reply" ? "Reply" : "Comment" })) as HTMLTextAreaElement)
@@ -2411,14 +2411,14 @@ test("the chosen kind survives an unmount and remount, and Clear filter forgets 
   withInbox([item, published]);
   const first = mount();
   fireEvent.click(await screen.findByRole("radio", { name: "Pubs" }));
-  expect(localStorage.getItem("emend:inbox-kind")).toBe("publish");
+  expect(localStorage.getItem("recense:inbox-kind")).toBe("publish");
   first.unmount();
   mount();
   expect(await screen.findByRole("radio", { name: "Pubs", checked: true })).toBeTruthy();
   expect(screen.queryByRole("link", { name: /Synthetic review/ })).toBeNull();
   fireEvent.change(screen.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "zzz" } });
   fireEvent.click(screen.getByRole("button", { name: "Clear filter" }));
-  expect(localStorage.getItem("emend:inbox-kind")).toBeNull();
+  expect(localStorage.getItem("recense:inbox-kind")).toBeNull();
 });
 
 test("a published item with a waiting agent still shows under Reviews", async () => {
@@ -2441,7 +2441,7 @@ test("a published item with a waiting agent still shows under Reviews", async ()
 });
 
 test("a stored garbage kind shows All", async () => {
-  localStorage.setItem("emend:inbox-kind", "nonsense");
+  localStorage.setItem("recense:inbox-kind", "nonsense");
   withInbox([item, secondItem]);
   mount();
   expect(await screen.findByRole("radio", { name: "All", checked: true })).toBeTruthy();
@@ -2879,14 +2879,14 @@ test.each([1280, 900])("kind choice is shared across sidebar and page remounts a
   const first = mount(`/r/${id}`);
   const sidebar = await openReviewInbox();
   fireEvent.click(await sidebar.findByRole("radio", { name: "Pubs" }));
-  expect(localStorage.getItem("emend:inbox-kind")).toBe("publish");
+  expect(localStorage.getItem("recense:inbox-kind")).toBe("publish");
   first.unmount();
   const page = mount();
   expect(await screen.findByRole("radio", { name: "Pubs", checked: true })).toBeTruthy();
   expect(screen.getByRole("link", { name: /Published notes/ })).toBeTruthy();
   expect(screen.queryByRole("link", { name: /Synthetic review/ })).toBeNull();
   fireEvent.click(screen.getByRole("radio", { name: "Reviews" }));
-  expect(localStorage.getItem("emend:inbox-kind")).toBe("review");
+  expect(localStorage.getItem("recense:inbox-kind")).toBe("review");
   page.unmount();
   mount(`/r/${id}`);
   const remounted = await openReviewInbox();
@@ -2895,13 +2895,13 @@ test.each([1280, 900])("kind choice is shared across sidebar and page remounts a
   fireEvent.change(remounted.getByRole("textbox", { name: "Filter reviews" }), { target: { value: "zzz" } });
   fireEvent.click(remounted.getByRole("button", { name: "Clear filter" }));
   expect(remounted.getByRole("radio", { name: "All", checked: true })).toBeTruthy();
-  expect(localStorage.getItem("emend:inbox-kind")).toBeNull();
+  expect(localStorage.getItem("recense:inbox-kind")).toBeNull();
   expect(remounted.getByRole("link", { name: /Published notes/ })).toBeTruthy();
 });
 
 test.each([1280, 900])("sidebar Reviews keeps waiting publishes and hides the open publish at %s px", async (size) => {
   width = size;
-  localStorage.setItem("emend:inbox-kind", "review");
+  localStorage.setItem("recense:inbox-kind", "review");
   const waiting = { ...secondItem, kind: "publish" as const, title: "Waiting notes" };
   const quiet = {
     ...waiting,
@@ -2952,13 +2952,13 @@ test.each([
   mount(path);
   if (path !== "/") await openReviewInbox();
   expect(await screen.findByRole("radio", { name: "All", checked: true })).toBeTruthy();
-  expect(denied).toHaveBeenCalledWith("emend:inbox-kind");
-  expect(denied).toHaveBeenCalledWith("emend:inbox-kind", "review");
+  expect(denied).toHaveBeenCalledWith("recense:inbox-kind");
+  expect(denied).toHaveBeenCalledWith("recense:inbox-kind", "review");
 });
 
 test.each([1280, 900])("collapsed rail ignores the saved kind at %s px", async (size) => {
   width = size;
-  localStorage.setItem("emend:inbox-kind", "publish");
+  localStorage.setItem("recense:inbox-kind", "publish");
   withInbox([item, { ...secondItem, agentWaiting: false }]);
   mount(`/r/${id}`);
   await screen.findByRole("heading", { name: item.title, level: 1 });
@@ -3020,7 +3020,7 @@ test("desktop frame has wordmark and Devices links, expands its rail and persist
   withInbox([item, { ...secondItem, movedTo: "https://hub.example/r/new" }]);
   const first = mount(`/r/${id}?tab=docs`);
   await screen.findByRole("heading", { name: "plan.md" });
-  expect(screen.getByRole("link", { name: "emend" }).getAttribute("href")).toBe("/");
+  expect(screen.getByRole("link", { name: "recense" }).getAttribute("href")).toBe("/");
   expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe("/devices");
   fireEvent.click(screen.getByRole("button", { name: "Collapse inbox" }));
   const rail = within(screen.getByRole("complementary", { name: "Inbox" }));
@@ -3028,10 +3028,10 @@ test("desktop frame has wordmark and Devices links, expands its rail and persist
   expect(link.getAttribute("aria-current")).toBe("page");
   expect(within(link).getByRole("img", { name: "From Workshop" })).toBeTruthy();
   expect(rail.queryByRole("link", { name: /Another proposal/ })).toBeNull();
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").inboxCollapsed).toBe(true);
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").inboxCollapsed).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Show inbox" }));
   expect(screen.getByTestId("inbox-pane")).toBeTruthy();
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").inboxCollapsed).toBe(false);
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").inboxCollapsed).toBe(false);
   first.unmount();
   mount(`/r/${id}`);
   expect(await screen.findByTestId("inbox-pane")).toBeTruthy();
@@ -3794,7 +3794,7 @@ test("phone menu offers Long lines, scroll by default, and saves Wrap", async ()
   const group = within(menu.getByRole("group", { name: "Long lines" }));
   expect(group.getByRole("menuitemradio", { name: "Scroll" }).getAttribute("aria-checked")).toBe("true");
   fireEvent.click(group.getByRole("menuitemradio", { name: "Wrap" }));
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").wrap).toBe(true);
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").wrap).toBe(true);
   expect(group.getByRole("menuitemradio", { name: "Wrap" }).getAttribute("aria-checked")).toBe("true");
 });
 
@@ -3810,7 +3810,7 @@ test("phone menu on the Diff tab still offers Long lines", async () => {
 
 test.each([1280, 900, 390])("text menu changes validated app variables at %s px", async (size) => {
   width = size;
-  localStorage.setItem("emend.layout.v1", JSON.stringify({ proseSize: "18px; color: red", codePx: 100 }));
+  localStorage.setItem("recense.layout.v1", JSON.stringify({ proseSize: "18px; color: red", codePx: 100 }));
   const { container } = mount(`/r/${id}`);
   await screen.findByText("Overview");
   const root = container.querySelector<HTMLElement>(".em-app");

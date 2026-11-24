@@ -1,0 +1,1 @@
+UPDATE `files` SET `look` = 'recense' WHERE `look` = 'emend';

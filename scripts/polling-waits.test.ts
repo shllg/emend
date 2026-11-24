@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const helper = "apps/emend/src/test/poll-until.ts";
+const helper = "apps/recense/src/test/poll-until.ts";
 const webSetup = "apps/web/src/test/setup.ts";
 const rawWaitAllowed = new Set([helper]);
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
@@ -174,8 +174,8 @@ test("the guard accepts inherited deadlines and only the named exceptions", () =
     "await vi.waitUntil(() => ready());",
   ]) {
     check(helper, source);
-    assert.throws(() => check("apps/emend/src/cli/tailscale-process.test.ts", source));
-    assert.throws(() => check("apps/emend/src/cli/commands/serve-signals.test.ts", source));
+    assert.throws(() => check("apps/recense/src/cli/tailscale-process.test.ts", source));
+    assert.throws(() => check("apps/recense/src/cli/commands/serve-signals.test.ts", source));
   }
   check(webSetup, "beforeEach(({ task }) => configure({ asyncUtilTimeout: task.timeout }));");
   for (const source of ["vi.waitFor(() => ready());", "expect.poll(() => value);", "vi.waitUntil(() => ready());"])

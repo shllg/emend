@@ -216,21 +216,21 @@ test("publish HTML looks are optional, bounded and never defaulted", () => {
   expect(PublishResponse.parse(response)).not.toHaveProperty("htmlLooks");
   expect(PublishResponse.parse({ ...response, htmlLooks: [] }).htmlLooks).toEqual([]);
   const htmlLooks = [
-    { path: "structure.html", look: "emend" },
+    { path: "structure.html", look: "recense" },
     { path: "styled.html", look: "custom" },
-    { path: "light.html", look: "emend", colorScheme: "light" },
+    { path: "light.html", look: "recense", colorScheme: "light" },
   ];
   expect(PublishResponse.parse({ ...response, htmlLooks }).htmlLooks).toEqual(htmlLooks);
-  const maximum = Array.from({ length: LIMITS.filesPerRevision }, (_, i) => ({ path: `${i}.html`, look: "emend" }));
+  const maximum = Array.from({ length: LIMITS.filesPerRevision }, (_, i) => ({ path: `${i}.html`, look: "recense" }));
   expect(PublishResponse.safeParse({ ...response, htmlLooks: maximum }).success).toBe(true);
   for (const invalid of [
     null,
     {},
     [{ path: "page.html", look: "other" }],
-    ...["auto", "dark", "", null, false].map((colorScheme) => [{ path: "page.html", look: "emend", colorScheme }]),
+    ...["auto", "dark", "", null, false].map((colorScheme) => [{ path: "page.html", look: "recense", colorScheme }]),
     [{ path: "page.html" }],
     [{ path: "../page.html", look: "custom" }],
-    [...maximum, { path: "extra.html", look: "emend" }],
+    [...maximum, { path: "extra.html", look: "recense" }],
   ])
     expect(PublishResponse.safeParse({ ...response, htmlLooks: invalid }).success).toBe(false);
 });
@@ -299,4 +299,18 @@ test("download ids are distinct UUIDs with at most 50 entries", () => {
   for (const value of [ids, [ids[0], ids[0]], ["invalid"], "", [null]]) {
     expect(DownloadDocIds.safeParse(value).success).toBe(false);
   }
+});
+
+test("a publish response from a server before the rename names the look `recense`", () => {
+  const response = {
+    reviewId: "11111111-1111-4111-8111-111111111111",
+    revision: 1,
+    url: "http://127.0.0.1:3636/r/11111111-1111-4111-8111-111111111111",
+    placed: 0,
+    unplaced: 0,
+    htmlLooks: [{ path: "old.html", look: "emend", colorScheme: "light" }],
+  };
+  expect(PublishResponse.parse(response).htmlLooks).toEqual([
+    { path: "old.html", look: "recense", colorScheme: "light" },
+  ]);
 });

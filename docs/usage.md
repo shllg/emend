@@ -1,25 +1,25 @@
-# Using emend
+# Using recense
 
-Day-to-day use of the `emend` command: its settings, and how to publish a doc for review. To
-install and set up emend first, start with [setup.md](setup.md).
+Day-to-day use of the `recense` command: its settings, and how to publish a doc for review. To
+install and set up recense first, start with [setup.md](setup.md).
 
 ## Configure
 
-`emend config` lists the global configuration. `emend config add docRoots <folder>` lets agents publish docs
-from a folder outside their repository. `emend config set openBrowser true` makes `emend` open your
+`recense config` lists the global configuration. `recense config add docRoots <folder>` lets agents publish docs
+from a folder outside their repository. `recense config set openBrowser true` makes `recense` open your
 browser instead of printing a one-time sign-in link. Run these yourself, never through an agent:
 they change what your agents may publish.
 
 The old state-folder config is copied once, only if the global config is missing, then renamed
 `config.json.migrated`. An existing global config wins without merging the old file.
-`EMEND_HOME` moves only state; set `XDG_CONFIG_HOME` too for a separate config.
-For `docRoots` and `openBrowser`, publish and bare `emend` ignore a global config whose path or
-links lie inside a repository holding the working directory, and warn. `emend config` refuses
+`RECENSE_HOME` moves only state; set `XDG_CONFIG_HOME` too for a separate config.
+For `docRoots` and `openBrowser`, publish and bare `recense` ignore a global config whose path or
+links lie inside a repository holding the working directory, and warn. `recense config` refuses
 there. An old state config inside such a repository is never read, copied or renamed.
 A home-rooted dotfiles repository does not count. The server reads only `approvedActiveHours`, `approvedActiveLimit` and `keys`
 from the file and does not apply this check. A config path set by a repository's environment
-is not detected when emend runs from a folder outside every repository.
-If `XDG_CONFIG_HOME` is absolute, `emend service install` records it at install time.
+is not detected when recense runs from a folder outside every repository.
+If `XDG_CONFIG_HOME` is absolute, `recense service install` records it at install time.
 Reinstall the service after changing it.
 
 Approved reviews stay in Active for 12 hours by default. Set `approvedActiveHours` in the global
@@ -40,7 +40,7 @@ Snoozed, the groups and Done. A folded section's rows get no number, and the cou
 next open section. An item pinned and shown in its own section too gets its number in Pinned.
 With a filter set, only the rows shown count. The collapsed rail numbers its own list, pinned
 items first, ignores folds, Kind and search, and stops after ten.
-emend keeps these keys while its page has focus, also where the browser uses them to switch tabs.
+recense keeps these keys while its page has focus, also where the browser uses them to switch tabs.
 Settings can switch rows 1 to 9 to Ctrl (⌘ on a Mac), leaving row ten without a key, or turn them
 all off to give them back to the browser. Ctrl+0 (⌘0 on a Mac) keeps resetting the browser's zoom.
 Ctrl+Shift+P (⌘⇧P on a Mac) opens the command palette. Type a few letters of a command, or find
@@ -58,26 +58,26 @@ See [api.md](api.md) for the command ids.
 
 To make your own theme, ask a coding agent such as Claude Code or Codex.
 Settings → Appearance shows the text to paste, with a Copy button.
-It links to the [emend-theme skill](skills/emend-theme/SKILL.md) at the running version's tag,
+It links to the [recense-theme skill](skills/recense-theme/SKILL.md) at the running version's tag,
 or at `main` for a build without a release.
 Write what you want after "What I want:". This example links to `main`:
 
 ```text
-Make me a custom theme for emend. Read the skill at https://raw.githubusercontent.com/shllg/emend/refs/heads/main/docs/skills/emend-theme/SKILL.md and follow it.
+Make me a custom theme for recense. Read the skill at https://raw.githubusercontent.com/shllg/recense/refs/heads/main/docs/skills/recense-theme/SKILL.md and follow it.
 
 What I want: a dark theme called forest, with deep green backgrounds and a warm amber accent. Keep it easy to read.
 ```
 
 Other wishes work the same way, such as "a light theme called paper, with warm off-white
 backgrounds and blue links" or "a theme called mono, based on Dark, with Iosevka for code and
-Inter for text". The agent copies Dark, Light or one of your themes with `emend theme copy`,
-changes only what you asked for and runs `emend theme check` until the theme is valid.
+Inter for text". The agent copies Dark, Light or one of your themes with `recense theme copy`,
+changes only what you asked for and runs `recense theme check` until the theme is valid.
 The skill is never installed. Then pick the theme in Settings → Appearance.
 
-Themes live in the `themes` folder beside emend's global `config.json`, on the server your
-browser reaches. `emend theme copy dark mine` writes `themes/mine/theme.json`.
+Themes live in the `themes` folder beside recense's global `config.json`, on the server your
+browser reaches. `recense theme copy dark mine` writes `themes/mine/theme.json`.
 You can also use `light` or another theme as the source. Each theme has its own folder.
-`emend theme list` shows valid and refused themes. `emend theme check mine` reports
+`recense theme list` shows valid and refused themes. `recense theme check mine` reports
 invalid values and text that is too faint to read, including syntax colours on `bg-sunken` code blocks,
 diff lines, changed words, hovered lines (including context lines on `bg-hover` over `bg-surface`)
 and selected lines.
@@ -96,19 +96,19 @@ The Download also checks `fg-reading` and
 `diff-add-bg` / `diff-del-bg` composited over `bg-sunken`.
 
 The CLI commands refuse a themes folder whose path, real path or symlink hops lie inside a repository
-holding the working directory, with the same home-rooted dotfiles exception as `emend config`.
+holding the working directory, with the same home-rooted dotfiles exception as `recense config`.
 The server reads this folder without that check, like `keys` and `approvedActiveHours`.
 
 Edit `themes/mine/theme.json` to change colours or set `fonts.text` and `fonts.code` to a built-in font
 (Geist, Inter, Roboto, Atkinson Hyperlegible Next, JetBrains Mono, Geist Mono, Roboto Mono or Fira Code)
 or an installed font name.
-Built-in names use emend's copy even when that font is installed.
+Built-in names use recense's copy even when that font is installed.
 The built-in files cover Latin and most Latin Extended letters in upright text.
 Italic files cover basic Latin and Latin-1 only.
 Most Vietnamese letters with tone marks and other scripts fall back to a system font.
 To use another font on every device, including your phone, put its files in `themes/fonts/` and name them in `fonts.files`;
-see [api.md](api.md#themes) for the format and limits. `emend theme check mine` reports missing or refused font files.
-Emend's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
+see [api.md](api.md#themes) for the format and limits. `recense theme check mine` reports missing or refused font files.
+Recense's fonts stay as fallbacks. Each file names a Dark or Light base; omitted values use that
 base. A token can reference a scale step, so changing that step recolours every token built on
 it. A token set to a colour keeps its own value. The surfaces `bg-app`, `bg-surface`, `bg-sunken`,
 `bg-raised`, `bg-reading`, `bg-reading-card` and `bg-inverse`, and the diagram text colours `fg-1`,
@@ -118,7 +118,7 @@ See [api.md](api.md#themes) for the file format and readability pairs.
 A theme can set `density` to `"compact"`, `"regular"` (the default) or `"roomy"` to change spacing, never text size.
 On touch screens, compact keeps regular spacing so tap targets keep their size.
 
-Emend lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
+Recense lists up to 50 theme folders in name order. Each `theme.json` is at most 32 KiB.
 The names `system`, `dark`, `light` and `fonts` are reserved.
 The shared `fonts` folder, top-level files and dot entries are ignored. A symlink counts only when it points to a folder;
 links to files, missing targets and link loops are skipped like top-level files.
@@ -140,7 +140,7 @@ they arrive. An error keeps the current version and waits for another trigger. S
 aborts its fetch and ignores its result; System, Dark and Light need no theme fetch.
 
 Each tab keeps its own last valid version. It ignores other tabs' saved copies of a theme it
-already holds. The browser saves a bare `ThemeValid` in `emend.theme.custom`, without a timestamp.
+already holds. The browser saves a bare `ThemeValid` in `recense.theme.custom`, without a timestamp.
 That saved copy seeds a tab at load or on a switch to a theme it does not hold, if the name matches.
 The tab parses it only when it needs a seed and the text or name changed. After a fetch for the
 still-picked name, a valid entry updates the held version and the saved copy if they differ.
@@ -163,7 +163,7 @@ uses the base of its held version for that name, or passes no theme if none is h
 Publish any UTF-8 text file and get its review URL:
 
 ```sh
-emend publish docs/plan.html
+recense publish docs/plan.html
 ```
 
 It prints the review URL, such as `http://127.0.0.1:3636/r/<review-id>`.
@@ -175,7 +175,7 @@ continues to print JSON. Markdown and HTML render by default; other text files s
 source with line numbers and syntax highlighting where available. `--source` shows every doc as
 source, including Markdown and HTML, in the path shortcut only. It cannot combine with
 `--manifest`; a manifest sets `view: "source"` per doc instead. For example,
-`emend publish --source notes.md` keeps Markdown syntax literal. Source docs must be valid UTF-8
+`recense publish --source notes.md` keeps Markdown syntax literal. Source docs must be valid UTF-8
 without NUL and at most 1 MiB; explicitly named binary files are refused. A folder walk skips names
 that look like secrets (Markdown and HTML files publish whatever their name), folders named exactly
 `secret`, `secrets`, `credential` or `credentials` in any case below the folder argument, binary
@@ -206,35 +206,35 @@ arguments keeps the URL. Adding files inside a named folder also keeps it; chang
 input paths needs `--key` to keep one review.
 
 `--main <path>` selects the opening doc, using its bundled path or its path from the current
-directory. Otherwise emend picks the only doc, `index.html`, the only HTML doc, `index.md`,
+directory. Otherwise recense picks the only doc, `index.html`, the only HTML doc, `index.md`,
 `README.md`, the only Markdown doc, then the first doc in path order. The title comes from
 `--title`, that doc's HTML title or first Markdown `#` heading, then its filename, capped at 200
 characters. A source main doc uses its filename as the inferred title.
 
 Docs must be in the current worktree or an allowed `docRoots` folder. For another folder, run
-`emend config add docRoots <folder>` yourself first; temporary folders need permission too.
-Publishing while the server is stopped saves the review and prints its URL; run `emend` or
-`emend service install` to open it. An attached machine publishes to its hub.
+`recense config add docRoots <folder>` yourself first; temporary folders need permission too.
+Publishing while the server is stopped saves the review and prints its URL; run `recense` or
+`recense service install` to open it. An attached machine publishes to its hub.
 
-### An HTML file in emend's look
+### An HTML file in recense's look
 
-Give a local HTML file emend's look before opening it on its own:
+Give a local HTML file recense's look before opening it on its own:
 
 ```sh
-emend look docs/plan.html
+recense look docs/plan.html
 ```
 
 The command changes the file in place. Run it again after editing; a second run without changes
 writes nothing. The file follows the reader's light or dark mode. When exactly one theme is valid,
-it uses that theme's colours. Pick one with `--theme <name>`, or use `--no-theme` for emend's own
-colours. With several valid themes, it uses emend's own colours and says how to pick one.
-A page marked `<meta name="emend-look" content="custom">` stays unchanged.
+it uses that theme's colours. Pick one with `--theme <name>`, or use `--no-theme` for recense's own
+colours. With several valid themes, it uses recense's own colours and says how to pick one.
+A page marked `<meta name="recense-look" content="custom">` stays unchanged.
 The file stays self-contained, adding about 200 KB for the default fonts. Publishing still works
-the same. Diagrams remain source text when the file opens outside emend.
+the same. Diagrams remain source text when the file opens outside recense.
 
 ## List your reviews and check the connection
 
-`emend ls` lists the reviews this machine published, newest first, one line each: id, state, last
+`recense ls` lists the reviews this machine published, newest first, one line each: id, state, last
 update, title and URL. It also lists snoozed and finished reviews, and it never shows comments. The
 update time is UTC. Add `--json` for one JSON object with an `items` list. It shows at most the
 newest 100. Each JSON item also carries `branch`, `newest` (`{ revision, head }` of the newest
@@ -243,7 +243,7 @@ head }` of the approved revision). `head` is a full commit id, `worktree` or `nu
 `turn` is `agent` after a Send on the newest revision that has not been set aside, `reviewer`
 otherwise, or `null` for an approved or retired review or one without a revision.
 
-To check which commit an approval covers, run `emend ls --json --head <sha>` with the full commit
+To check which commit an approval covers, run `recense ls --json --head <sha>` with the full commit
 id (40 or 64 lowercase hex characters). It lists only reviews whose approved or newest revision has
 that head. `head` and `branch` are what the publisher sent and are not verified, and a review of docs
 or a plan alone shows no diff, so `approved.head` equal to `<sha>` means the reviewer approved a
@@ -252,32 +252,32 @@ revision labelled with that commit, not that its content was shown. To rely on i
 carried the diff. An item with `newest.head` equal to `<sha>` and `approved: null` is published but
 not approved. It reads only, takes no comments and changes nothing.
 
-`emend status` shows whether this machine is `local` or `attached`, the server or hub address,
+`recense status` shows whether this machine is `local` or `attached`, the server or hub address,
 the hub name when attached, this machine's instance name, whether the server or hub answers, and
-the `emend` version. Add `--json` for the same fields as JSON, where `address: none` and
+the `recense` version. Add `--json` for the same fields as JSON, where `address: none` and
 `instance: none` in the human form are `null`. It prints no token, creates no file, and reports a
 server or hub that does not answer instead of failing. Use `--line` for the branch's review in
 [Claude Code's status line](#show-the-review-in-claude-codes-status-line).
 
 ## Show the review in Claude Code's status line
 
-`emend status --line` prints one short line, such as `emend r3 · your turn`,
-`emend r3 · agent's turn`, `emend r5 · approved` or `emend r5 · retired`.
-It shows the review that `emend publish` made for the current folder's branch on this machine.
-When the server does not report whose turn it is, an open review shows only `emend r3`.
-It needs a server or hub that lists `agent-review-key` (this emend version or newer) and prints nothing otherwise.
+`recense status --line` prints one short line, such as `recense r3 · your turn`,
+`recense r3 · agent's turn`, `recense r5 · approved` or `recense r5 · retired`.
+It shows the review that `recense publish` made for the current folder's branch on this machine.
+When the server does not report whose turn it is, an open review shows only `recense r3`.
+It needs a server or hub that lists `agent-review-key` (this recense version or newer) and prints nothing otherwise.
 
 It prints nothing when the branch has no review, when no server or hub answers, and on any error.
 It always exits 0. It reads only, never starts a server and never prompts.
-It also prints nothing when the emend it runs is installed inside the repository.
-The command gives up after 2 seconds; `EMEND_STATUS_LINE_DEADLINE_MS` (100 to 10000 milliseconds) changes that.
+It also prints nothing when the recense it runs is installed inside the repository.
+The command gives up after 2 seconds; `RECENSE_STATUS_LINE_DEADLINE_MS` (100 to 10000 milliseconds) changes that.
 
 Paste this prompt into Claude Code:
 
 ```text
-Add emend to my Claude Code status line. In my ~/.claude/settings.json, add a statusLine setting of type command that runs emend status --line.
+Add recense to my Claude Code status line. In my ~/.claude/settings.json, add a statusLine setting of type command that runs recense status --line.
 
-Keep any existing status line by printing both: the existing command's output, a separator, then emend's line. Show me the change before saving it.
+Keep any existing status line by printing both: the existing command's output, a separator, then recense's line. Show me the change before saving it.
 ```
 
 Settings → Integrations shows the same prompt, with a Copy button.
@@ -285,19 +285,19 @@ Settings → Integrations shows the same prompt, with a Copy button.
 Without an existing status line, the setting should look like this:
 
 ```json
-{ "statusLine": { "type": "command", "command": "emend status --line" } }
+{ "statusLine": { "type": "command", "command": "recense status --line" } }
 ```
 
 Claude Code runs the command after each assistant message and shows its output below the prompt;
-it passes session data on standard input, which `emend status --line` ignores: it uses the folder
+it passes session data on standard input, which `recense status --line` ignores: it uses the folder
 it runs in.
 
 ## Stop the server
 
-`emend stop` stops the server that `emend` started on this machine, for example after an update so
-the next `emend` runs the new version. It does not stop a server the service runs: run
-`emend service install` to restart that one, or `emend service uninstall` to stop it. When no
-server runs, it removes a Tailscale Serve route that a crashed `emend serve --tailscale` left.
+`recense stop` stops the server that `recense` started on this machine, for example after an update so
+the next `recense` runs the new version. It does not stop a server the service runs: run
+`recense service install` to restart that one, or `recense service uninstall` to stop it. When no
+server runs, it removes a Tailscale Serve route that a crashed `recense serve --tailscale` left.
 
 ## A look around
 
@@ -327,13 +327,13 @@ A plan or other doc that comes with a review opens next to its diff, with its di
 your comments beside the text. A tinted passage, or the count in the margin, opens its thread
 beside the text. Press `,` and `.` to step through the comments.
 
-HTML pages use `<pre class="mermaid">` containing Mermaid source. emend draws it in light and
+HTML pages use `<pre class="mermaid">` containing Mermaid source. recense draws it in light and
 dark mode, also on custom pages. The page's own scripts never run.
 `<pre><code class="language-mermaid">` works too.
-Escape `<` as `&lt;` and `&` as `&amp;` in the source, because emend reads the `pre`'s text.
+Escape `<` as `&lt;` and `&` as `&amp;` in the source, because recense reads the `pre`'s text.
 
-In emend's look, `<pre><code class="language-ts">` shows its code in the same colours as a
-Markdown doc, in light and dark mode. A block without a language, or with one emend does not colour,
+In recense's look, `<pre><code class="language-ts">` shows its code in the same colours as a
+Markdown doc, in light and dark mode. A block without a language, or with one recense does not colour,
 stays plain.
 
 Diagrams colour the classes `blue`, `orange`, `purple`, `yellow`, `teal`, `tan` and `pink` as group
@@ -341,7 +341,7 @@ fills in light and dark. They mark states with `breaks` (red), `mayBreak` (orang
 border) and `repeats` (a dashed purple border) in both modes. These are the names the statechart
 skill writes. The colours apply to states, composite states, flowchart nodes and subgraphs.
 A mark shows over a group fill. A `classDef` for one of these names in the diagram wins over
-emend's colours for that class. A hand-drawn diagram (`look: handDrawn`) keeps Mermaid's sketched
+recense's colours for that class. A hand-drawn diagram (`look: handDrawn`) keeps Mermaid's sketched
 fills, so give it a `classDef` instead.
 In light and dark, a change graph marks parts with `added` (green), `changed` (amber) and `removed`
 (red with a dashed border, so it reads without colour). A `classDef` for these names wins too.
@@ -354,7 +354,7 @@ pick how the agent should act on them.
 ![The Comments tab with three unsent comments and the Send button](images/send-desktop.png)
 
 Download (on a phone: in the menu) saves the revision on screen as one HTML file that opens offline
-in any browser, so you can send it to someone who cannot reach emend. A code review's file holds
+in any browser, so you can send it to someone who cannot reach recense. A code review's file holds
 its writeup; a published doc's file holds that doc. Tick Code diff to add each topic's changed files
 and their added and removed lines after the writeup. You can tick docs to add them. With any doc
 ticked, the download is a ZIP holding the writeup file (or the pub's base doc) and one HTML file
@@ -366,3 +366,28 @@ limits are shared across the download. A doc that does not fit is replaced by a 
 title and a left-out note.
 
 An HTML doc's comments come in a separate list or file, never inside the doc.
+
+## Coming from emend
+
+recense was called emend until 0.17.1 and was published as `@shllg/emend`. The same project, with a new
+name. To move over:
+
+1. Stop the old server, or the old service: `emend stop`, or `systemctl --user stop emend` on Linux,
+   `launchctl bootout gui/$(id -u)/dev.emend.server` on macOS.
+2. Uninstall the old package, so that its `emend` command does not clash with the new one: for
+   example `npm uninstall -g @shllg/emend`.
+3. Install the new one: `npm install -g @shllg/recense`. The `emend` command stays for now, prints one
+   line that says it is now `recense`, and runs `recense`. It goes away in a later release.
+4. Run `recense`. On first start it moves your state folder (`~/.local/share/emend`, on macOS
+   `~/Library/Application Support/emend`) and your config folder (`~/.config/emend`) to their `recense`
+   names, and renames the database file. It deletes nothing. It refuses, and moves nothing, while a
+   server still uses the old state folder. A folder you picked with `EMEND_HOME` keeps its place and
+   is read as `RECENSE_HOME`; so is `EMEND_STATUS_LINE_DEADLINE_MS` as `RECENSE_STATUS_LINE_DEADLINE_MS`.
+5. If you used the service, run `recense service install`. It stops and removes the old `emend`
+   service, then installs the `recense` one. `recense service status` says when an old one is still
+   installed.
+6. Reinstall the Claude Code plugin as `recense`, and run `recense skills install`: it replaces the
+   old `emend-*` skill links with `recense-*` ones.
+
+Browsers pair again only when you also moved to another address; a signed-in browser stays signed in,
+and its saved settings move over on the first load.

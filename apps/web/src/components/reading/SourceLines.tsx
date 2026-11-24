@@ -1,4 +1,4 @@
-import type { RevisionView, SourceLinesTarget, SourceToken, SyntaxRole } from "@emend/contract";
+import type { RevisionView, SourceLinesTarget, SourceToken, SyntaxRole } from "@recense/contract";
 import { type CSSProperties, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ComposerVisibilityContext } from "../../lib/composer-owner.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";

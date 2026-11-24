@@ -14,9 +14,9 @@ test.each([
 });
 
 const diagram = { source: "graph LR", mode: "light", width: 500 };
-const job = { type: "emend:diagrams", request: 1, diagrams: [diagram] };
+const job = { type: "recense:diagrams", request: 1, diagrams: [diagram] };
 const reply = { type: "svg", svg: "<svg/>", width: 1, height: 10000 };
-const relay = { ...reply, type: "emend:diagram", request: 1, index: 0 };
+const relay = { ...reply, type: "recense:diagram", request: 1, index: 0 };
 
 test("diagram schemas accept exactly the bounded job and answer shapes", () => {
   expect(FrameToParent.parse(job)).toEqual(job);
@@ -27,7 +27,7 @@ test("diagram schemas accept exactly the bounded job and answer shapes", () => {
   expect(parseDiagramReply(reply)).toEqual(reply);
   expect(parseDiagramReply({ type: "svg", svg: null })).toEqual({ type: "svg", svg: null });
   expect(ParentToFrame.parse(relay)).toEqual(relay);
-  expect(ParentToFrame.parse({ type: "emend:diagram", request: 2147483647, index: 49, svg: null })).toBeDefined();
+  expect(ParentToFrame.parse({ type: "recense:diagram", request: 2147483647, index: 49, svg: null })).toBeDefined();
   expect(parseDiagramReply({ ...reply, svg: `<svg${"x".repeat(3999996)}` })).toBeDefined();
   for (const patch of [
     { extra: true },

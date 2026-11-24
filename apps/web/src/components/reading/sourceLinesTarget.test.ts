@@ -1,4 +1,4 @@
-import { LIMITS, SourceLinesTarget } from "@emend/contract";
+import { LIMITS, SourceLinesTarget } from "@recense/contract";
 import { expect, test } from "vitest";
 import { splitLines } from "../../../../../packages/core/src/place/linemap.ts";
 import { sourceLinesTarget } from "./sourceLinesTarget.ts";

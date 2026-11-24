@@ -1,4 +1,4 @@
-# Commands Codex never runs in emend. Codex writes code. The main session and the owner commit,
+# Commands Codex never runs in recense. Codex writes code. The main session and the owner commit,
 # push, merge, install and deploy. The sandbox has no network, so these rules are a second layer.
 # Decisions: allow, prompt, forbidden.
 
@@ -13,56 +13,56 @@ prefix_rule(
 prefix_rule(
     pattern = [["wrangler", "node_modules/.bin/wrangler"]],
     decision = "forbidden",
-    justification = "emend does not use wrangler. Deploying and remote setup are the owner's step.",
+    justification = "recense does not use wrangler. Deploying and remote setup are the owner's step.",
     match = ["wrangler deploy", "wrangler d1 execute DB --remote"],
 )
 
 prefix_rule(
     pattern = [["npx", "pnpx", "bunx"], "wrangler"],
     decision = "forbidden",
-    justification = "emend does not use wrangler. Deploying and remote setup are the owner's step.",
+    justification = "recense does not use wrangler. Deploying and remote setup are the owner's step.",
 )
 
 prefix_rule(
     pattern = ["pnpm", ["exec", "dlx"], "wrangler"],
     decision = "forbidden",
-    justification = "emend does not use wrangler. Deploying and remote setup are the owner's step.",
+    justification = "recense does not use wrangler. Deploying and remote setup are the owner's step.",
 )
 
 prefix_rule(
     pattern = ["pnpm", "wrangler"],
     decision = "forbidden",
-    justification = "emend does not use wrangler. Deploying and remote setup are the owner's step.",
+    justification = "recense does not use wrangler. Deploying and remote setup are the owner's step.",
 )
 
 prefix_rule(
     pattern = [["drizzle-kit", "node_modules/.bin/drizzle-kit"], ["push", "migrate"]],
     decision = "forbidden",
-    justification = "Generate migrations with pnpm db:generate. emend applies them itself when it opens its database.",
+    justification = "Generate migrations with pnpm db:generate. recense applies them itself when it opens its database.",
 )
 
 prefix_rule(
     pattern = [["npx", "pnpx", "bunx"], "drizzle-kit", ["push", "migrate"]],
     decision = "forbidden",
-    justification = "Generate migrations with pnpm db:generate. emend applies them itself when it opens its database.",
+    justification = "Generate migrations with pnpm db:generate. recense applies them itself when it opens its database.",
 )
 
 prefix_rule(
     pattern = ["pnpm", ["exec", "dlx"], "drizzle-kit", ["push", "migrate"]],
     decision = "forbidden",
-    justification = "Generate migrations with pnpm db:generate. emend applies them itself when it opens its database.",
+    justification = "Generate migrations with pnpm db:generate. recense applies them itself when it opens its database.",
 )
 
 prefix_rule(
     pattern = ["pnpm", ["deploy", "publish"]],
     decision = "forbidden",
-    justification = "Publishing emend is the owner's step.",
+    justification = "Publishing recense is the owner's step.",
 )
 
 prefix_rule(
     pattern = [["pnpm", "npm"], ["run", "run-script"], "deploy"],
     decision = "forbidden",
-    justification = "Publishing emend is the owner's step.",
+    justification = "Publishing recense is the owner's step.",
 )
 
 prefix_rule(
@@ -74,7 +74,7 @@ prefix_rule(
 prefix_rule(
     pattern = ["npm", ["install", "i", "ci", "update", "uninstall", "publish"]],
     decision = "forbidden",
-    justification = "emend uses pnpm, and the main session installs dependencies after the owner approves them.",
+    justification = "recense uses pnpm, and the main session installs dependencies after the owner approves them.",
 )
 
 prefix_rule(
@@ -86,7 +86,7 @@ prefix_rule(
 prefix_rule(
     pattern = ["sudo"],
     decision = "forbidden",
-    justification = "Nothing in emend needs root.",
+    justification = "Nothing in recense needs root.",
 )
 
 prefix_rule(
@@ -122,17 +122,17 @@ prefix_rule(
 prefix_rule(
     pattern = ["npm", ["add", "in", "ins", "inst", "insta", "instal", "isnt", "isnta", "isntal", "isntall", "up", "upgrade", "remove", "rm", "r", "un", "unlink", "link", "x", "exec", "run-script"]],
     decision = "forbidden",
-    justification = "emend uses pnpm, and the main session installs dependencies after the owner approves them.",
+    justification = "recense uses pnpm, and the main session installs dependencies after the owner approves them.",
 )
 
 prefix_rule(
     pattern = ["./node_modules/.bin/wrangler"],
     decision = "forbidden",
-    justification = "emend does not use wrangler. Deploying and remote setup are the owner's step.",
+    justification = "recense does not use wrangler. Deploying and remote setup are the owner's step.",
 )
 
 prefix_rule(
     pattern = ["node", ["node_modules/wrangler/bin/wrangler.js", "./node_modules/wrangler/bin/wrangler.js"]],
     decision = "forbidden",
-    justification = "emend does not use wrangler. Deploying and remote setup are the owner's step.",
+    justification = "recense does not use wrangler. Deploying and remote setup are the owner's step.",
 )

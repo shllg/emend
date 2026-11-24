@@ -1,4 +1,4 @@
-import type { FileView, RevisionView } from "@emend/contract";
+import type { FileView, RevisionView } from "@recense/contract";
 import { expect, test, vi } from "vitest";
 import { diffFiles, diffGroups, pathOrder } from "./diff-groups.ts";
 

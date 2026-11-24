@@ -10,14 +10,14 @@ import {
   ThemeName,
   ThemeValid,
   themeFontType,
-} from "@emend/contract";
+} from "@recense/contract";
 import { useSyncExternalStore } from "react";
 import { get } from "../api/client.ts";
 import { useMedia } from "./layout.ts";
 
 export type ThemePick = "system" | "dark" | "light" | `theme:${ThemeName}`;
-export const themeKey = "emend.theme";
-export const customThemeKey = "emend.theme.custom";
+export const themeKey = "recense.theme";
+export const customThemeKey = "recense.theme.custom";
 // Keep these stacks in sync with typography.css; theme.test.tsx checks the full declarations.
 export const themeFontStacks = {
   text: `"${DEFAULT_THEME_FONTS.text}", ui-sans-serif, system-ui, sans-serif`,
@@ -25,7 +25,7 @@ export const themeFontStacks = {
 };
 // Plain identifiers work whether an engine parses FontFace families as CSS or literal names.
 // Leading underscores keep these aliases outside ThemeFont's accepted names.
-const themeFontAliases = { text: "_emend-theme-text", code: "_emend-theme-code" };
+const themeFontAliases = { text: "_recense-theme-text", code: "_recense-theme-code" };
 type FontFileEntry = { family: string; source: string; descriptors: FontFaceDescriptors };
 // Light --bg-app = --n-25 = oklch(0.985 0.001 260), rounded to sRGB bytes.
 const defaultThemeColors = { dark: "#171717", light: "#fafafb" };

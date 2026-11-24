@@ -1,4 +1,4 @@
-import { type ChartSpec, parseChartSource } from "@emend/contract";
+import { type ChartSpec, parseChartSource } from "@recense/contract";
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import {
   chartWidth,

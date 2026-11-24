@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { RepoUrl } from "@emend/contract";
+import { RepoUrl } from "@recense/contract";
 import { type Range, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { HtmlRoot } from "../../../packages/core/src/render/blocks.ts";
@@ -37,7 +37,7 @@ function bridge(html: string) {
   const post = vi.fn();
   const parent = { postMessage: post };
   Object.defineProperty(window, "parent", { value: parent });
-  const source = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../recense/src/server/content/bridge.ts", import.meta.url), "utf8");
   const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
   const highlights = new Map<string, { ranges: Range[] }>();
   Object.defineProperty(window, "HighlightRegistry", { value: Map });
@@ -73,7 +73,7 @@ test.each([
   expect(RepoUrl.safeParse(url).success).toBe(true);
   const b = bridge("<body><p>See #12, #1 and #9999999.</p></body>");
   const before = b.window.document.body.textContent;
-  b.message({ type: "emend:repo", url });
+  b.message({ type: "recense:repo", url });
   const links = [...b.window.document.querySelectorAll("a")];
   expect(links.map((link) => link.textContent)).toEqual(["#12", "#1", "#9999999"]);
   for (const [index, number] of [12, 1, 9999999].entries()) {
@@ -103,7 +103,7 @@ test.each([
 ])("issue text inside %s stays unchanged", (tag) => {
   const b = bridge(`<body><${tag}>#12</${tag}><p>#13</p></body>`);
   const before = b.window.document.body.textContent;
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   expect(b.window.document.querySelectorAll("a[href]")).toHaveLength(1);
   expect(b.window.document.querySelector("a[href]")?.textContent).toBe("#13");
   expect(b.window.document.querySelector(tag)?.querySelector("a")).toBeNull();
@@ -126,7 +126,7 @@ test("issue linking skips SVG, MathML, HTML nested in SVG, and shadow roots", ()
   const shadowText = b.window.document.createElement("p");
   shadowText.textContent = "#12";
   shadow.appendChild(shadowText);
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   expect(b.window.document.querySelectorAll("a")).toHaveLength(1);
   expect(b.window.document.querySelector("a")?.textContent).toBe("#13");
   expect(paragraph.textContent).toBe("#12");
@@ -136,7 +136,7 @@ test("issue linking skips SVG, MathML, HTML nested in SVG, and shadow roots", ()
 test("issue linking uses the core reference boundaries within each text node", () => {
   const b = bridge("<body><p>page#12 a&amp;#12 x/#12 #012 #12345678 #12a ##12 #0 #<span>12</span> #12</p></body>");
   const before = b.window.document.body.textContent;
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   expect(b.window.document.querySelectorAll("a")).toHaveLength(1);
   expect(b.window.document.querySelector("a")?.textContent).toBe("#12");
   expect(b.window.document.body.textContent).toBe(before);
@@ -190,7 +190,7 @@ test.each(referenceSamples)("bridge reference links match core for %s", (value) 
   );
   const b = bridge("<body><p></p></body>");
   required(b.window.document.querySelector("p")).textContent = value;
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   expect(
     [...b.window.document.querySelectorAll("a")].map((link) => ({
       text: link.textContent,
@@ -260,13 +260,13 @@ const repoUrlCandidates = [
 test.each(repoUrlCandidates)("bridge repository URL acceptance matches RepoUrl for %s", (url) => {
   const b = bridge("<body><p>#12</p></body>");
   const checked = RepoUrl.safeParse(url);
-  b.message({ type: "emend:repo", url });
+  b.message({ type: "recense:repo", url });
   const links = [...b.window.document.querySelectorAll("a")];
   expect(links).toHaveLength(checked.success ? 1 : 0);
   if (checked.success) {
     expect(required(links[0]).getAttribute("href")).toBe(new URL(`${checked.data}/issues/12`).href);
   } else {
-    b.message({ type: "emend:repo", url: repoUrl });
+    b.message({ type: "recense:repo", url: repoUrl });
     expect(b.window.document.querySelector("a")?.getAttribute("href")).toBe(`${repoUrl}/issues/12`);
   }
   expect(b.window.document.body.textContent).toBe("#12");
@@ -274,12 +274,12 @@ test.each(repoUrlCandidates)("bridge repository URL acceptance matches RepoUrl f
 
 test("only the first valid repository message from the parent links text", () => {
   const b = bridge("<body><p>#12</p></body>");
-  b.message({ type: "emend:repo", url: repoUrl }, {});
-  b.message({ type: "emend:repo", url: repoUrl, extra: true });
+  b.message({ type: "recense:repo", url: repoUrl }, {});
+  b.message({ type: "recense:repo", url: repoUrl, extra: true });
   expect(b.window.document.querySelector("a")).toBeNull();
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   const link = required(b.window.document.querySelector("a"));
-  b.message({ type: "emend:repo", url: "https://example.test/other/repo" });
+  b.message({ type: "recense:repo", url: "https://example.test/other/repo" });
   expect(b.window.document.querySelectorAll("a")).toHaveLength(1);
   expect(b.window.document.querySelector("a")).toBe(link);
   expect(link.getAttribute("href")).toBe(`${repoUrl}/issues/12`);
@@ -287,13 +287,13 @@ test("only the first valid repository message from the parent links text", () =>
 
 test("only bridge-created issue links post a number and prevent default navigation", () => {
   const b = bridge(`<body><p>#12</p><a href="${repoUrl}/issues/12">Authored link</a></body>`);
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   const link = required(b.window.document.querySelector("p a"));
   const click = new b.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
   link.dispatchEvent(click);
   expect(click.defaultPrevented).toBe(true);
-  expect(b.post.mock.calls.filter(([data]) => data.type === "emend:issue")).toEqual([
-    [{ type: "emend:issue", number: 12 }, "*"],
+  expect(b.post.mock.calls.filter(([data]) => data.type === "recense:issue")).toEqual([
+    [{ type: "recense:issue", number: 12 }, "*"],
   ]);
   b.post.mockClear();
   let prevented: boolean | undefined;
@@ -304,7 +304,7 @@ test("only bridge-created issue links post a number and prevent default navigati
   });
   authored.dispatchEvent(new b.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
   expect(prevented).toBe(false);
-  expect(b.post.mock.calls.filter(([data]) => data.type === "emend:issue")).toEqual([]);
+  expect(b.post.mock.calls.filter(([data]) => data.type === "recense:issue")).toEqual([]);
 });
 
 const issueClicks = [
@@ -317,17 +317,17 @@ const issueClicks = [
 
 test.each(issueClicks)("$name on a bridge issue link posts once and prevents default", ({ type, init }) => {
   const b = bridge("<body><p>#12</p></body>");
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   b.post.mockClear();
   const event = new b.window.MouseEvent(type, { bubbles: true, cancelable: true, ...init });
   required(b.window.document.querySelector("a")).dispatchEvent(event);
   expect(event.defaultPrevented).toBe(true);
-  expect(b.post.mock.calls).toEqual([[{ type: "emend:issue", number: 12 }, "*"]]);
+  expect(b.post.mock.calls).toEqual([[{ type: "recense:issue", number: 12 }, "*"]]);
 });
 
 test.each(issueClicks)("$name on an authored link is not handled by the bridge", ({ type, init }) => {
   const b = bridge(`<body><a href="${repoUrl}/issues/12">Authored link</a></body>`);
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   b.post.mockClear();
   const link = required(b.window.document.querySelector("a"));
   let prevented: boolean | undefined;
@@ -342,7 +342,7 @@ test.each(issueClicks)("$name on an authored link is not handled by the bridge",
 
 test("a right-button auxclick is ignored on bridge and authored links", () => {
   const b = bridge(`<body><p>#12</p><a href="${repoUrl}/issues/12">Authored link</a></body>`);
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   b.post.mockClear();
   for (const link of b.window.document.querySelectorAll("a")) {
     const event = new b.window.MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 2 });
@@ -354,7 +354,7 @@ test("a right-button auxclick is ignored on bridge and authored links", () => {
 
 test.each(issueClicks)("an already prevented $name does not post an issue", ({ type, init }) => {
   const b = bridge("<body><p>#12</p></body>");
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   b.post.mockClear();
   const event = new b.window.MouseEvent(type, { bubbles: true, cancelable: true, ...init });
   event.preventDefault();
@@ -365,11 +365,11 @@ test.each(issueClicks)("an already prevented $name does not post an issue", ({ t
 test("linking rebuilds earlier highlights around the same quote", () => {
   const b = bridge("<body><p>See #12 and #34 today.</p></body>");
   const quote = "#12 and #34";
-  b.message({ type: "emend:highlight", anchors: [{ threadId: "t", quote, prefix: "See ", suffix: " today." }] });
-  const before = required(b.highlights.get("emend-quotes"));
+  b.message({ type: "recense:highlight", anchors: [{ threadId: "t", quote, prefix: "See ", suffix: " today." }] });
+  const before = required(b.highlights.get("recense-quotes"));
   expect(required(before.ranges[0]).toString()).toBe(quote);
-  b.message({ type: "emend:repo", url: repoUrl });
-  const after = required(b.highlights.get("emend-quotes"));
+  b.message({ type: "recense:repo", url: repoUrl });
+  const after = required(b.highlights.get("recense-quotes"));
   expect(after).not.toBe(before);
   expect(required(after.ranges[0]).toString()).toBe(quote);
   expect(b.window.document.querySelectorAll("a")).toHaveLength(2);
@@ -387,7 +387,7 @@ test("a megabyte text node with 10000 references is replaced once without splitt
   const replace = vi.spyOn(b.window.Node.prototype, "replaceChild");
   const observer = new b.window.MutationObserver(() => {});
   observer.observe(b.window.document.body, { subtree: true, childList: true });
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   const records = observer.takeRecords();
   observer.disconnect();
   expect(split).not.toHaveBeenCalled();
@@ -406,7 +406,7 @@ test("a megabyte text node with 10000 references is replaced once without splitt
 test("issue linking stops at the link cap and preserves remaining text", () => {
   const b = bridge(`<body><p>${"#12 ".repeat(10001)}</p></body>`);
   const before = b.window.document.body.textContent;
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   expect(b.window.document.querySelectorAll("a")).toHaveLength(10000);
   expect(b.window.document.body.textContent).toBe(before);
 });
@@ -414,7 +414,7 @@ test("issue linking stops at the link cap and preserves remaining text", () => {
 test("the link cap is shared across text nodes and leaves the remaining suffix plain", () => {
   const b = bridge(`<body><p>${"#12 ".repeat(9999)}</p><p>#34 #56 tail</p><p>#78</p></body>`);
   const before = b.window.document.body.textContent;
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   const paragraphs = b.window.document.querySelectorAll("p");
   expect(required(paragraphs[0]).querySelectorAll("a")).toHaveLength(9999);
   const second = required(paragraphs[1]);
@@ -428,6 +428,6 @@ test("the link cap is shared across text nodes and leaves the remaining suffix p
 
 test("issue linking stops at the visited-node cap", () => {
   const b = bridge(`<body>${"<!-- skipped -->".repeat(100000)}<p>#12</p></body>`);
-  b.message({ type: "emend:repo", url: repoUrl });
+  b.message({ type: "recense:repo", url: repoUrl });
   expect(b.window.document.querySelector("a")).toBeNull();
 });

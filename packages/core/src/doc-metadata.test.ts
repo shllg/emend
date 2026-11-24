@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { defaultTreeAdapter } from "parse5";
 import { afterEach, expect, test, vi } from "vitest";
 import { htmlHeadings, markdownHeadings } from "./doc-headings.ts";

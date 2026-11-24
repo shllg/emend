@@ -1,4 +1,4 @@
-import type { FileView, RevisionView } from "@emend/contract";
+import type { FileView, RevisionView } from "@recense/contract";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { beginDraftSave, draftKey, finishDraftSave, trackReviewDraftSave } from "../../lib/drafts.ts";

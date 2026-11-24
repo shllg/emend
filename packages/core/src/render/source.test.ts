@@ -1,4 +1,4 @@
-import { SourceToken, SyntaxRole } from "@emend/contract";
+import { SourceToken, SyntaxRole } from "@recense/contract";
 import { expect, it } from "vitest";
 import { splitLines } from "../place/linemap.ts";
 import { decodeText } from "../text.ts";

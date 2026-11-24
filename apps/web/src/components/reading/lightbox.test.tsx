@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { RenderedBlock } from "@emend/contract";
+import type { RenderedBlock } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type Element as HappyElement, PropertySymbol } from "happy-dom";
@@ -14,23 +14,23 @@ import { DIAGRAM_DRAW_TIMEOUT_MS } from "./MermaidBlock.tsx";
 const reviewId = "11111111-1111-4111-8111-111111111111";
 const media = (hash: string) => `/api/v1/media/${hash.repeat(64)}`;
 const imageHtml = (hash: string, caption: string, alt = caption) =>
-  `<span class="emend-media"><img src="${media(hash)}" alt="${alt}"><span class="emend-media-caption">${caption}</span></span>`;
+  `<span class="recense-media"><img src="${media(hash)}" alt="${alt}"><span class="recense-media-caption">${caption}</span></span>`;
 const row: RenderedBlock = {
   id: "overview-11111111",
   section: "overview",
   kind: "paragraph",
   text: "Before After",
-  html: `<p class="emend-media-row">${imageHtml("a", "Before")}${imageHtml("b", "After")}</p>`,
+  html: `<p class="recense-media-row">${imageHtml("a", "Before")}${imageHtml("b", "After")}</p>`,
 };
 const pair: RenderedBlock = {
   ...row,
   text: "Before After\nMore room for seeds.",
-  html: `<p class="emend-media-row emend-media-pair">${imageHtml("a", "Before")} ${imageHtml("b", "After")}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+  html: `<p class="recense-media-row recense-media-pair">${imageHtml("a", "Before")} ${imageHtml("b", "After")}\n<span class="recense-media-effect">More room for seeds.</span></p>`,
 };
 const diffPair: RenderedBlock = {
   ...pair,
   text: "Before After Diff\nMore room for seeds.",
-  html: `<p class="emend-media-row emend-media-pair emend-media-pair-diff">${imageHtml("a", "Before")} ${imageHtml("b", "After")} ${imageHtml("c", "Diff").replace('class="emend-media"', 'class="emend-media emend-media-diff"')}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+  html: `<p class="recense-media-row recense-media-pair recense-media-pair-diff">${imageHtml("a", "Before")} ${imageHtml("b", "After")} ${imageHtml("c", "Diff").replace('class="recense-media"', 'class="recense-media recense-media-diff"')}\n<span class="recense-media-effect">More room for seeds.</span></p>`,
 };
 const mixedPairs: RenderedBlock = {
   ...diffPair,
@@ -65,7 +65,7 @@ const later: RenderedBlock = {
   section: "overview",
   kind: "paragraph",
   text: "garden.png",
-  html: `<p>${imageHtml("c", "garden.png", "")}<span class="emend-media"><img alt="No source"></span><span class="emend-media"><img src="/other.png" alt="Other source"></span></p>`,
+  html: `<p>${imageHtml("c", "garden.png", "")}<span class="recense-media"><img alt="No source"></span><span class="recense-media"><img src="/other.png" alt="Other source"></span></p>`,
 };
 const groups: ReaderGroup[] = [
   { key: "overview", blocks: [row, paragraph] },
@@ -208,7 +208,7 @@ test.each([
   const { container } = mount([
     {
       key: "overview",
-      blocks: [{ ...row, html: `<span class="emend-media"><img src="${src}" alt="Invalid"></span>` }],
+      blocks: [{ ...row, html: `<span class="recense-media"><img src="${src}" alt="Invalid"></span>` }],
     },
   ]);
   const image = container.querySelector("img");
@@ -222,7 +222,7 @@ test("ignores unwrapped images, nested images and author-prefixed wrappers", () 
       blocks: [
         {
           ...row,
-          html: `<p><img src="${media("a")}"><span class="emend-media"><span><img src="${media("b")}"></span></span><span class="user-content-emend-media"><img src="${media("c")}"></span></p>`,
+          html: `<p><img src="${media("a")}"><span class="recense-media"><span><img src="${media("b")}"></span></span><span class="user-content-recense-media"><img src="${media("c")}"></span></p>`,
         },
       ],
     },
@@ -713,7 +713,7 @@ test.each(["click", "Enter", " "])(
   },
 );
 
-test.each([".emend-media-caption", "p.emend-media-row"])(
+test.each([".recense-media-caption", "p.recense-media-row"])(
   "clicking %s does not open a screenshot or clear selection",
   (selector) => {
     const { container } = mount();
@@ -757,7 +757,7 @@ test.each([
       blocks: [
         {
           ...row,
-          html: `<span class="emend-media"><img src="${media("a")}" alt="${alt}"><span class="emend-media-caption"> </span></span>`,
+          html: `<span class="recense-media"><img src="${media("a")}" alt="${alt}"><span class="recense-media-caption"> </span></span>`,
         },
       ],
     },
@@ -1188,8 +1188,8 @@ test("a diff pair offers four modes and keeps all three images mounted", () => {
       .map((button) => button.textContent),
   ).toEqual(["Before", "After", "Side by side", "Diff"]);
   const prose = container.querySelector(".em-prose");
-  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
-  const mounted = [...container.querySelectorAll(".emend-media > img")];
+  const images = [...container.querySelectorAll<HTMLElement>("p.recense-media-pair > .recense-media")];
+  const mounted = [...container.querySelectorAll(".recense-media > img")];
   expect(mounted).toHaveLength(3);
   expect(prose?.getAttribute("data-pair-mode")).toBe("side");
   expect(images.map((image) => mediaDisplay(image) === "none")).toEqual([false, false, false]);
@@ -1204,7 +1204,7 @@ test("a diff pair offers four modes and keeps all three images mounted", () => {
     expect(prose?.getAttribute("data-pair-mode")).toBe(mode);
     expect(selected.getAttribute("aria-pressed")).toBe("true");
     expect(images.map((image) => mediaDisplay(image) === "none")).toEqual(hidden);
-    expect([...container.querySelectorAll(".emend-media > img")]).toEqual(mounted);
+    expect([...container.querySelectorAll(".recense-media > img")]).toEqual(mounted);
     for (const image of mounted) expect(image.isConnected).toBe(true);
   }
   prose?.removeAttribute("data-pair-mode");
@@ -1217,7 +1217,7 @@ test("Diff mode keeps both images visible in pairs without a diff in the same bl
   expect(screen.getAllByRole("group", { name: "Compare screenshots" })).toHaveLength(1);
   const control = screen.getByRole("group", { name: "Compare screenshots" });
   fireEvent.click(within(control).getByRole("button", { name: "Diff" }));
-  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
+  const images = [...container.querySelectorAll<HTMLElement>("p.recense-media-pair > .recense-media")];
   expect(images).toHaveLength(5);
   expect(images.map((image) => mediaDisplay(image) === "none")).toEqual([true, true, false, false, false]);
   for (const image of images) expect(image.isConnected).toBe(true);
@@ -1235,7 +1235,7 @@ test("replacing a diff pair with a plain pair resets Diff mode to side by side",
   expect(within(control).queryByRole("button", { name: "Diff" })).toBeNull();
   expect(within(control).getByRole("button", { name: "Side by side" }).getAttribute("aria-pressed")).toBe("true");
   expect(container.querySelector(".em-prose")?.getAttribute("data-pair-mode")).toBe("side");
-  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
+  const images = [...container.querySelectorAll<HTMLElement>("p.recense-media-pair > .recense-media")];
   expect(images).toHaveLength(2);
   for (const image of images) expect(mediaDisplay(image)).not.toBe("none");
 });
@@ -1255,7 +1255,7 @@ test.each([
   const { container } = mount([{ key: "overview", blocks: [block] }]);
   expect(screen.getAllByRole("group", { name: "Compare screenshots" })).toHaveLength(1);
   const control = screen.getByRole("group", { name: "Compare screenshots" });
-  const images = [...container.querySelectorAll<HTMLElement>("p.emend-media-pair > .emend-media")];
+  const images = [...container.querySelectorAll<HTMLElement>("p.recense-media-pair > .recense-media")];
   expect(images).toHaveLength(count * 2);
   for (const [mode, label] of [
     ["before", "Before"],
@@ -1348,7 +1348,7 @@ test.each(["Before", "After"])("revealing %s in a plain pair keeps a mixed block
   const control = screen.getByRole("group", { name: "Compare screenshots" });
   fireEvent.click(within(control).getByRole("button", { name: "Diff" }));
   const image = container.querySelector<HTMLImageElement>(
-    `p.emend-media-pair:not(.emend-media-pair-diff) img[alt="${target}"]`,
+    `p.recense-media-pair:not(.recense-media-pair-diff) img[alt="${target}"]`,
   );
   if (!image?.parentElement) throw new Error("Missing plain pair image");
   expect(mediaDisplay(image.parentElement)).not.toBe("none");

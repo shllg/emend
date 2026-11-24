@@ -1,4 +1,4 @@
-import { OTHER_TOPIC, type PlacementLocation, type RevisionView, type ThreadView } from "@emend/contract";
+import { OTHER_TOPIC, type PlacementLocation, type RevisionView, type ThreadView } from "@recense/contract";
 import { resolveFile, targetLabel, WRITEUP_SECTION_NAMES } from "../components/diff/targets.ts";
 import { diffGroups } from "./diff-groups.ts";
 

@@ -1,4 +1,4 @@
-import type { Placement, PlacementLocation, Target, TopicMeta } from "@emend/contract";
+import type { Placement, PlacementLocation, Target, TopicMeta } from "@recense/contract";
 import { expect, test } from "vitest";
 import type { DownloadDiffFile } from "./download-diff.ts";
 import {

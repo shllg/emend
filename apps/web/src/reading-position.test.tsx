@@ -1,5 +1,5 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import type { RenderedBlock, ReviewView, RevisionView, ThreadView } from "@emend/contract";
+import type { RenderedBlock, ReviewView, RevisionView, ThreadView } from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -228,7 +228,7 @@ test.each([true, false])(
     const dispatch = vi.spyOn(HTMLElement.prototype, "dispatchEvent");
     // happy-dom calls dispatchEvent again on each ancestor while the same event bubbles.
     const reveals = () =>
-      new Set(dispatch.mock.calls.map(([event]) => event).filter((event) => event.type === "emend:reveal-reading"));
+      new Set(dispatch.mock.calls.map(([event]) => event).filter((event) => event.type === "recense:reveal-reading"));
     const anchor = { id: `block-${folded ? b.id : a.id}`, fraction: 0.5 };
     saveReadingPosition(writeupKey, anchor);
     fakeTimers();
@@ -621,12 +621,12 @@ test("C3 HTML positions use the frame's declared headings rather than the outer 
   if (!frame) throw new Error("missing frame");
   Object.defineProperty(frame, "contentWindow", { value: { postMessage: vi.fn() } });
   fireEvent.load(frame);
-  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "recense:ready" } }));
   fireEvent(
     window,
     new MessageEvent("message", {
       source: frame.contentWindow,
-      data: { type: "emend:position", heading: 0, fraction: 0.25 },
+      data: { type: "recense:position", heading: 0, fraction: 0.25 },
     }),
   );
   readerScroll(200);

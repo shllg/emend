@@ -1,4 +1,4 @@
-import type { AgentNoteView, FileView, Target } from "@emend/contract";
+import type { AgentNoteView, FileView, Target } from "@recense/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useEffect, useRef, useState } from "react";

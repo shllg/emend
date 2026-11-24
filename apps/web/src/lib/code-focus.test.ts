@@ -1,4 +1,4 @@
-import { type FileView, OTHER_TOPIC, type TopicMeta } from "@emend/contract";
+import { type FileView, OTHER_TOPIC, type TopicMeta } from "@recense/contract";
 import { expect, test } from "vitest";
 import { resolveCodeFocus, sameCodeFocus } from "./code-focus.ts";
 

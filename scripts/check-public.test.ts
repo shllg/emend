@@ -335,7 +335,7 @@ test("the line marker never skips private terms from either the file or the envi
   const cwd = repo();
   writeFileSync(path.join(cwd, ".private-terms"), "# local\nfixturecorp\n");
   writeFileSync(path.join(cwd, "marked.md"), `${secret} fixturecorp fixture-team // ${allowMarker}\n`);
-  const result = cli(cwd, [], { EMEND_PRIVATE_TERMS: "fixture-team" });
+  const result = cli(cwd, [], { RECENSE_PRIVATE_TERMS: "fixture-team" });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, "");
   assert.equal(
@@ -354,9 +354,9 @@ test("the line marker cannot disable redaction in a reported filename", () => {
 test("private lists preserve line numbers and only file allowed phrases take effect", () => {
   const cwd = repo();
   writeFileSync(path.join(cwd, ".private-terms"), "# synthetic\n\nfixturecorp\n!fixturecorp/public-tool\n");
-  const env = { EMEND_PRIVATE_TERMS: "# environment\nfixture-team\n!fixture-team/public\n!fixturecorp/shared\n" };
+  const env = { RECENSE_PRIVATE_TERMS: "# environment\nfixture-team\n!fixture-team/public\n!fixturecorp/shared\n" };
   const terms = loadPrivateTerms(cwd, env, { root: cwd });
-  assert.deepEqual(terms.notes, ["check:public: allowed phrases in EMEND_PRIVATE_TERMS are ignored"]);
+  assert.deepEqual(terms.notes, ["check:public: allowed phrases in RECENSE_PRIVATE_TERMS are ignored"]);
   assert.deepEqual(checkText("FIXTURECORP and fixture-team", "--text #1", terms), [
     "--text #1: private term (file line 3)",
     "--text #1: private term (env line 2)",
@@ -397,7 +397,7 @@ test("the no-list note occurs exactly once and is not a failure", () => {
   assert.equal(result.stderr, "check:public: no private terms list; generic rules only\n");
   const outside = directory();
   writeFileSync(path.join(outside, ".private-terms"), "unused-synthetic-term");
-  const supplied = cli(outside, ["--root", outside, "--text", "public"], { EMEND_PRIVATE_TERMS: "fixturecorp" });
+  const supplied = cli(outside, ["--root", outside, "--text", "public"], { RECENSE_PRIVATE_TERMS: "fixturecorp" });
   assert.equal(supplied.status, 0);
   assert.equal(supplied.stderr, "");
 });
@@ -410,7 +410,7 @@ test("explicit files and texts are repeatable, isolated and never echo matches",
   const result = cli(
     cwd,
     ["--file", "draft.md", "--file", "second.md", "--text", blockedMail, "--text", "fixturecorp"],
-    { EMEND_PRIVATE_TERMS: "fixturecorp" },
+    { RECENSE_PRIVATE_TERMS: "fixturecorp" },
   );
   assert.equal(result.status, 1);
   assert.equal(
@@ -419,7 +419,7 @@ test("explicit files and texts are repeatable, isolated and never echo matches",
   );
   for (const value of [home("fixture-person"), trailer, generated, blockedMail, "fixturecorp"])
     assert(!result.stderr.includes(value));
-  assert.equal(cli(cwd, ["--text", "clean"], { EMEND_PRIVATE_TERMS: "fixturecorp" }).status, 0);
+  assert.equal(cli(cwd, ["--text", "clean"], { RECENSE_PRIVATE_TERMS: "fixturecorp" }).status, 0);
 });
 
 test("locations and errors cannot disclose a term, content or terminal controls", () => {
@@ -427,7 +427,7 @@ test("locations and errors cannot disclose a term, content or terminal controls"
   writeFileSync(path.join(cwd, ".private-terms"), "unused-synthetic-term");
   const file = "fixturecorp\n.md";
   writeFileSync(path.join(cwd, file), secret);
-  const env = { EMEND_PRIVATE_TERMS: "fixturecorp" };
+  const env = { RECENSE_PRIVATE_TERMS: "fixturecorp" };
   const result = cli(cwd, ["--file", file], env);
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "[redacted]?.md:1: secret shape\n");
@@ -497,7 +497,7 @@ test("commit mode checks every message in range, including merges, but ignores f
   git(cwd, "merge", "--no-ff", "side", "-m", generated);
   const merged = git(cwd, "rev-parse", "HEAD");
   writeFileSync(path.join(cwd, "untracked.md"), secret);
-  const result = cli(cwd, ["--commits", "main..HEAD"], { EMEND_PRIVATE_TERMS: "fixturecorp" });
+  const result = cli(cwd, ["--commits", "main..HEAD"], { RECENSE_PRIVATE_TERMS: "fixturecorp" });
   assert.equal(result.status, 1);
   assert.deepEqual(
     result.stderr.trim().split("\n").sort(),
@@ -552,7 +552,7 @@ test("bad usage exits two without echoing arguments", () => {
   ]) {
     assert.equal(cli(cwd, args).status, 2);
   }
-  assert.equal(cli(cwd, ["--text", ""], { EMEND_PRIVATE_TERMS: "fixturecorp" }).status, 0);
+  assert.equal(cli(cwd, ["--text", ""], { RECENSE_PRIVATE_TERMS: "fixturecorp" }).status, 0);
 });
 
 test("the scanner and its tests do not match their own generic patterns", () => {
@@ -669,7 +669,7 @@ test("regression: explicit modes require a list and --root selects it without gi
     assert.equal(missing.status, 1);
     assert.equal(missing.stderr, "check:public: private terms list required; ask the owner to create <main>/.private-terms; agents never create, read or edit it\n");
     for (const value of ["", "# deliberate empty list", "fixturecorp"]) {
-      const refused = cli(cwd, args, { EMEND_PRIVATE_TERMS: value });
+      const refused = cli(cwd, args, { RECENSE_PRIVATE_TERMS: value });
       assert.equal(refused.status, 1);
       assert.equal(refused.stderr, "check:public: private terms list required; ask the owner to create <main>/.private-terms; agents never create, read or edit it\n");
     }
@@ -688,12 +688,12 @@ test("regression: symlink entrypoint executes and explicit symlink files are ref
   writeFileSync(path.join(cwd, ".private-terms"), "unused-synthetic-term");
   const linkedScript = path.join(cwd, "gate.ts");
   symlinkSync(script, linkedScript);
-  const result = nodeCaptured(cwd, [linkedScript, "--text", secret], { EMEND_PRIVATE_TERMS: "fixturecorp" });
+  const result = nodeCaptured(cwd, [linkedScript, "--text", secret], { RECENSE_PRIVATE_TERMS: "fixturecorp" });
   assert.equal(result.status, 1);
   assert.equal(result.stderr, "--text #1:1:1: secret shape\n");
   writeFileSync(path.join(cwd, "target.md"), "public");
   symlinkSync("target.md", path.join(cwd, "draft.md"));
-  const refused = cli(cwd, ["--file", "draft.md"], { EMEND_PRIVATE_TERMS: "fixturecorp" });
+  const refused = cli(cwd, ["--file", "draft.md"], { RECENSE_PRIVATE_TERMS: "fixturecorp" });
   assert.equal(refused.status, 1);
   assert.equal(refused.stderr, "check:public: could not read a file\n");
 });
@@ -755,7 +755,7 @@ test("regression: printed locations remove format controls and list hits name th
   assert.deepEqual(checkText(secret, "draft\u202e\u2066\u200b.md", empty), ["draft???.md: secret shape"]);
   const cwd = repo();
   writeFileSync(path.join(cwd, ".private-terms"), "# local\nfixturecorp");
-  const terms = loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "# env\n# second\nfixtureteam" }, { root: cwd });
+  const terms = loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "# env\n# second\nfixtureteam" }, { root: cwd });
   assert.deepEqual(checkText("fixturecorp fixtureteam", "x", terms), [
     "x: private term (file line 2)",
     "x: private term (env line 3)",
@@ -830,7 +830,7 @@ test("regression: URL spans and line offsets are reused for many email hits", { 
   assert.equal(result.stdout, "ok");
 });
 
-test("1: emend tokens, Tailscale keys, PGP blocks and URL passwords", () => {
+test("1: recense tokens, Tailscale keys, PGP blocks and URL passwords", () => {
   for (const prefix of ["em", "ems", "emp"].map((kind) => `${kind}_`)) {
     for (const ending of ["a", "_", "-"]) {
       const token = prefix + "a".repeat(42) + ending;
@@ -1035,7 +1035,7 @@ test("8: unreadable advertised refs refuse with exit 69 and fixed output", () =>
   const cwd = repo();
   writeFileSync(path.join(cwd, ".private-terms"), "unused-synthetic-term");
   git(cwd, "remote", "set-url", "--push", "origin", path.join(root, "missing-fixturecorp"));
-  const result = cli(cwd, ["--push", "HEAD"], { EMEND_PRIVATE_TERMS: "fixturecorp" });
+  const result = cli(cwd, ["--push", "HEAD"], { RECENSE_PRIVATE_TERMS: "fixturecorp" });
   assert.equal(result.status, 69);
   assert.equal(result.stderr, "check:public: could not read destination refs\n");
 });
@@ -1551,21 +1551,21 @@ test("B: requireTerms needs the root file even with environment terms", () => {
   const cwd = directory();
   for (const value of ["", " \t\r\n", "# comment\n  # another", "!alice example\n!", "alice example"]) {
     assert.throws(
-      () => loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: value }, { root: cwd, requireTerms: true }),
+      () => loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: value }, { root: cwd, requireTerms: true }),
       (error: unknown) =>
         error instanceof PublicCheckError && error.message.startsWith("check:public: private terms list required;"),
     );
   }
   assert.equal(
-    loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "# comment\nalice example" }, { root: cwd }).terms.length,
+    loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "# comment\nalice example" }, { root: cwd }).terms.length,
     1,
   );
   writeFileSync(path.join(cwd, ".private-terms"), "unused-synthetic-term");
-  assert.equal(loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "# comment" }, { root: cwd, requireTerms: true }).terms.length, 1);
-  const terms = loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "alice example" }, { root: cwd, requireTerms: true });
+  assert.equal(loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "# comment" }, { root: cwd, requireTerms: true }).terms.length, 1);
+  const terms = loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "alice example" }, { root: cwd, requireTerms: true });
   assert.deepEqual(checkText("alice-example", "draft", terms), ["draft: private term (env line 1)"]);
   assert.throws(
-    () => loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "alice example" }, { root: directory(), requireTerms: true }),
+    () => loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "alice example" }, { root: directory(), requireTerms: true }),
     (error: unknown) =>
       error instanceof PublicCheckError && error.message.startsWith("check:public: private terms list required;"),
   );
@@ -1726,7 +1726,7 @@ test("R6.7: inherited git location variables cannot redirect a cwd scan", () => 
       ...extra,
       PATH: gitShim(`
         for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-          "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "EMEND_PRIVATE_TERMS"])
+          "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "RECENSE_PRIVATE_TERMS"])
           if (process.env[key] !== undefined) process.exit(128);
         if (!args.includes("submodule.recurse=false")) process.exit(128);
       `),
@@ -1815,7 +1815,7 @@ test("R7.B: inline comments name only the line and required lists must contain f
   for (const contents of ["", "\ufeff", "# synthetic\n \t\n", "!alice example\n# synthetic\n"]) {
     writeFileSync(file, contents);
     assert.throws(
-      () => loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "alice example" }, { root: cwd, requireTerms: true }),
+      () => loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "alice example" }, { root: cwd, requireTerms: true }),
       (error: unknown) => error instanceof PublicCheckError && error.message === "check:public: the private terms list holds no terms",
     );
   }
@@ -2020,7 +2020,7 @@ test("R8.8: explicit terms roots ignore a git directory in a temporary ancestor"
   mkdirSync(path.join(ancestor, ".git"));
   const cwd = path.join(ancestor, "child");
   mkdirSync(cwd);
-  const terms = loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "alice example" }, { root: cwd });
+  const terms = loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "alice example" }, { root: cwd });
   assert.equal(terms.terms.length, 1);
   assert.throws(() => loadPrivateTerms(cwd, {}, { root: cwd, requireTerms: true }),
     (error: unknown) => error instanceof PublicCheckError && error.message.startsWith("check:public: private terms list required;"));
@@ -2172,10 +2172,10 @@ test("R11.B: markers count once per changed commit, path and key", () => {
 test("R9.8: environment terms reject every hidden line separator before parsing comments", () => {
   const cwd = directory();
   for (const character of ["\r", "\u2028", "\u2029", "\u0085", "\v", "\f"])
-    assert.throws(() => loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: `# comment\n# hidden${character}text` }, { root: cwd }),
+    assert.throws(() => loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: `# comment\n# hidden${character}text` }, { root: cwd }),
       (error: unknown) => error instanceof PublicCheckError && error.message ===
-        "check:public: invalid line separator in EMEND_PRIVATE_TERMS at line 2");
-  assert.equal(loadPrivateTerms(cwd, { EMEND_PRIVATE_TERMS: "# comment\r\nunused-synthetic-term" }, { root: cwd }).terms.length, 1);
+        "check:public: invalid line separator in RECENSE_PRIVATE_TERMS at line 2");
+  assert.equal(loadPrivateTerms(cwd, { RECENSE_PRIVATE_TERMS: "# comment\r\nunused-synthetic-term" }, { root: cwd }).terms.length, 1);
 });
 
 test("R9.3: the scanner strips all Git config environment overrides", () => {
@@ -2214,10 +2214,10 @@ test("R9.11: 64k compatibility and mixed mark runs refuse text; exactly 32 code 
 test("R9.11: environment terms enforce the compatibility mark bound", () => {
   const cwd = directory();
   for (const count of [32, 33, 64 * 1024]) {
-    const env = { EMEND_PRIVATE_TERMS: `# synthetic\na${compatibilityRun(count)}` };
+    const env = { RECENSE_PRIVATE_TERMS: `# synthetic\na${compatibilityRun(count)}` };
     if (count === 32) assert.equal(loadPrivateTerms(cwd, env, { root: cwd }).terms.length, 1);
     else assert.throws(() => loadPrivateTerms(cwd, env, { root: cwd }),
-      (error: unknown) => error instanceof PublicCheckError && error.message === "EMEND_PRIVATE_TERMS:2: combining-mark run");
+      (error: unknown) => error instanceof PublicCheckError && error.message === "RECENSE_PRIVATE_TERMS:2: combining-mark run");
   }
 });
 
@@ -2765,7 +2765,7 @@ test("R4.7: LAN suffixes and command, assignment and copy contexts identify host
     `I deployed to ${["builder", "lan"].join(".")} yesterday`, `open ${["printer", "home", "arpa"].join(".")}`,
     `REDIS_HOST=${["cache", "lan"].join(".")}`, `scp file ${["builder", "lan"].join(".")}:/tmp/x`,
     `rsync -a . ${["nas", "lan"].join(".")}:/srv`, `ssh -p 22 ${["nas", "lan"].join(".")}`,
-    `emend serve --host=${["nas", "lan"].join(".")}`, `server: ${["nas", "lan"].join(".")}`,
+    `recense serve --host=${["nas", "lan"].join(".")}`, `server: ${["nas", "lan"].join(".")}`,
     ...["ssh -p 22", "rsync -a", "scp", "mosh", "ProxyJump", "server:"].map((word) => `${word} ${["fixture", "internal"].join(".")}`),
     ...["local", "internal"].map((suffix) => `HOST=${["fixture", suffix].join(".")}`),
     ...[":/tmp/x", ":~"].map((after) => `${["fixture", "local"].join(".")}${after}`),

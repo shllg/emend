@@ -10,7 +10,7 @@ import {
   ThemeBase,
   ThemeValid,
   ThreadView,
-} from "@emend/contract";
+} from "@recense/contract";
 import { codePxSchema, proseSizeSchema, readingWidthSchema } from "./layout-store.ts";
 
 export const HtmlPosition = HtmlDocPosition;
@@ -47,7 +47,7 @@ export const DiagramReply = diagramResult
 export type DiagramReply = typeof DiagramReply._output;
 const diagrams = empty
   .extend({
-    type: literal("emend:diagrams"),
+    type: literal("recense:diagrams"),
     request,
     diagrams: empty
       .extend({
@@ -65,7 +65,7 @@ const diagrams = empty
   .refine(({ diagrams }) => diagrams.reduce((total, diagram) => total + diagram.source.length, 0) <= DIAGRAM_TOTAL_MAX);
 export type DiagramJob = typeof diagrams._output;
 const diagramAddress = {
-  type: literal("emend:diagram"),
+  type: literal("recense:diagram"),
   request,
   index: FileView.shape.order.max(DIAGRAM_COUNT_MAX - 1),
 };
@@ -75,7 +75,7 @@ const image = empty.extend({
 });
 const gallery = empty
   .extend({
-    type: literal("emend:image"),
+    type: literal("recense:image"),
     images: image.array().min(1).max(LIMITS.filesPerRevision),
     index: FileView.shape.order,
   })
@@ -84,30 +84,30 @@ const gallery = empty
     ({ images }) => images.reduce((total, image) => total + image.path.length + image.caption.length, 0) <= 1_000_000,
   );
 export const FrameToParent = span
-  .extend({ type: literal("emend:anchor") })
-  .or(empty.extend({ type: literal("emend:ready") }))
-  .or(empty.extend({ type: literal("emend:issue"), number: ThreadView.shape.createdOn.max(9_999_999) }))
-  .or(HtmlPosition.safeExtend({ type: literal("emend:position") }))
+  .extend({ type: literal("recense:anchor") })
+  .or(empty.extend({ type: literal("recense:ready") }))
+  .or(empty.extend({ type: literal("recense:issue"), number: ThreadView.shape.createdOn.max(9_999_999) }))
+  .or(HtmlPosition.safeExtend({ type: literal("recense:position") }))
   .or(gallery)
   .or(diagrams)
   .or(
     empty.extend({
-      type: literal("emend:navigate"),
+      type: literal("recense:navigate"),
       path: FilePath,
       fragment: FileView.shape.mediaType.max(1024).refine((fragment) => fragment.isWellFormed()),
     }),
   );
-export type DocNavigation = Extract<typeof FrameToParent._output, { type: "emend:navigate" }>;
+export type DocNavigation = Extract<typeof FrameToParent._output, { type: "recense:navigate" }>;
 export const ParentToFrame = empty
-  .extend({ type: literal("emend:highlight"), anchors: span.extend({ threadId }).array() })
-  .or(empty.extend({ type: literal("emend:repo"), url: RepoUrl }))
-  .or(HtmlDocChanges.safeExtend({ type: literal("emend:changed") }))
+  .extend({ type: literal("recense:highlight"), anchors: span.extend({ threadId }).array() })
+  .or(empty.extend({ type: literal("recense:repo"), url: RepoUrl }))
+  .or(HtmlDocChanges.safeExtend({ type: literal("recense:changed") }))
   .or(diagramResult.extend(diagramAddress))
   .or(diagramFailure.extend(diagramAddress))
-  .or(empty.extend({ type: literal("emend:layout"), wide: FileView.shape.hasOld }))
+  .or(empty.extend({ type: literal("recense:layout"), wide: FileView.shape.hasOld }))
   .or(
     empty.extend({
-      type: literal("emend:layout"),
+      type: literal("recense:layout"),
       wide: FileView.shape.hasOld,
       width: readingWidthSchema,
       prose: proseSizeSchema,
@@ -116,20 +116,20 @@ export const ParentToFrame = empty
   )
   .or(
     empty.extend({
-      type: literal("emend:theme"),
+      type: literal("recense:theme"),
       mode: ThemeBase,
       scales: ThemeValid.shape.scales,
       tokens: ThemeValid.shape.tokens,
     }),
   )
-  .or(empty.extend({ type: literal("emend:scroll"), threadId }))
+  .or(empty.extend({ type: literal("recense:scroll"), threadId }))
   .or(
     empty.extend({
-      type: literal("emend:goto"),
+      type: literal("recense:goto"),
       heading: HtmlPosition.shape.heading.unwrap(),
       label: DocHeading.shape.text,
       fraction: HtmlPosition.shape.fraction.optional(),
     }),
   )
-  .or(empty.extend({ type: literal("emend:docs"), paths: FilePath.array() }));
+  .or(empty.extend({ type: literal("recense:docs"), paths: FilePath.array() }));
 export type ParentToFrame = typeof ParentToFrame._output;

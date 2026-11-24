@@ -12,7 +12,7 @@ export function prepareTables(markdown: string) {
   const lines = markdown.split("\n");
   const output: string[] = [];
   const tables = new Map<string, string>();
-  let prefix = "emend-large-table-";
+  let prefix = "recense-large-table-";
   while (markdown.includes(prefix)) prefix += "-";
   let fence: string | undefined;
   for (let i = 0; i < lines.length; i++) {

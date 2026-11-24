@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   accessSync,
   constants,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -117,7 +118,7 @@ export async function installLocal(args: string[], options: InstallOptions = {})
     if (dirty.trim()) stdout(`install:local: uncommitted changes are not included; installing ${commit}.`);
 
     step = "create temporary folder";
-    temporary = mkdtempSync(join(options.temporaryRoot ?? tmpdir(), "emend-install-local-"));
+    temporary = mkdtempSync(join(options.temporaryRoot ?? tmpdir(), "recense-install-local-"));
     const source = join(temporary, "src");
     const pack = join(temporary, "pack");
     mkdirSync(source);
@@ -129,19 +130,19 @@ export async function installLocal(args: string[], options: InstallOptions = {})
     if (tag) {
       step = "stamp release version";
       const version = tag.slice(1);
-      const committed = JSON.parse(readFileSync(join(source, "apps/emend/package.json"), "utf8")).version;
+      const committed = JSON.parse(readFileSync(join(source, "apps/recense/package.json"), "utf8")).version;
       if (typeof committed !== "string" || !VERSION_PATTERN.test(committed)) {
         throw new Error("Expected a plain release version");
       }
       if (compareVersions(version, committed) > 0) stampVersion(source, version);
     }
     step = "stamp local build";
-    const manifestPath = join(source, "apps/emend/package.json");
+    const manifestPath = join(source, "apps/recense/package.json");
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, emendLocalBuild: commit }, null, 2)}\n`);
+    writeFileSync(manifestPath, `${JSON.stringify({ ...manifest, recenseLocalBuild: commit }, null, 2)}\n`);
     await command("pnpm install", "pnpm", ["install", "--frozen-lockfile"], source);
     await command("pnpm build", "pnpm", ["build"], source);
-    const pkg = join(source, "apps/emend");
+    const pkg = join(source, "apps/recense");
     await command("pnpm pack", "pnpm", ["pack", "--pack-destination", pack], pkg);
     step = "read package";
     const version = JSON.parse(readFileSync(join(pkg, "package.json"), "utf8")).version;
@@ -155,28 +156,37 @@ export async function installLocal(args: string[], options: InstallOptions = {})
       const data =
         env.MISE_DATA_DIR ||
         (env.XDG_DATA_HOME ? join(env.XDG_DATA_HOME, "mise") : join(env.HOME || homedir(), ".local/share/mise"));
-      folder = resolve(data, "linked-installs/npm-shllg-emend-local");
+      folder = resolve(data, "linked-installs/npm-shllg-recense-local");
+      // The install of the name before the rename would answer to the same `emend` command; unlink it first.
+      const legacy = resolve(data, "linked-installs/npm-shllg-emend-local");
+      if (existsSync(legacy)) {
+        await command("mise unlink old emend", mise, ["uninstall", "npm:@shllg/emend@local"]);
+        rmSync(legacy, { recursive: true, force: true });
+        stdout("install:local: removed the old emend install.");
+      }
       await command("npm install", "npm", ["install", "-g", "--prefix", folder, tarball]);
-      await command("mise link", mise, ["link", "--force", "npm:@shllg/emend@local", folder]);
+      await command("mise link", mise, ["link", "--force", "npm:@shllg/recense@local", folder]);
     } else {
+      // A global @shllg/emend owns the `emend` command that this package also installs, so it goes first.
+      await command("npm uninstall old emend", "npm", ["uninstall", "-g", "@shllg/emend"]);
       await command("npm install", "npm", ["install", "-g", tarball]);
       folder = (await command("npm prefix", "npm", ["prefix", "-g"], root, true)).trim();
       if (!folder) throw new Error("Empty npm prefix");
     }
-    stdout(`install:local: installed emend ${version} (${commit}).`);
+    stdout(`install:local: installed recense ${version} (${commit}).`);
 
     step = "check PATH";
-    const installed = join(folder, "bin/emend");
+    const installed = join(folder, "bin/recense");
     const installedPath = realpathSync(installed);
-    const onPath = findExecutable("emend", env, root);
+    const onPath = findExecutable("recense", env, root);
     if (!onPath) {
-      stdout(`install:local: emend is not on your PATH; add ${join(folder, "bin")} to it.`);
+      stdout(`install:local: recense is not on your PATH; add ${join(folder, "bin")} to it.`);
     } else {
       let foundPath = realpathSync(onPath);
       let matches = foundPath === installedPath;
       if (mise && foundPath === realpathSync(mise)) {
         try {
-          foundPath = realpathSync((await command("mise which", mise, ["which", "emend"], root, true)).trim());
+          foundPath = realpathSync((await command("mise which", mise, ["which", "recense"], root, true)).trim());
           matches = foundPath === installedPath;
         } catch {
           interruption.signal.throwIfAborted();
@@ -185,7 +195,7 @@ export async function installLocal(args: string[], options: InstallOptions = {})
       }
       if (!matches) {
         stdout(
-          `install:local: the emend on your PATH is ${onPath} (${foundPath}), not this install; remove it or put ${join(folder, "bin")} before it.`,
+          `install:local: the recense on your PATH is ${onPath} (${foundPath}), not this install; remove it or put ${join(folder, "bin")} before it.`,
         );
       }
     }
@@ -195,10 +205,10 @@ export async function installLocal(args: string[], options: InstallOptions = {})
       service = await command("service status", installed, ["service", "status"], root, true);
     } catch {
       interruption.signal.throwIfAborted();
-      stdout("install:local: could not check the emend service; if you use it, run emend service install.");
+      stdout("install:local: could not check the recense service; if you use it, run recense service install.");
     }
-    if (service?.trim() === "emend: service not installed") {
-      stdout("Next: emend service install, then emend skills install.");
+    if (service?.trim() === "recense: service not installed") {
+      stdout("Next: recense service install, then recense skills install.");
     } else if (service !== undefined) {
       await command("service install", installed, ["service", "install"]);
     }

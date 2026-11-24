@@ -1,4 +1,4 @@
-import { SyntaxRole, type ThemeBase } from "@emend/contract";
+import { SyntaxRole, type ThemeBase } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { expect, test } from "vitest";

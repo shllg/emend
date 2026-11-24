@@ -6,27 +6,35 @@ import { applyHtmlLook } from "./html-look-file.ts";
 import { HTML_NESTING_LIMIT, parseDocHtml } from "./place/html.ts";
 
 test.each([
-  ["<main><h1>Plan</h1><section><p>Seeds</p></section></main>", "emend", "default"],
-  ["<style>p { color: red }</style>", "emend", "default"],
-  ['<link rel="Stylesheet preload" href="a.css">', "emend", "default"],
-  ['<link rel="icon">', "emend", "default"],
-  ["<svg><style>body { color: red }</style></svg>", "emend", "default"],
-  ['<p style="color:#222">Seeds</p>', "emend", "default"],
-  ['<body bgcolor="#000">Seeds</body>', "emend", "default"],
-  ['<svg style="color:red"><path style="fill:red"/></svg>', "emend", "default"],
-  ['<svg><foreignObject><p style="color:red">Seeds</p></foreignObject></svg>', "emend", "default"],
-  ['<math><mtext><span style="color:red">Seeds</span></mtext></math>', "emend", "default"],
-  ['<meta name="emend-look" content="custom">', "custom", "marked-custom"],
-  ['<meta name="emend-look" content="emend"><style>p{}</style>', "emend", "marked-emend"],
-  ['<meta name="  EMEND-Look " content=" Custom ">', "custom", "marked-custom"],
-  ['<meta name="emend-look" content="other">', "emend", "default"],
-  ['<body><p>Body</p><meta name="emend-look" content="custom">', "custom", "marked-custom"],
-  ['<meta name="emend-look" content="other"><meta name="emend-look" content="custom">', "custom", "marked-custom"],
-  ['<meta name="emend-look" content="custom"><meta name="emend-look" content="emend">', "custom", "marked-custom"],
-  ['<meta name="emend-look" content="emend"><meta name="emend-look" content="custom">', "emend", "marked-emend"],
-  ['<svg><foreignObject><meta name="emend-look" content="custom"></foreignObject></svg>', "custom", "marked-custom"],
-  ['<link rel="preload\tSTYLESHEET\nicon">', "emend", "default"],
-  ['<link rel="preload\u00a0stylesheet">', "emend", "default"],
+  ["<main><h1>Plan</h1><section><p>Seeds</p></section></main>", "recense", "default"],
+  ["<style>p { color: red }</style>", "recense", "default"],
+  ['<link rel="Stylesheet preload" href="a.css">', "recense", "default"],
+  ['<link rel="icon">', "recense", "default"],
+  ["<svg><style>body { color: red }</style></svg>", "recense", "default"],
+  ['<p style="color:#222">Seeds</p>', "recense", "default"],
+  ['<body bgcolor="#000">Seeds</body>', "recense", "default"],
+  ['<svg style="color:red"><path style="fill:red"/></svg>', "recense", "default"],
+  ['<svg><foreignObject><p style="color:red">Seeds</p></foreignObject></svg>', "recense", "default"],
+  ['<math><mtext><span style="color:red">Seeds</span></mtext></math>', "recense", "default"],
+  ['<meta name="recense-look" content="custom">', "custom", "marked-custom"],
+  ['<meta name="recense-look" content="recense"><style>p{}</style>', "recense", "marked-recense"],
+  ['<meta name="  RECENSE-Look " content=" Custom ">', "custom", "marked-custom"],
+  ['<meta name="recense-look" content="other">', "recense", "default"],
+  ['<body><p>Body</p><meta name="recense-look" content="custom">', "custom", "marked-custom"],
+  ['<meta name="recense-look" content="other"><meta name="recense-look" content="custom">', "custom", "marked-custom"],
+  [
+    '<meta name="recense-look" content="custom"><meta name="recense-look" content="recense">',
+    "custom",
+    "marked-custom",
+  ],
+  [
+    '<meta name="recense-look" content="recense"><meta name="recense-look" content="custom">',
+    "recense",
+    "marked-recense",
+  ],
+  ['<svg><foreignObject><meta name="recense-look" content="custom"></foreignObject></svg>', "custom", "marked-custom"],
+  ['<link rel="preload\tSTYLESHEET\nicon">', "recense", "default"],
+  ['<link rel="preload\u00a0stylesheet">', "recense", "default"],
 ])("classifies %s", (source, look, reason) => {
   expect(htmlLook(source)).toMatchObject({ look, reason, outside: [], otherOutside: false });
 });
@@ -35,7 +43,7 @@ test.each(["style", "bgcolor", "color", "text", "link", "vlink", "alink"])(
   "HTML %s attributes count as own styles even when empty",
   (attribute) => {
     expect(htmlLook(`<div ${attribute}>Seeds</div>`)).toMatchObject({
-      look: "emend",
+      look: "recense",
       reason: "default",
       ownStyles: true,
     });
@@ -43,13 +51,13 @@ test.each(["style", "bgcolor", "color", "text", "link", "vlink", "alink"])(
 );
 
 test.each([
-  ['<template><meta name="emend-look" content="custom"></template>', "emend", "default"],
-  ["<template><style>p{color:red}</style></template>", "emend", "default"],
-  ['<template><link rel="stylesheet" href="a.css"></template>', "emend", "default"],
+  ['<template><meta name="recense-look" content="custom"></template>', "recense", "default"],
+  ["<template><style>p{color:red}</style></template>", "recense", "default"],
+  ['<template><link rel="stylesheet" href="a.css"></template>', "recense", "default"],
   [
-    '<template><meta name="emend-look" content="custom"></template><meta name="emend-look" content="emend">',
-    "emend",
-    "marked-emend",
+    '<template><meta name="recense-look" content="custom"></template><meta name="recense-look" content="recense">',
+    "recense",
+    "marked-recense",
   ],
 ])("template contents are inert: %s", (source, look, reason) => {
   expect(htmlLook(source)).toMatchObject({ look, reason, outside: ["template"], otherOutside: false });
@@ -63,7 +71,7 @@ test.each(["open", "closed", "Open", "CLOSED"])("declarative shadow root %s cont
     '<p color="red">x</p>',
   ])
     expect(htmlLook(`<div><template shadowrootmode="${mode}">${content}</template></div>`)).toMatchObject({
-      look: "emend",
+      look: "recense",
       reason: "default",
       ownStyles: true,
       outside: ["template"],
@@ -77,7 +85,7 @@ test.each([" open ", "open ", "\topen", "closed\n"])(
     expect(
       htmlLook(`<div><template shadowrootmode="${mode}"><style>p{color:red}</style></template></div>`),
     ).toMatchObject({
-      look: "emend",
+      look: "recense",
       reason: "default",
       outside: ["template"],
       otherOutside: false,
@@ -88,29 +96,29 @@ test.each([" open ", "open ", "\topen", "closed\n"])(
 test("declarative shadow roots ignore marks and outside names", () => {
   const names = Array.from({ length: 21 }, (_, i) => `<x-${i}></x-${i}>`).join("");
   const source =
-    '<div><template shadowrootmode="open"><meta name="emend-look" content="custom">' +
+    '<div><template shadowrootmode="open"><meta name="recense-look" content="custom">' +
     `<form></form><x-\u00a0></x-\u00a0>${names}</template></div>`;
   expect(htmlLook(source)).toMatchObject({
-    look: "emend",
+    look: "recense",
     reason: "default",
     outside: ["template"],
     otherOutside: false,
   });
-  expect(htmlLook(`${source}<meta name="emend-look" content="emend">`)).toMatchObject({
-    look: "emend",
-    reason: "marked-emend",
+  expect(htmlLook(`${source}<meta name="recense-look" content="recense">`)).toMatchObject({
+    look: "recense",
+    reason: "marked-recense",
   });
   expect(
     htmlLook(
-      '<div><template shadowrootmode="open"><meta name="emend-look" content="emend"><style>p{}</style></template></div>',
+      '<div><template shadowrootmode="open"><meta name="recense-look" content="recense"><style>p{}</style></template></div>',
     ),
-  ).toMatchObject({ look: "emend", reason: "default", ownStyles: true });
+  ).toMatchObject({ look: "recense", reason: "default", ownStyles: true });
 });
 
 test("declarative shadow roots traverse nested roots but leave other templates inert", () => {
   const inner = '<div><template shadowrootmode="closed"><style>p{}</style></template></div>';
   expect(htmlLook(`<div><template shadowrootmode="open">${inner}</template></div>`)).toMatchObject({
-    look: "emend",
+    look: "recense",
     reason: "default",
     ownStyles: true,
     outside: ["template"],
@@ -122,19 +130,19 @@ test("declarative shadow roots traverse nested roots but leave other templates i
     `<div><template shadowrootmode="open"><template>${inner}</template></template></div>`,
   ])
     expect(htmlLook(source)).toMatchObject({
-      look: "emend",
+      look: "recense",
       reason: "default",
       outside: ["template"],
       otherOutside: false,
     });
 });
 
-test("a document emend mark wins over declarative shadow styles", () => {
+test("a document recense mark wins over declarative shadow styles", () => {
   expect(
     htmlLook(
-      '<meta name="emend-look" content="emend"><div><template shadowrootmode="open"><style>:host{font-family:Georgia}</style></template></div>',
+      '<meta name="recense-look" content="recense"><div><template shadowrootmode="open"><style>:host{font-family:Georgia}</style></template></div>',
     ),
-  ).toMatchObject({ look: "emend", reason: "marked-emend" });
+  ).toMatchObject({ look: "recense", reason: "marked-recense" });
 });
 
 test("outside names are HTML-only, distinct, sorted and limited to the first twenty", () => {
@@ -143,7 +151,7 @@ test("outside names are HTML-only, distinct, sorted and limited to the first twe
     "<svg><g/><foreignObject><button>Skip</button></foreignObject></svg>" +
     "<math><mtext><input></mtext></math>";
   expect(htmlLook(source)).toMatchObject({
-    look: "emend",
+    look: "recense",
     reason: "default",
     outside: ["form", "iframe", "script", "x-widget"],
     otherOutside: false,
@@ -168,7 +176,7 @@ test.each(["x unsafe", "x-\u00a0", `x-${"a".repeat(31)}`])("outside names omit u
   defaultTreeAdapter.appendChild(tree, defaultTreeAdapter.createElement(name, html.NS.HTML, []));
   defaultTreeAdapter.appendChild(tree, defaultTreeAdapter.createElement("x-safe", html.NS.HTML, []));
   expect(htmlLookFromTree(tree)).toMatchObject({
-    look: "emend",
+    look: "recense",
     reason: "default",
     outside: ["x-safe"],
     otherOutside: true,
@@ -183,11 +191,11 @@ test("unsafe names from parsed HTML never enter the outside list", () => {
 });
 
 test.each([
-  ["<script>alert(1)</script>", "emend", ["script"]],
-  ["<img src=x onerror=alert(1)>", "emend", []],
-  ['<a href="javascript:alert(1)">Link</a>', "emend", []],
-  ['<style>@import url("https://evil.example/x.css")</style>', "emend", []],
-  ['<link rel=stylesheet href="https://evil.example/x.css">', "emend", []],
+  ["<script>alert(1)</script>", "recense", ["script"]],
+  ["<img src=x onerror=alert(1)>", "recense", []],
+  ['<a href="javascript:alert(1)">Link</a>', "recense", []],
+  ['<style>@import url("https://evil.example/x.css")</style>', "recense", []],
+  ['<link rel=stylesheet href="https://evil.example/x.css">', "recense", []],
 ] as const)("hostile markup is classified without changing content isolation: %s", (source, look, outside) => {
   expect(htmlLook(source)).toMatchObject({ look, outside });
 });
@@ -228,7 +236,7 @@ test.each([
   "<style>p{color:#222}/* unclosed prefers-color-scheme: dark</style>",
   '<div><template shadowrootmode="open"><style>p{color:#222}</style></template></div>',
 ])("colours without a dark rule use light mode: %s", (source) => {
-  expect(htmlLook(source)).toMatchObject({ look: "emend", reason: "default", colorScheme: "light" });
+  expect(htmlLook(source)).toMatchObject({ look: "recense", reason: "default", colorScheme: "light" });
 });
 
 test.each([
@@ -247,7 +255,7 @@ test.each([
   '<div><template shadowrootmode="closed"><style>p{color:light-dark(#222,white)}</style></template></div>',
   "<p>Plan</p>",
 ])("pages without fixed colours or with dark rules follow the mode: %s", (source) => {
-  expect(htmlLook(source)).toMatchObject({ look: "emend", colorScheme: "auto" });
+  expect(htmlLook(source)).toMatchObject({ look: "recense", colorScheme: "auto" });
 });
 
 test.each(["", "inherit", "initial", "unset", "revert", "revert-layer", "currentColor", "transparent", "none"])(
@@ -315,7 +323,7 @@ test.each([
   [".a\\\n{color:#222}", "light"],
   ["p{color:#222}\\", "light"],
 ])("CSS data does not become a colour declaration or dark rule: %s", (css, colorScheme) => {
-  expect(htmlLook(`<style>${css}</style>`)).toMatchObject({ look: "emend", colorScheme });
+  expect(htmlLook(`<style>${css}</style>`)).toMatchObject({ look: "recense", colorScheme });
 });
 
 test.each(["a", "Z", "0", "_", "-", "é"])("URL scanning respects a preceding %j", (prefix) => {
@@ -363,7 +371,7 @@ test.each([
     );
     if (!inline) defaultTreeAdapter.insertText(element, css);
     defaultTreeAdapter.appendChild(tree, element);
-    expect(htmlLookFromTree(tree)).toMatchObject({ look: "emend", colorScheme: "light" });
+    expect(htmlLookFromTree(tree)).toMatchObject({ look: "recense", colorScheme: "light" });
   }
 });
 
@@ -374,7 +382,7 @@ test.each([
   ["background:url(prefers-color-scheme.png)", "light"],
   ['content:"light-dark(";color:light-dark(#222,white)', "auto"],
 ])("style attribute strings and URLs remain data: %s", (css, colorScheme) => {
-  expect(htmlLook(`<p style='${css}'>Plan</p>`)).toMatchObject({ look: "emend", colorScheme });
+  expect(htmlLook(`<p style='${css}'>Plan</p>`)).toMatchObject({ look: "recense", colorScheme });
 });
 
 test.each([
@@ -399,23 +407,23 @@ test.each([
       );
       if (!inline) defaultTreeAdapter.insertText(element, `p{${css}}`);
       defaultTreeAdapter.appendChild(tree, element);
-      expect(htmlLookFromTree(tree)).toMatchObject({ look: "emend", ownStyles: true, colorScheme });
+      expect(htmlLookFromTree(tree)).toMatchObject({ look: "recense", ownStyles: true, colorScheme });
     }
   },
 );
 
 test("own styles are independent of the selected look and colour scheme", () => {
   for (const source of ["<style>p{}</style>", '<p style="">Plan</p>', '<link rel="stylesheet">', '<body bgcolor="">'])
-    expect(htmlLook(source)).toMatchObject({ look: "emend", reason: "default", ownStyles: true });
-  expect(htmlLook('<meta name="emend-look" content="custom"><style>p{color:#222}</style>')).toMatchObject({
+    expect(htmlLook(source)).toMatchObject({ look: "recense", reason: "default", ownStyles: true });
+  expect(htmlLook('<meta name="recense-look" content="custom"><style>p{color:#222}</style>')).toMatchObject({
     look: "custom",
     reason: "marked-custom",
     ownStyles: true,
     colorScheme: "auto",
   });
-  expect(htmlLook('<meta name="emend-look" content="emend"><style>p{color:#222}</style>')).toMatchObject({
-    look: "emend",
-    reason: "marked-emend",
+  expect(htmlLook('<meta name="recense-look" content="recense"><style>p{color:#222}</style>')).toMatchObject({
+    look: "recense",
+    reason: "marked-recense",
     ownStyles: true,
     colorScheme: "light",
   });
@@ -425,7 +433,7 @@ test("own styles are independent of the selected look and colour scheme", () => 
 test("hostile CSS declarations and an unclosed comment scan in linear time", () => {
   const source = `<style>${"{;a:".repeat(50_000)}/*${"*x".repeat(100_000)}</style>`;
   const start = performance.now();
-  expect(htmlLook(source)).toMatchObject({ look: "emend", ownStyles: true, colorScheme: "auto" });
+  expect(htmlLook(source)).toMatchObject({ look: "recense", ownStyles: true, colorScheme: "auto" });
   expect(performance.now() - start).toBeLessThan(2000);
 });
 
@@ -436,7 +444,7 @@ test.each([
 ])("the file look preserves all appearance metadata: %s", (page) => {
   const before = htmlLook(page);
   const styled = applyHtmlLook(page, {
-    css: "@layer emend{:root{color:black}@media(prefers-color-scheme:dark){:root{color:white}}}",
+    css: "@layer recense{:root{color:black}@media(prefers-color-scheme:dark){:root{color:white}}}",
     lightOnly: before.colorScheme === "light",
   });
   expect(htmlLook(styled)).toEqual(before);
@@ -444,17 +452,27 @@ test.each([
 
 test("the look marker does not exempt styles outside the recognised leading chunk", () => {
   for (const page of [
-    "<style data-emend-look>p{color:red}</style><p>Plan</p>",
-    '<!doctype html><title>Plan</title><meta charset="utf-8"><style data-emend-look>p{color:red}</style>',
-    "<svg><style data-emend-look>text{fill:red}</style></svg>",
-    '<div><template shadowrootmode="open"><style data-emend-look>p{color:red}</style></template></div>',
+    "<style data-recense-look>p{color:red}</style><p>Plan</p>",
+    '<!doctype html><title>Plan</title><meta charset="utf-8"><style data-recense-look>p{color:red}</style>',
+    "<svg><style data-recense-look>text{fill:red}</style></svg>",
+    '<div><template shadowrootmode="open"><style data-recense-look>p{color:red}</style></template></div>',
   ])
-    expect(htmlLook(page)).toMatchObject({ look: "emend", ownStyles: true, colorScheme: "light" });
+    expect(htmlLook(page)).toMatchObject({ look: "recense", ownStyles: true, colorScheme: "light" });
 });
 
 test("an unrecognised leading chunk retains its styles and the page's custom mark", () => {
   const page =
-    '<!doctype html><meta charset="utf-8"><style data-emend-look>p{color:red}</STYLE>' +
-    '<meta name="emend-look" content="custom"><p>Kept</p><!-- </style> -->';
+    '<!doctype html><meta charset="utf-8"><style data-recense-look>p{color:red}</STYLE>' +
+    '<meta name="recense-look" content="custom"><p>Kept</p><!-- </style> -->';
   expect(htmlLook(page)).toMatchObject({ look: "custom", reason: "marked-custom", ownStyles: true });
+});
+
+test.each([
+  ['<meta name="emend-look" content="custom">', "custom", "marked-custom"],
+  ['<meta name="EMEND-LOOK" content=" Custom ">', "custom", "marked-custom"],
+  ['<meta name="emend-look" content="emend"><style>p{}</style>', "recense", "marked-recense"],
+  ['<meta name="recense-look" content="emend"><style>p{}</style>', "recense", "marked-recense"],
+  ['<meta name="emend-look" content="other"><meta name="recense-look" content="custom">', "custom", "marked-custom"],
+])("pages marked before the rename keep their meaning: %s", (source, look, reason) => {
+  expect(htmlLook(source)).toMatchObject({ look, reason });
 });

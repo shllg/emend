@@ -1,4 +1,4 @@
-import { BlockId, type GlossaryTerm, LIMITS, normalizeGlossaryForm, parseChartSource } from "@emend/contract";
+import { BlockId, type GlossaryTerm, LIMITS, normalizeGlossaryForm, parseChartSource } from "@recense/contract";
 import rehypeShiki from "@shikijs/rehype/core";
 import { toString as hastText } from "hast-util-to-string";
 import rehypeRaw from "rehype-raw";
@@ -52,9 +52,9 @@ function isolateDiagrams() {
       const source = text.endsWith("\n") ? text.slice(0, -1) : text;
       if (!mermaid) {
         if (!parseChartSource(source)) return;
-        renderData(element).emendChart = true;
+        renderData(element).recenseChart = true;
       }
-      renderData(element).emendDiagram = source;
+      renderData(element).recenseDiagram = source;
       element.children = [];
     });
   };
@@ -127,7 +127,7 @@ async function createProcessor() {
     .use(markTerms)
     .use(limitHighlighting, highlighter.getLoadedLanguages())
     .use(rehypeShiki, highlighter, {
-      theme: "emend",
+      theme: "recense",
       transformers: [
         {
           pre(node) {
@@ -191,7 +191,7 @@ export async function renderMarkdownWithBudget(
   if (effects)
     visitElements(tree, (element) => {
       if (element.tagName !== "img") return;
-      const path = renderData(element).emendUnlistedMediaPath;
+      const path = renderData(element).recenseUnlistedMediaPath;
       // Shiki and diagram isolation can remove images marked by the link hardener.
       if (path !== undefined) {
         effects.unlistedMedia ??= new Set();

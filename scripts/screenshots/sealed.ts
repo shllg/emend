@@ -205,18 +205,18 @@ export function createSealedLifecycle(label: string) {
     assertOutputFolder(out, realStateDirs, canonicalPath);
     const tmpDir = realpathSync(tmpdir());
     assertTempParent(tmpDir, realStateDirs, canonicalPath);
-    root = mkdtempSync(join(tmpDir, `emend-${label}-`));
+    root = mkdtempSync(join(tmpDir, `recense-${label}-`));
     const sealedRoot = root;
     const env = childEnvironment(sealedRoot, process.platform);
     for (const key of ["HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "TMPDIR"])
       mkdirSync(env[key] as string, { recursive: true });
     mkdirSync(env.XDG_RUNTIME_DIR as string, { recursive: true, mode: 0o700 });
-    mkdirSync(env.EMEND_HOME as string, { recursive: true, mode: 0o700 });
+    mkdirSync(env.RECENSE_HOME as string, { recursive: true, mode: 0o700 });
     assertSealedPaths(
       {
         root: sealedRoot,
         tmpDir,
-        emendHome: env.EMEND_HOME as string,
+        recenseHome: env.RECENSE_HOME as string,
         realStateDirs,
       },
       canonicalPath,
@@ -243,7 +243,7 @@ export function createSealedLifecycle(label: string) {
     const port = await freePort();
     await assertPortAvailable(port);
     const origin = sealedOrigin(port);
-    writeFileSync(join(env.EMEND_HOME as string, "instance.json"), JSON.stringify({ id: instanceId, name: "laptop" }), {
+    writeFileSync(join(env.RECENSE_HOME as string, "instance.json"), JSON.stringify({ id: instanceId, name: "laptop" }), {
       mode: 0o600,
     });
 
@@ -266,7 +266,7 @@ export function createSealedLifecycle(label: string) {
     if (!probeOnly)
       for (let i = 0; ; i++) {
         serverAlive();
-        if (serverLog.includes(`emend is serving ${origin}`)) break;
+        if (serverLog.includes(`recense is serving ${origin}`)) break;
         if (i > 300) throw new Error("The sealed server did not start");
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
@@ -297,14 +297,14 @@ export function createSealedLifecycle(label: string) {
       }
     } else status = await probeStatus();
     if (status !== 200) throw new Error("The sealed server does not answer");
-    const record = JSON.parse(readFileSync(join(env.EMEND_HOME as string, "server.json"), "utf8")) as { url?: string };
+    const record = JSON.parse(readFileSync(join(env.RECENSE_HOME as string, "server.json"), "utf8")) as { url?: string };
     if (new URL(record.url ?? "http://invalid").origin !== origin)
       throw new Error("The sealed server record names another URL");
 
     const cli = async (args: string[], cwd: string, timeoutMs?: number): Promise<string> => {
       serverAlive();
       const result = await run(process.execPath, [entry, ...args], { cwd, env, ...(timeoutMs ? { timeoutMs } : {}) });
-      if (result.code !== 0) throw new Error(`emend ${args[0]} failed: ${result.stderr.trim().slice(0, 300)}`);
+      if (result.code !== 0) throw new Error(`recense ${args[0]} failed: ${result.stderr.trim().slice(0, 300)}`);
       return result.stdout;
     };
     return { port, origin, cli, serverAlive };

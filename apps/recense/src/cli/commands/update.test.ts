@@ -1,0 +1,944 @@
+import { mkdir, readdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { delimiter, dirname, join, sep } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { run } from "../../main.ts";
+import { pollUntil } from "../../test/poll-until.ts";
+import { VERSION } from "../../version.ts";
+import { quoteShellArgument } from "../escape.ts";
+import { updateDoc } from "../update/install.ts";
+import { nextSteps } from "../update/next-steps.ts";
+import {
+  attachHub,
+  type Fake,
+  installService,
+  type Layout,
+  makeDatabase,
+  makeFake,
+  recenseScript,
+} from "../update/test-support.ts";
+
+let fixtureRoot = "";
+// Like the tailscale tests: a lookup with a PATH outside the test's own folder never reaches the live PATH.
+vi.mock("../executable.ts", async (original) => {
+  const actual = await original<typeof import("../executable.ts")>();
+  return {
+    ...actual,
+    async findExecutable(...args: Parameters<typeof actual.findExecutable>) {
+      const entries = (args[1] ?? "").split(delimiter).filter(Boolean);
+      if (!fixtureRoot || entries.length === 0 || entries.some((entry) => !entry.startsWith(`${fixtureRoot}${sep}`)))
+        throw new Error("executable lookup outside the test fixtures");
+      return actual.findExecutable(...args);
+    },
+  };
+});
+
+let fake: Fake;
+async function make(layout: Layout) {
+  fake = await makeFake(process.env.RECENSE_HOME as string, layout);
+  fixtureRoot = fake.root;
+  return fake;
+}
+const out = () => fake.stdout.join("");
+const err = () => fake.stderr.join("");
+const update = (...args: string[]) => run(["update", ...args], fake.io);
+
+let listeners: number[];
+beforeEach(() => {
+  fixtureRoot = "";
+  listeners = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name));
+});
+afterEach(() => {
+  expect(["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name))).toEqual(listeners);
+});
+
+describe("refusals change nothing", () => {
+  beforeEach(async () => {
+    await make("npm");
+    await makeDatabase(join(fake.state, "recense.db"));
+  });
+  const untouched = async () => {
+    expect(await fake.calls()).toEqual([]);
+    expect(await readdir(fake.state)).not.toContain("backups");
+  };
+
+  test("a call with arguments is a usage error", async () => {
+    expect(await update("now")).toBe(2);
+    expect(err()).toBe("recense: Usage: recense update.\n");
+    await untouched();
+  });
+
+  test("a call without a terminal refuses", async () => {
+    fake.options.terminal = false;
+    expect(await update(), err()).toBe(1);
+    expect(err()).toBe("recense: recense update runs only in your own terminal; nothing was changed.\n");
+    expect(out()).toBe("");
+    await untouched();
+  });
+
+  test("root refuses", async () => {
+    fake.options.uid = 0;
+    expect(await update(), err()).toBe(1);
+    expect(err()).toBe("recense: run recense update as the user who runs recense, not as root.\n");
+    await untouched();
+  });
+
+  test("an unsupported platform refuses and names the update page", async () => {
+    fake.options.platform = "win32";
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain("https://github.com/shllg/recense/blob/release/docs/setup/update.md");
+    await untouched();
+  });
+
+  test("a relative home folder refuses", async () => {
+    fake.options.home = "relative/home";
+    expect(await update(), err()).toBe(1);
+    expect(err()).toBe("recense: could not use the home folder; nothing was changed.\n");
+    await untouched();
+  });
+
+  test("a missing package manager refuses before the backup", async () => {
+    fake.io.env.PATH = join(fake.root, "empty");
+    await mkdir(join(fake.root, "empty"));
+    expect(await update(), err()).toBe(1);
+    expect(err()).toBe("recense: npm was not found on PATH; nothing was changed.\n");
+    await untouched();
+  });
+
+  test("an unknown layout exits 1 and changes nothing", async () => {
+    const entry = join(fake.root, "elsewhere/dist/recense.mjs");
+    await mkdir(join(fake.root, "elsewhere/dist"), { recursive: true });
+    await writeFile(entry, "");
+    fake.options.entry = entry;
+    expect(await update(), err()).toBe(1);
+    expect(err()).toBe(
+      "recense: could not tell how recense was installed; update it as https://github.com/shllg/recense/blob/release/docs/setup/update.md says. Nothing was changed.\n",
+    );
+    await untouched();
+  });
+});
+
+describe("a local build", () => {
+  beforeEach(async () => {
+    await make("npm");
+    await makeDatabase(join(fake.state, "recense.db"));
+  });
+
+  test("a checkout prints the commands and runs nothing", async () => {
+    const checkout = join(fake.root, "check out");
+    await mkdir(join(checkout, ".git"), { recursive: true });
+    await mkdir(join(checkout, "apps/recense/dist"), { recursive: true });
+    fake.options.entry = join(checkout, "apps/recense/dist/recense.mjs");
+    await writeFile(fake.options.entry, "");
+    await writeFile(
+      join(dirname(dirname(fake.options.entry)), "package.json"),
+      JSON.stringify({ name: "@shllg/recense" }),
+    );
+    expect(await update(), err()).toBe(0);
+    expect(
+      out(),
+    ).toBe(`recense: this recense is a local build (the checkout at ${checkout}); recense update changes nothing.
+recense: to update it, review the new commits, then run in your recense checkout:
+  cd '${checkout}'
+  git pull
+  pnpm install
+  pnpm install:local
+recense: then link the agent skills again and update the Claude Code plugin and the phone app as ${updateDoc} says.
+`);
+    expect(await fake.calls()).toEqual([]);
+    expect(await readdir(fake.state)).not.toContain("backups");
+  });
+
+  test("a mise link prints the commands without a checkout folder", async () => {
+    const dir = join(fake.root, "mise/linked-installs/npm-shllg-recense/dev/dist");
+    await mkdir(dir, { recursive: true });
+    fake.options.entry = join(dir, "recense.mjs");
+    await writeFile(fake.options.entry, "");
+    await writeFile(
+      join(dirname(dirname(fake.options.entry)), "package.json"),
+      JSON.stringify({ name: "@shllg/recense" }),
+    );
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain("this recense is a local build (linked into mise)");
+    expect(out()).not.toContain("cd ");
+    expect(out()).toContain("  pnpm install:local\n");
+    expect(out()).toMatch(/recense: then link the agent skills again[^\n]+\n$/);
+    expect(await fake.calls()).toEqual([]);
+    expect(await readdir(fake.state)).not.toContain("backups");
+  });
+});
+
+describe.each([
+  [
+    "npm",
+    (f: Fake) => [
+      `install`,
+      `--global`,
+      `--prefix`,
+      join(f.root, "prefix"),
+      `--ignore-scripts`,
+      `@shllg/recense@latest`,
+    ],
+  ],
+  ["pnpm", () => ["add", "--global", "--ignore-scripts", "--ignore-pnpmfile", "@shllg/recense@latest"]],
+  ["mise", () => ["upgrade", "--bump", "npm:@shllg/recense"]],
+] as const)("%s install", (layout, expected) => {
+  beforeEach(async () => {
+    await make(layout);
+    await makeDatabase(join(fake.state, "recense.db"));
+  });
+
+  test("runs the update from the home folder even inside a repository, then checks the new recense", async () => {
+    const repo = join(fake.root, "repo");
+    await mkdir(join(repo, ".git/objects"), { recursive: true });
+    await mkdir(join(repo, ".git/refs"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    fake.options.cwd = repo;
+    expect(await update(), err()).toBe(0);
+    const calls = await fake.calls();
+    const updateCall = calls.find((call) =>
+      ["install", "add", "upgrade"].includes((call.argv as string[])[0] ?? ""),
+    ) as { tool: string; argv: string[]; cwd: string };
+    expect(updateCall.tool).toBe(layout);
+    expect(updateCall.argv).toEqual(expected(fake));
+    for (const call of calls) expect(await realpath((call as { cwd: string }).cwd)).toBe(fake.home);
+    expect(out()).toContain("recense: recense is now 0.2.0\n");
+    expect(out()).toContain("recense: this machine runs recense 0.2.0\n");
+    expect(out()).toContain(`recense: running ${layout} `);
+    expect(err()).toBe("");
+  });
+
+  test("passes only the allowlisted environment to every child", async () => {
+    expect(await update(), err()).toBe(0);
+    for (const call of (await fake.calls()) as { env: string[]; values: Record<string, string> }[]) {
+      expect(call.env).not.toContain("NODE_OPTIONS");
+      expect(call.env).not.toContain("NODE_PATH");
+      expect(call.env.filter((name) => /^npm_config_/i.test(name))).toEqual(["npm_config_ignore_scripts"]);
+      expect(call.env).not.toContain("MISE_SOMETHING");
+      expect(call.env).not.toContain("XDG_RUNTIME_DIR");
+      expect(call.env).toEqual(expect.arrayContaining(["RECENSE_HOME", "HOME", "PATH", "USER", "LC_ALL"]));
+    }
+    const first = (await fake.calls())[0] as { values: Record<string, string> };
+    expect(first.values).toEqual({
+      PATH: fake.bin,
+      HOME: fake.home,
+      RECENSE_HOME: fake.state,
+      npm_config_ignore_scripts: "true",
+    });
+  });
+
+  test("a failing package manager exits 1, keeps the backup and prints how to go back", async () => {
+    await fake.set({ updateFails: true });
+    expect(await update(), err()).toBe(1);
+    const backups = await readdir(join(fake.state, "backups"));
+    expect(backups).toEqual(["recense-0.1.0-20261112T102030123Z.db"]);
+    const backup = join(fake.state, "backups", backups[0] as string);
+    expect(err()).toContain("failed with exit 3.");
+    expect(err()).toContain(`recense: to go back to recense ${VERSION}, stop every agent that uses recense`);
+    expect(err()).toContain(` /bin/cp '${backup}' '${join(fake.state, "recense.db.restore")}' && /usr/bin/env -i `);
+    expect(err()).toContain(`  cd '${fake.home}' &&\n`);
+    expect(err()).toContain(
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' RECENSE_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' stop &&\n`,
+    );
+    expect(err()).toContain(
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' RECENSE_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}'\n`,
+    );
+    const old = {
+      npm: `'${join(fake.bin, "npm")}' install --global --prefix '${join(fake.root, "prefix")}' --ignore-scripts @shllg/recense@${VERSION}`,
+      pnpm: `'${join(fake.bin, "pnpm")}' add --global --ignore-scripts --ignore-pnpmfile @shllg/recense@${VERSION}`,
+      mise: `'${join(fake.bin, "mise")}' use --global npm:@shllg/recense@${VERSION}`,
+    }[layout];
+    expect(err()).toContain(`npm_config_ignore_scripts=true ${old} &&\n`);
+    expect(out()).not.toContain("recense is now");
+    expect(out() + err()).not.toContain("recense: next,");
+    expect(out() + err()).not.toContain("recense: agent skills:");
+  });
+
+  test("a wrong version answer fails", async () => {
+    await fake.set({ badVersion: true });
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain("recense: the new recense does not answer with its version.\n");
+    expect(err()).toContain("to go back to recense");
+  });
+
+  test("reports that the helper installed nothing newer", async () => {
+    await fake.set({
+      newVersion: VERSION,
+      newScript: recenseScript(VERSION, fake.root),
+    });
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain(`recense: recense ${VERSION} is already installed; ${layout} installed nothing newer\n`);
+    expect(out().endsWith(nextSteps(VERSION, "unknown", false))).toBe(true);
+  });
+});
+
+test.each([false, true])("a new version ends with notes after recovery with service=%s", async (service) => {
+  await make("mise");
+  if (service) await installService(fake);
+  const fresh = join(fake.root, "new-package");
+  await fake.set({ newPackage: fresh, located: join(fake.root, "located") });
+  await mkdir(join(fake.root, "located/lib/node_modules/@shllg"), { recursive: true });
+  await symlink(fresh, join(fake.root, "located/lib/node_modules/@shllg/recense"));
+  await mkdir(join(fresh, "dist/skills/recense-review"), { recursive: true });
+  await mkdir(join(fake.oldPackage, "dist/skills/recense-review"), { recursive: true });
+  const links = join(fake.home, ".agents/skills");
+  await mkdir(links, { recursive: true });
+  await symlink(await realpath(join(fake.oldPackage, "dist/skills/recense-review")), join(links, "recense-review"));
+  expect(await update(), err()).toBe(0);
+  const notes = nextSteps("0.2.0", "stale", false);
+  expect(out()).toContain("to go back");
+  expect(out().lastIndexOf("to go back")).toBeLessThan(out().indexOf(notes));
+  expect(out().endsWith(notes)).toBe(true);
+  expect((await fake.calls()).map((call) => call.tool)).toEqual(
+    service ? ["mise", "mise", "service-install"] : ["mise", "mise"],
+  );
+});
+
+describe("the database backup", () => {
+  beforeEach(async () => {
+    await make("npm");
+  });
+
+  test("without a database it says so and continues", async () => {
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain("recense: no database to back up yet.\n");
+    expect(out()).toContain("to go back");
+    expect(out()).not.toContain("recense: database recovery");
+    expect(await readdir(fake.state)).not.toContain("backups");
+  });
+
+  test("holds the data, is private, and keeps only the 3 newest", async () => {
+    await makeDatabase(join(fake.state, "recense.db"), "kept row");
+    const folder = join(fake.state, "backups");
+    await mkdir(folder, { mode: 0o700 });
+    const old = [
+      "recense-0.0.1-20260101T000000000Z.db",
+      "recense-0.0.2-20260102T000000000Z.db",
+      "recense-0.0.3-20260103T000000000Z.db",
+    ];
+    for (const name of [...old, "notes.txt", "recense-0.0.4-20260104T000000000Z.db.partial"])
+      await writeFile(join(folder, name), "x");
+    expect(await update(), err()).toBe(0);
+    expect((await readdir(folder)).sort()).toEqual([
+      "notes.txt",
+      "recense-0.0.2-20260102T000000000Z.db",
+      "recense-0.0.3-20260103T000000000Z.db",
+      "recense-0.0.4-20260104T000000000Z.db.partial",
+      "recense-0.1.0-20261112T102030123Z.db",
+    ]);
+    const backup = join(folder, "recense-0.1.0-20261112T102030123Z.db");
+    expect((await stat(backup)).mode & 0o777).toBe(0o600);
+    expect((await stat(folder)).mode & 0o777).toBe(0o700);
+    const copy = new DatabaseSync(backup, { readOnly: true });
+    expect(copy.prepare("SELECT value FROM sample").all()).toEqual([{ value: "kept row" }]);
+    copy.close();
+    expect(out()).toContain(`recense: backed up the database to ${backup}\n`);
+    expect(out()).toContain("recense: to go back to recense");
+  });
+});
+
+describe("the service", () => {
+  beforeEach(async () => {
+    await make("npm");
+    await makeDatabase(join(fake.state, "recense.db"));
+  });
+
+  test("is reinstalled with the new entry when the unit file exists", async () => {
+    await installService(fake);
+    expect(await update(), err()).toBe(0);
+    const calls = await fake.calls();
+    const reinstall = calls.find((call) => call.tool === "service-install") as { entry: string; cwd: string };
+    expect(reinstall.entry).toBe(join(fake.oldPackage, "dist/recense.mjs"));
+    expect(await realpath(reinstall.cwd)).toBe(fake.home);
+    expect(out()).toContain("recense: the recense service runs recense 0.2.0\n");
+    expect(out().split(`${quoteShellArgument(join(fake.bin, "systemctl"))} --user stop recense`)).toHaveLength(3);
+    expect(out()).toContain(
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' '${join(fake.bin, "systemctl")}' --user stop recense &&\n`,
+    );
+    expect(out()).toContain(
+      `  /usr/bin/env -i PATH='${fake.bin}' HOME='${fake.home}' XDG_CONFIG_HOME='${join(fake.home, ".config")}' RECENSE_HOME='${fake.state}' '${process.execPath}' '${await realpath(fake.entry)}' service install\n`,
+    );
+  });
+
+  test("a macOS go-back block boots the agent out", async () => {
+    fake.options.platform = "darwin";
+    const plist = join(fake.home, "Library/LaunchAgents/dev.recense.server.plist");
+    await mkdir(join(fake.home, "Library/LaunchAgents"), { recursive: true });
+    await writeFile(plist, "x");
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain("'/bin/launchctl' bootout gui/1000/dev.recense.server; n=0; while /usr/bin/env -i ");
+  });
+
+  test("is not touched without a unit file", async () => {
+    expect(await update(), err()).toBe(0);
+    expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(false);
+  });
+
+  test("a service that runs another version afterwards fails", async () => {
+    await installService(fake);
+    await fake.set({ serverVersion: "0.1.0" });
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain(
+      "recense: the recense service does not run recense 0.2.0 yet; run recense service status.\n",
+    );
+    expect(err()).toContain("to go back to recense");
+    expect(out() + err()).not.toContain("recense: next,");
+  });
+
+  test("a failing service install fails", async () => {
+    await installService(fake);
+    await fake.set({ serviceFails: true });
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain("does not run recense 0.2.0 yet");
+  });
+
+  test("a server that runs the newest version already is left alone", async () => {
+    await installService(fake);
+    await fake.set({
+      newVersion: VERSION,
+      newScript: recenseScript(VERSION, fake.root),
+    });
+    await writeFile(join(fake.root, "server-version"), VERSION);
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain(`recense: the recense service already runs recense ${VERSION}\n`);
+    expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(false);
+    expect(out().endsWith(nextSteps(VERSION, "unknown", false))).toBe(true);
+  });
+
+  test("without a service, an old running server gets a hint", async () => {
+    await writeFile(join(fake.root, "server-version"), "0.1.0");
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain(
+      "recense: the recense server at http://127.0.0.1:3636 still runs recense 0.1.0. Run recense stop, then recense, to start recense 0.2.0.\n",
+    );
+  });
+});
+
+describe("the hub report", () => {
+  beforeEach(async () => {
+    await make("npm");
+    await attachHub(fake.state);
+  });
+  test.each([
+    ["0.1.0", "The hub is behind this machine; run recense update on the hub."],
+    ["0.3.0", "This machine is behind the hub."],
+    ["0.2.0", "Both run the same version."],
+    ["0.3.0-rc.1", "Update both to the same version."],
+  ])("a hub at %s", async (hub, advice) => {
+    fake.options.hubVersion = async () => hub;
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain(`recense: the hub at https://hub.example.test runs recense ${hub}. ${advice}\n`);
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", true))).toBe(true);
+  });
+
+  test("an unreachable hub is not a failure", async () => {
+    fake.options.hubVersion = async () => {
+      throw new Error("down");
+    };
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain("recense: could not reach the hub at https://hub.example.test to check its version.\n");
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", true))).toBe(true);
+  });
+
+  test("a machine without an attachment prints no hub line", async () => {
+    await rm(join(fake.state, "attach.json"));
+    expect(await update(), err()).toBe(0);
+    expect(out()).not.toContain("the hub at");
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", false))).toBe(true);
+  });
+
+  test("an unreadable attachment uses the unattached phone note", async () => {
+    await writeFile(join(fake.state, "attach.json"), "invalid JSON");
+    expect(await update(), err()).toBe(0);
+    expect(out()).not.toContain("the hub at");
+    expect(out().endsWith(nextSteps("0.2.0", "unknown", false))).toBe(true);
+  });
+});
+
+test("refuses a HOME different from the account before any child or backup", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  fake.options.accountHome = fake.root;
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain(
+    "HOME is not your account's home folder; run recense update from a normal shell. Nothing was changed.",
+  );
+  expect(await fake.calls()).toEqual([]);
+  expect(await readdir(fake.state)).not.toContain("backups");
+});
+test("allows HOME aliases resolving to the account home", async () => {
+  await make("npm");
+  await symlink(fake.home, join(fake.root, "home-link"));
+  fake.options.home = join(fake.root, "home-link");
+  expect(await update(), err()).toBe(0);
+});
+
+test.each(["pnpm", "mise"] as const)(
+  "%s refuses a located package in the original cwd repository before executing it",
+  async (layout) => {
+    await make(layout);
+    await makeDatabase(join(fake.state, "recense.db"));
+    const repo = join(fake.root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    fake.options.cwd = repo;
+    await fake.set({ newPackage: join(repo, "lib/node_modules/@shllg/recense"), located: repo });
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain("repository");
+    expect(err()).toContain("to go back");
+    expect(await readFile(join(fake.root, "new-log"), "utf8")).toBe("");
+  },
+);
+
+test.each(["npm", "pnpm", "mise"] as const)(
+  "a marked local build under %s prints commands without cd and runs nothing",
+  async (layout) => {
+    await make(layout);
+    await writeFile(
+      join(fake.oldPackage, "package.json"),
+      JSON.stringify({ name: "@shllg/recense", recenseLocalBuild: "abc123" }),
+    );
+    expect(await update(), err()).toBe(0);
+    expect(out()).toContain("local build");
+    expect(out()).not.toContain("  cd ");
+    expect(out()).toMatch(/recense: then link the agent skills again[^\n]+\n$/);
+    expect(await fake.calls()).toEqual([]);
+  },
+);
+
+test.each([{}, { listError: "global bin directory is not in PATH\u001b[31m\nprivate second line" }])(
+  "pnpm confirmation refuses unlisted copies or errors before backup: %j",
+  async (patch) => {
+    await make("pnpm");
+    await makeDatabase(join(fake.state, "recense.db"));
+    await fake.set({ unlisted: true, ...patch });
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain("could not tell how recense was installed");
+    expect(await readdir(fake.state)).not.toContain("backups");
+    expect((await fake.calls()).map((c) => c.argv)).toEqual([
+      ["list", "--global", "--json", "--depth", "0", "--config.ignore-pnpmfile=true"],
+    ]);
+    if (patch.listError) {
+      expect(err()).toContain("global bin directory is not in PATH");
+      expect(err()).not.toContain("\u001b");
+      expect(err()).not.toContain("private second");
+    }
+  },
+);
+
+test("mise reinstalls from the moving NEW entry with the same node and state folder", async () => {
+  await make("mise");
+  await installService(fake);
+  expect(await update(), err()).toBe(0);
+  const call = (await fake.calls()).find((c) => c.tool === "service-install");
+  expect(call).toMatchObject({
+    entry: join(fake.root, "mise/installs/npm-shllg-recense/0.2.0/lib/node_modules/@shllg/recense/dist/recense.mjs"),
+    node: process.execPath,
+    recenseHome: fake.state,
+  });
+  expect(call?.entry).not.toBe(fake.entry);
+});
+
+test.each(["changed", "noop", "failed"])("backup retention after %s with a backward clock", async (outcome) => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  const folder = join(fake.state, "backups");
+  await mkdir(folder);
+  const existing = [1, 2, 3].map((day) => `recense-0.1.0-2027010${day}T000000000Z.db`);
+  for (const name of existing) await writeFile(join(folder, name), "old backup");
+  if (outcome === "noop") await fake.set({ newVersion: VERSION, newScript: recenseScript(VERSION, fake.root) });
+  if (outcome === "failed") await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(outcome === "failed" ? 1 : 0);
+  const files = await readdir(folder);
+  if (outcome === "noop") {
+    expect(files.sort()).toEqual(existing);
+    expect(out()).toContain("recense: nothing changed; removed the backup.");
+    expect(out()).not.toContain("to go back");
+  } else {
+    expect(files).toContain(`recense-${VERSION}-20261112T102030123Z.db`);
+    expect(files).toHaveLength(outcome === "changed" ? 3 : 4);
+  }
+});
+
+test.each([
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+  ["SIGHUP", 129],
+  ["SIGQUIT", 131],
+] as const)(
+  "%s during a terminal child keeps the backup, prints rollback and removes handlers",
+  async (signal, code) => {
+    await make("npm");
+    await makeDatabase(join(fake.state, "recense.db"));
+    await fake.set({ sleep: 300 });
+    const before = process.listenerCount(signal);
+    const pending = update();
+    await pollUntil(async () => expect(await fake.calls()).toHaveLength(1));
+    process.emit(signal);
+    expect(await pending).toBe(code);
+    expect(err()).toContain("recense update was interrupted.");
+    expect(err()).toContain("to go back");
+    expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+    expect(process.listenerCount(signal)).toBe(before);
+  },
+);
+
+test.each([
+  "not json",
+  "{}",
+  '[{"dependencies":{"@shllg/recense":{"path":"relative","version":"1.0.0"}}}]',
+  '[{"dependencies":{"@shllg/recense":{"path":"/tmp"}}}]',
+  " ".repeat(65537),
+])("pnpm refuses malformed, relative or oversized list output before backup (%#)", async (listOutput) => {
+  await make("pnpm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  await fake.set({ listOutput });
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain("could not tell how recense was installed");
+  expect(await readdir(fake.state)).not.toContain("backups");
+});
+
+test("a same-version service reinstall still keeps the backup", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  await installService(fake);
+  await fake.set({ newVersion: VERSION, newScript: recenseScript(VERSION, fake.root) });
+  expect(await update(), err()).toBe(0);
+  expect((await fake.calls()).some((c) => c.tool === "service-install")).toBe(true);
+  expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+});
+
+test("rollback quotes every path even with shell metacharacters", async () => {
+  const parent = join(process.env.RECENSE_HOME as string, "quote's $folder");
+  await mkdir(parent, { recursive: true });
+  fake = await makeFake(parent, "npm");
+  fixtureRoot = fake.root;
+  await makeDatabase(join(fake.state, "recense.db"));
+  await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(1);
+  const entry = await realpath(fake.entry);
+  expect(err()).toContain(`  cd ${quoteShellArgument(fake.home)} &&\n`);
+  expect(err()).toContain(
+    `npm_config_ignore_scripts=true ${quoteShellArgument(join(fake.bin, "npm"))} install --global --prefix ${quoteShellArgument(join(fake.root, "prefix"))} --ignore-scripts @shllg/recense@${VERSION} &&\n`,
+  );
+  expect(err()).toContain(
+    `  /usr/bin/env -i PATH=${quoteShellArgument(fake.bin)} HOME=${quoteShellArgument(fake.home)} RECENSE_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)} stop &&\n`,
+  );
+  expect(err()).toContain(
+    `  /usr/bin/env -i PATH=${quoteShellArgument(fake.bin)} HOME=${quoteShellArgument(fake.home)} RECENSE_HOME=${quoteShellArgument(fake.state)} ${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`,
+  );
+});
+
+test("pnpm names the first escaped warning when its successful list does not confirm ownership", async () => {
+  await make("pnpm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  await fake.set({ unlisted: true, listWarning: "global bin directory is not in PATH\u001b[31m\nsecond line" });
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain("global bin directory is not in PATH\\u{1b}[31m");
+  expect(err()).not.toContain("second line");
+  expect(await readdir(fake.state)).not.toContain("backups");
+});
+
+test("every pnpm call disables pnpmfiles, including detection and locate", async () => {
+  await make("pnpm");
+  expect(await update(), err()).toBe(0);
+  expect((await fake.calls()).filter((call) => call.tool === "pnpm").map((call) => call.argv)).toEqual([
+    ["list", "--global", "--json", "--depth", "0", "--config.ignore-pnpmfile=true"],
+    ["add", "--global", "--ignore-scripts", "--ignore-pnpmfile", "@shllg/recense@latest"],
+    ["list", "--global", "--json", "--depth", "0", "--config.ignore-pnpmfile=true"],
+  ]);
+});
+
+test("a same-version update without a service keeps the backup for an older running server", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  await fake.set({ newVersion: VERSION, newScript: recenseScript(VERSION, fake.root) });
+  await writeFile(join(fake.root, "server-version"), "0.0.1");
+  expect(await update(), err()).toBe(0);
+  expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+  expect(out()).not.toContain("nothing changed");
+  expect(out()).not.toContain("to go back");
+});
+
+test("a planted service in a dropped XDG_CONFIG_HOME does not count as a service", async () => {
+  await make("npm");
+  const repo = join(fake.root, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+  const config = join(repo, "config");
+  await mkdir(join(config, "systemd/user"), { recursive: true });
+  await writeFile(join(config, "systemd/user/recense.service"), "# planted");
+  fake.options.cwd = repo;
+  fake.io.env.XDG_CONFIG_HOME = config;
+  await makeDatabase(join(fake.state, "recense.db"));
+  await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain(`${quoteShellArgument(await realpath(fake.entry))} stop &&`);
+  expect(err()).not.toContain("--user stop recense");
+  expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(false);
+});
+
+test("SIGTERM during a capture child forwards the signal, prints rollback and removes handlers", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  const ready = join(fake.root, "capture-ready");
+  const received = join(fake.root, "capture-signal");
+  await fake.set({
+    newScript: `import { writeFileSync } from "node:fs";
+    process.on("SIGTERM", () => { writeFileSync(${JSON.stringify(received)}, "SIGTERM"); process.exit(0); });
+    writeFileSync(${JSON.stringify(ready)}, "ready");
+    setInterval(() => {}, 1000);`,
+  });
+  const before = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name));
+  const pending = update();
+  await pollUntil(async () => expect(await readFile(ready, "utf8")).toBe("ready"));
+  process.emit("SIGTERM");
+  expect(await pending).toBe(143);
+  expect(await readFile(received, "utf8")).toBe("SIGTERM");
+  expect(err()).toContain("recense update was interrupted.");
+  expect(err()).toContain("to go back");
+  expect(["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name))).toEqual(before);
+});
+
+test("SIGINT during the hub probe keeps rollback and removes handlers", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  await attachHub(fake.state);
+  fake.options.hubVersion = async () => {
+    process.emit("SIGINT");
+    return "0.2.0";
+  };
+  const before = ["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name));
+  expect(await update(), err()).toBe(130);
+  expect(err()).toContain("recense update was interrupted.");
+  expect(err()).toContain("to go back");
+  expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+  expect(["SIGINT", "SIGTERM", "SIGHUP", "SIGQUIT"].map((name) => process.listenerCount(name))).toEqual(before);
+});
+
+test.each(["npm", "pnpm", "mise"] as const)(
+  "%s rollback restores before stopping the old entry even when the new version is broken",
+  async (layout) => {
+    for (const service of [false, true])
+      for (const known of [false, true]) {
+        await make(layout);
+        await makeDatabase(join(fake.state, "recense.db"));
+        if (service) await installService(fake);
+        await fake.set(known ? { badVersion: true } : { updateFails: true });
+        expect(await update(), err()).toBe(1);
+        const stopEntry = await realpath(fake.entry);
+        expect(err()).toContain(
+          service
+            ? `${quoteShellArgument(join(fake.bin, "systemctl"))} --user stop recense &&`
+            : `${quoteShellArgument(stopEntry)} stop &&`,
+        );
+        expect(err()).toContain(
+          `${quoteShellArgument(await realpath(fake.entry))}${service ? " service install" : ""}\n`,
+        );
+      }
+  },
+);
+
+test("SIGINT before the package manager keeps the backup and starts no child", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  fake.options.localVersion = async () => {
+    process.emit("SIGINT");
+    return null;
+  };
+  expect(await update(), err()).toBe(130);
+  expect(await fake.calls()).toEqual([]);
+  expect(err()).toContain("recense update was interrupted.");
+  expect(err()).not.toContain("to go back");
+  expect(await readdir(join(fake.state, "backups"))).toHaveLength(1);
+});
+
+test("rollback prints only checked child directory values, never raw or proxy settings", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  const safe = join(fake.root, "quote's $directory");
+  const repo = join(fake.root, "repo");
+  await mkdir(safe);
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+  fake.options.cwd = repo;
+  Object.assign(fake.io.env, {
+    MISE_DATA_DIR: safe,
+    MISE_CONFIG_DIR: repo,
+    MISE_CACHE_DIR: "relative",
+    MISE_STATE_DIR: join(fake.root, "missing"),
+    PNPM_HOME: safe,
+    XDG_DATA_HOME: safe,
+    XDG_CONFIG_HOME: safe,
+    XDG_CACHE_HOME: safe,
+    XDG_STATE_HOME: safe,
+    HTTPS_PROXY: "https://proxy.example.test",
+    XDG_RUNTIME_DIR: safe,
+  });
+  await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(1);
+  for (const name of [
+    "MISE_DATA_DIR",
+    "PNPM_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+  ])
+    expect(err()).toContain(`${name}=${quoteShellArgument(safe)}`);
+  for (const name of ["MISE_CONFIG_DIR", "MISE_CACHE_DIR", "MISE_STATE_DIR"]) {
+    expect(err()).not.toContain(`${name}=`);
+  }
+  expect(err()).toContain(`HTTPS_PROXY="\${HTTPS_PROXY-}"`);
+  expect(err().includes("proxy.example")).toBe(false);
+  expect(err()).toContain(`XDG_RUNTIME_DIR=${quoteShellArgument(safe)}`);
+});
+
+test("SIGINT when stdout receives the final go-back list finishes successfully and prints it once", async () => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  fake.io.stdout = (text) => {
+    fake.stdout.push(text);
+    if (text.includes("to go back")) process.emit("SIGINT");
+  };
+  expect(await update(), err()).toBe(0);
+  expect((out() + err()).match(/to go back/g)).toHaveLength(1);
+  expect(err()).toBe("");
+  expect(out().endsWith(nextSteps("0.2.0", "unknown", false))).toBe(true);
+});
+
+test("restarts a same-version service that stopped during the install", async () => {
+  await make("npm");
+  await installService(fake);
+  await fake.set({ newVersion: VERSION, newScript: recenseScript(VERSION, fake.root) });
+  const running = { url: "http://127.0.0.1:3636", version: VERSION };
+  const probe = vi.fn().mockResolvedValueOnce(running).mockResolvedValueOnce(null).mockResolvedValue(running);
+  fake.options.localVersion = probe;
+  expect(await update(), err()).toBe(0);
+  expect((await fake.calls()).some((call) => call.tool === "service-install")).toBe(true);
+  expect(probe).toHaveBeenCalledTimes(3);
+  expect(out()).not.toContain("the recense service already runs");
+});
+
+test.each(["npm", "pnpm", "mise"] as const)(
+  "%s refuses a downgrade before running the located entry",
+  async (layout) => {
+    await make(layout);
+    await fake.set({ newVersion: "0.0.1", newScript: recenseScript("0.0.1", fake.root) });
+    await installService(fake);
+    expect(await update()).toBe(1);
+    expect(err()).toContain(`recense: ${layout} installed recense 0.0.1, older than ${VERSION}.`);
+    expect(err()).toContain("to go back");
+    expect(err()).not.toContain("recense: database recovery");
+    expect(await readFile(join(fake.root, "new-log"), "utf8")).toBe("");
+  },
+);
+
+test.each(["failure", "SIGHUP", "SIGQUIT"])(
+  "%s after the installer starts prints package recovery without a database",
+  async (outcome) => {
+    await make("npm");
+    await fake.set(outcome === "failure" ? { updateFails: true } : { sleep: 300 });
+    const pending = update();
+    if (outcome !== "failure") {
+      await pollUntil(async () => expect(await fake.calls()).toHaveLength(1));
+      process.emit(outcome);
+    }
+    expect(await pending).toBe(outcome === "failure" ? 1 : outcome === "SIGHUP" ? 129 : 131);
+    expect(err()).toContain("to go back");
+    expect(err()).not.toContain("recense: database recovery");
+  },
+);
+
+test("a successful unchanged install without a database prints no recovery", async () => {
+  await make("npm");
+  await fake.set({ newVersion: VERSION, newScript: recenseScript(VERSION, fake.root) });
+  expect(await update()).toBe(0);
+  expect(out()).not.toContain("to go back");
+});
+
+test.each([
+  ["SIGHUP", 129],
+  ["SIGQUIT", 131],
+] as const)("a failed terminal write preserves the %s exit", async (signal, code) => {
+  await make("npm");
+  await fake.set({ sleep: 300 });
+  const pending = update();
+  await pollUntil(async () => expect(await fake.calls()).toHaveLength(1));
+  fake.io.stderr = () => {
+    throw new Error("terminal hung up");
+  };
+  process.emit(signal);
+  expect(await pending).toBe(code);
+});
+
+test.each(["node", "npm", "systemctl"])(
+  "update removes an entry with a repository %s link from child and printed PATH",
+  async (name) => {
+    await make("mise");
+    const repo = join(fake.root, "repo");
+    const planted = join(fake.root, "planted");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    await mkdir(planted);
+    await writeFile(join(repo, name), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+    await symlink(join(repo, name), join(planted, name));
+    fake.options.cwd = repo;
+    fake.io.env.PATH = [planted, fake.bin].join(delimiter);
+    expect(await update(), err()).toBe(0);
+    for (const call of await fake.calls()) expect(call.values).toMatchObject({ PATH: fake.bin });
+    expect(out()).toContain(`PATH='${fake.bin}'`);
+    expect(out()).not.toContain(planted);
+  },
+);
+
+test.each(["missing", "repository"])("a %s systemctl refuses before the backup", async (kind) => {
+  await make("npm");
+  await makeDatabase(join(fake.state, "recense.db"));
+  await installService(fake);
+  await rm(join(fake.bin, "systemctl"));
+  if (kind === "repository") {
+    const repo = join(fake.root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    await writeFile(join(repo, "systemctl"), "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+    await symlink(join(repo, "systemctl"), join(fake.bin, "systemctl"));
+    fake.options.cwd = repo;
+  }
+  expect(await update(), err()).toBe(1);
+  expect(err()).toBe("recense: could not use systemctl on PATH; nothing was changed.\n");
+  expect(await fake.calls()).toEqual([]);
+  expect(await readdir(fake.state)).not.toContain("backups");
+});
+
+test.each(["helper", "node", "old-entry", "systemctl"])(
+  "an equals sign in the %s path refuses before changing anything",
+  async (kind) => {
+    await make("npm");
+    await makeDatabase(join(fake.state, "recense.db"));
+    const folder = join(fake.root, "equal=sign");
+    await mkdir(folder);
+    if (kind === "helper" || kind === "systemctl") {
+      const name = kind === "helper" ? "npm" : "systemctl";
+      if (kind === "systemctl") await installService(fake);
+      await symlink(join(fake.bin, name), join(folder, name));
+      fake.io.env.PATH = [folder, fake.bin].join(delimiter);
+    } else if (kind === "node") {
+      fake.options.node = join(folder, "node");
+      await symlink(process.execPath, fake.options.node);
+    } else {
+      const prefix = join(fake.root, "prefix");
+      const moved = join(folder, "prefix");
+      await rename(prefix, moved);
+      fake.options.entry = fake.entry.replace(prefix, moved);
+      const launcher = join(moved, "bin/recense");
+      await rm(launcher);
+      await symlink(join(moved, "lib/node_modules/@shllg/recense/bin/recense"), launcher);
+    }
+    expect(await update(), err()).toBe(1);
+    expect(err()).toMatch(/nothing was changed/i);
+    expect(out()).toBe("");
+    expect(await fake.calls()).toEqual([]);
+    expect(await readdir(fake.state)).not.toContain("backups");
+  },
+);

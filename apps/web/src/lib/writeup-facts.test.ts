@@ -1,4 +1,10 @@
-import { type FileView, type RenderedBlock, RenderedWriteup, type RevisionView, type TopicMeta } from "@emend/contract";
+import {
+  type FileView,
+  type RenderedBlock,
+  RenderedWriteup,
+  type RevisionView,
+  type TopicMeta,
+} from "@recense/contract";
 import { expect, test } from "vitest";
 import { renderWriteup } from "../../../../packages/core/src/render/writeup.ts";
 import { type FactPart, labelledFact, sinceFact, undoFact, usesOpeningCard } from "./writeup-facts.ts";

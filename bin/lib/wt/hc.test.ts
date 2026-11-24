@@ -82,7 +82,7 @@ const failure = (code: number, pattern?: RegExp) => (e: unknown) => {
 };
 const json = JSON.stringify;
 const options = { issue: 42, mode: "github" as const };
-const branch = "emend-42-fix-the-review-pane";
+const branch = "recense-42-fix-review-pane";
 const name = agentName(branch);
 const herdrList = (agents: Record<string, unknown>[] = []): FakeRule => ({
   match: ["agent", "list"],
@@ -125,7 +125,7 @@ const command = async (repo: Repo, sub: string, args: string[]) => {
 
 function issueWorker(env: TestEnv, repo: Repo, issue = 42) {
   installFake(env, "gh", issueRules([readyIssue(issue)]));
-  return setup(repo, { branch: `emend-${issue}-worker-tree`, issue });
+  return setup(repo, { branch: `recense-${issue}-worker-tree`, issue });
 }
 
 test("backend detection ignores unsafe hc ids and the test environment scrubs both backends", () =>
@@ -353,11 +353,11 @@ for (const state of ["working", "blocked"] as const)
           "--outlive-parent",
           "--no-notify",
           "--label",
-          "emend.loop=t1k",
+          "recense.loop=t1k",
           "--label",
-          `emend.branch=${branch}`,
+          `recense.branch=${branch}`,
           "--label",
-          "emend.issue=42",
+          "recense.issue=42",
           "--",
           join(env.fakeBin, "claude"),
           "--permission-mode",
@@ -394,11 +394,11 @@ test("hc issue spawn adds the issue label and fixed initial issue prompt", () =>
       "--outlive-parent",
       "--no-notify",
       "--label",
-      "emend.loop=t2",
+      "recense.loop=t2",
       "--label",
-      `emend.branch=${result.branch}`,
+      `recense.branch=${result.branch}`,
       "--label",
-      "emend.issue=42",
+      "recense.issue=42",
       "--",
       join(env.fakeBin, "claude"),
       "--permission-mode",
@@ -504,7 +504,7 @@ test("hc close uses only the registry-owned address and checks every ownership f
   scenario(async ({ env, repo }) => {
     process.env.HC_TERMINAL_ID = "t2";
     const wt = setup(repo, { branch: "worker-tree" });
-    const details = { cwd: wt.path, labels: { "emend.branch": "worker-tree" }, foreground: { cwd: "/elsewhere" } };
+    const details = { cwd: wt.path, labels: { "recense.branch": "worker-tree" }, foreground: { cwd: "/elsewhere" } };
     const rules = (extra: Record<string, unknown> = {}): FakeRule[] => [
       hcList([terminal(), terminal({ address: "t3" })]),
       get({ ...details, ...extra }),
@@ -529,7 +529,7 @@ test("hc close uses only the registry-owned address and checks every ownership f
     ]);
     for (const mismatch of [
       { labels: {} },
-      { labels: { "emend.branch": "another-branch" } },
+      { labels: { "recense.branch": "another-branch" } },
       { cwd: `${wt.path}-other` },
       { state: "finished" },
       { address: "t3" },
@@ -573,7 +573,7 @@ test("hc cleanup closes the matching terminal only after removing its worktree",
         cwd: wt.path,
         foreground: { cwd: wt.path },
         status: { state: "idle" },
-        labels: { "emend.branch": "worker-tree" },
+        labels: { "recense.branch": "worker-tree" },
       }),
       { match: ["kill"], stdout: "{}" },
     ]);
@@ -816,7 +816,7 @@ test("hc spawn CLI uses desktop terminal wording", () =>
     assert.equal(result.code, 0, result.stderr);
     assert.match(
       result.stdout,
-      /waiting for an answer in herdr desktop terminal wt-emend-42-fix-the-review-pane \(t1m\)/,
+      /waiting for an answer in herdr desktop terminal wt-recense-42-fix-review-pane \(t1m\)/,
     );
   }, true));
 

@@ -1,5 +1,5 @@
-import type { LinesTarget, ThreadView } from "@emend/contract";
 import { DiffHunksRenderer, FileDiff as PierreFileDiff } from "@pierre/diffs";
+import type { LinesTarget, ThreadView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";

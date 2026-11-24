@@ -1,4 +1,4 @@
-import type { RenderedBlock } from "@emend/contract";
+import type { RenderedBlock } from "@recense/contract";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../ui/Button.tsx";
 import { ChartBlock } from "./ChartBlock.tsx";
@@ -21,8 +21,12 @@ function pairModeForReveal(mode: PairMode, view: "before" | "after" | "diff", pa
   return view;
 }
 
+/** Blocks stored before the rename carry `emend-media-*` classes; they read like the current ones. */
+const mediaHas = (element: Element | null | undefined, suffix: string) =>
+  !!element?.classList.contains(`recense-media-${suffix}`) || !!element?.classList.contains(`emend-media-${suffix}`);
+
 /**
- * A prose block. Only an image whose wrapper is `span.emend-media.emend-media-sized` carries the
+ * A prose block. Only an image whose wrapper is `span.recense-media.recense-media-sized` carries the
  * server's pixel size in `width` and `height`; any other media image may hold an author's numbers
  * (revisions stored before the marker), so its size is never used.
  */
@@ -35,41 +39,41 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
   // biome-ignore lint/correctness/useExhaustiveDependencies: the images change only when the block's HTML does.
   useLayoutEffect(() => {
     const prose = ref.current;
-    setPair(!!prose?.querySelector("p.emend-media-pair"));
-    const hasDiff = !!prose?.querySelector("p.emend-media-pair-diff");
+    setPair(!!prose?.querySelector("p:is(.recense-media-pair, .emend-media-pair)"));
+    const hasDiff = !!prose?.querySelector("p:is(.recense-media-pair-diff, .emend-media-pair-diff)");
     setPairDiff(hasDiff);
     if (!hasDiff) setMode((current) => (current === "diff" ? "side" : current));
-    for (const image of ref.current?.querySelectorAll("span.emend-media > img") ?? []) {
+    for (const image of ref.current?.querySelectorAll("span:is(.recense-media, .emend-media) > img") ?? []) {
       const wrapper = image.parentElement;
       if (!wrapper) continue;
       const width = image.getAttribute("width") ?? "";
       const height = image.getAttribute("height") ?? "";
       if (
-        wrapper.classList.contains("emend-media-sized") &&
+        mediaHas(wrapper, "sized") &&
         SIDE.test(width) &&
         SIDE.test(height) &&
         Number(width) <= MAX_SIDE &&
         Number(height) <= MAX_SIDE
       ) {
-        wrapper.style.setProperty("--emend-media-w", String(Number(width)));
-        wrapper.style.setProperty("--emend-media-h", String(Number(height)));
+        wrapper.style.setProperty("--recense-media-w", String(Number(width)));
+        wrapper.style.setProperty("--recense-media-h", String(Number(height)));
       } else {
-        wrapper.style.removeProperty("--emend-media-w");
-        wrapper.style.removeProperty("--emend-media-h");
+        wrapper.style.removeProperty("--recense-media-w");
+        wrapper.style.removeProperty("--recense-media-h");
       }
     }
     const reveal = (event: Event) => {
       const target = event.target instanceof Element ? event.target : null;
-      if (target === prose && prose?.querySelector("p.emend-media-pair")) {
+      if (target === prose && prose?.querySelector("p:is(.recense-media-pair, .emend-media-pair)")) {
         // Navigation scrolls and measures before React commits the state update.
         prose.setAttribute("data-pair-mode", "side");
         setMode("side");
         return;
       }
-      const media = target?.closest("p.emend-media-pair > .emend-media");
+      const media = target?.closest("p:is(.recense-media-pair, .emend-media-pair) > :is(.recense-media, .emend-media)");
       if (!media || !prose?.contains(media)) return;
-      const images = media.parentElement?.querySelectorAll(":scope > .emend-media");
-      const next = media.classList.contains("emend-media-diff")
+      const images = media.parentElement?.querySelectorAll(":scope > :is(.recense-media, .emend-media)");
+      const next = mediaHas(media, "diff")
         ? "diff"
         : images?.[0] === media
           ? "before"
@@ -80,17 +84,13 @@ function ProseBlock({ block, attributes }: { block: RenderedBlock; attributes: R
         const attribute = prose.getAttribute("data-pair-mode");
         const current: PairMode =
           attribute === "before" || attribute === "after" || attribute === "diff" ? attribute : "side";
-        const mode = pairModeForReveal(
-          current,
-          next,
-          !!media.parentElement?.classList.contains("emend-media-pair-diff"),
-        );
+        const mode = pairModeForReveal(current, next, mediaHas(media.parentElement, "pair-diff"));
         prose.setAttribute("data-pair-mode", mode);
         setMode(mode);
       }
     };
-    prose?.addEventListener("emend:reveal-reading", reveal);
-    return () => prose?.removeEventListener("emend:reveal-reading", reveal);
+    prose?.addEventListener("recense:reveal-reading", reveal);
+    return () => prose?.removeEventListener("recense:reveal-reading", reveal);
   }, [block.html]);
   return (
     <>

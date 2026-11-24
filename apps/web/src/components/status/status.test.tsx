@@ -1,4 +1,4 @@
-import type { ReviewState } from "@emend/contract";
+import type { ReviewState } from "@recense/contract";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { AgentStatus, agentStatusOf, agentStatusText } from "./AgentStatus.tsx";

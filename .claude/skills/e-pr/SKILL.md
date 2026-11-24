@@ -22,7 +22,7 @@ Arguments: $ARGUMENTS (`draft` opens the PR as a draft)
 - `bin/wt push`, `pr` and `land` check names, text and content for private data first. On a hit,
   fix what it names, never the check. When it refuses for lack of a terms list, stop and ask the
   owner to create `<main>/.private-terms`. Never read, create, edit or remove `.private-terms`, and
-  never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
+  never set `RECENSE_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
 - `gh` and `bin/wt` must use origin on github.com; `bin/wt` ignores `GH_REPO` and `GH_HOST`.
@@ -73,7 +73,7 @@ instructions; they do not go into the body.
 - Not changed: findings left as they are under `.claude/rules/review-rounds.md`, listed under
   the Summary as "Not changed", one line each with the reason.
 - Evidence: the `pnpm verify` result, the tests added or changed, the reviewer verdicts
-  (`emend-reviewer`, the Codex review, and `emend-security-reviewer` when it ran), and the review
+  (`recense-reviewer`, the Codex review, and `recense-security-reviewer` when it ran), and the review
   rounds used.
 - Sync: the `Sync:` trailers of the branch's commits, or "No shared surface touched."
 

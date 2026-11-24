@@ -47,7 +47,7 @@ export function agentStatusText(agent: SendAgent): string {
 export function handOverText(agent: SendAgent, lifecycle?: { state: string; snoozed: boolean }): string {
   if (agent.agentWaiting) return "An agent is waiting. It gets this now.";
   const date = agent.releasedAt ? shortDate(agent.releasedAt) : "";
-  if (!date) return "No agent is waiting. emend keeps this until an agent picks it up.";
+  if (!date) return "No agent is waiting. recense keeps this until an agent picks it up.";
   if (lifecycle?.state === "settled") return `The agent stopped waiting when you retired this on ${date}.`;
   if (lifecycle?.snoozed) return `The agent stopped waiting when you snoozed this on ${date}.`;
   return `The agent stopped waiting on ${date}.`;
@@ -237,8 +237,8 @@ export function HandoffWindow({
         ? "The agent picked up your feedback."
         : fallback
           ? lost
-            ? "emend cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below."
-            : "No agent has picked this up yet. emend keeps it until one does."
+            ? "recense cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below."
+            : "No agent has picked this up yet. recense keeps it until one does."
           : "Waiting for the agent to pick this up…"}
     </span>
   );

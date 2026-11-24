@@ -26,7 +26,7 @@ function makeProject(): string {
   temps.push(root);
   const agents = path.join(root, ".claude", "agents");
   mkdirSync(agents, { recursive: true });
-  writeFileSync(path.join(agents, "emend-reviewer.md"), "---\nname: emend-reviewer\nmodel: sonnet\n---\nBody\n");
+  writeFileSync(path.join(agents, "recense-reviewer.md"), "---\nname: recense-reviewer\nmodel: sonnet\n---\nBody\n");
   writeFileSync(path.join(agents, "renamed-file.md"), "---\nname: security-bot\nmodel: opus\n---\nBody\n");
   writeFileSync(path.join(agents, "floating.md"), "---\nname: floating\nmodel: inherit\n---\nBody\n");
   return root;
@@ -56,17 +56,17 @@ function run(root: string, input: string, env: Record<string, string> = {}) {
 }
 
 test("a pinned agent with the wrong model exits 2", () => {
-  const result = run(makeProject(), agentCall("emend-reviewer", "opus"));
+  const result = run(makeProject(), agentCall("recense-reviewer", "opus"));
   assert.equal(result.status, 2);
   assert.match(result.stderr, /requires explicit model: "sonnet"/);
 });
 
 test("a pinned agent with no model exits 2", () => {
-  assert.equal(run(makeProject(), agentCall("emend-reviewer")).status, 2);
+  assert.equal(run(makeProject(), agentCall("recense-reviewer")).status, 2);
 });
 
 test("a pinned agent with the right model exits 0", () => {
-  assert.equal(run(makeProject(), agentCall("emend-reviewer", "sonnet")).status, 0);
+  assert.equal(run(makeProject(), agentCall("recense-reviewer", "sonnet")).status, 0);
 });
 
 test("blocks a nested dispatch without the pinned model", () => {
@@ -74,8 +74,8 @@ test("blocks a nested dispatch without the pinned model", () => {
   const input = {
     tool_name: "Agent",
     agent_id: "review-round-1",
-    agent_type: "emend-review-manager",
-    tool_input: { subagent_type: "emend-reviewer" },
+    agent_type: "recense-review-manager",
+    tool_input: { subagent_type: "recense-reviewer" },
   };
   assert.equal(run(root, JSON.stringify(input)).status, 2);
   assert.equal(
@@ -94,7 +94,7 @@ test("caller startup files never run in the test", () => {
   try {
     process.env.BASH_ENV = startup;
     process.env.ENV = startup;
-    const result = run(root, agentCall("emend-reviewer", "sonnet"));
+    const result = run(root, agentCall("recense-reviewer", "sonnet"));
     assert.equal(result.status, 0);
     assert.equal(existsSync(marker), false);
   } finally {
@@ -112,7 +112,7 @@ test("an agent whose file name differs from its name is still enforced", () => {
 });
 
 test("an environment override that differs from the pin exits 2", () => {
-  const result = run(makeProject(), agentCall("emend-reviewer", "sonnet"), {
+  const result = run(makeProject(), agentCall("recense-reviewer", "sonnet"), {
     CLAUDE_CODE_SUBAGENT_MODEL: "opus",
   });
   assert.equal(result.status, 2);
@@ -125,7 +125,7 @@ test("an unpinned agent and an unknown agent exit 0", () => {
 });
 
 test("a name with a slash does not read files outside the agents folder", () => {
-  assert.equal(run(makeProject(), agentCall("../agents/emend-reviewer", "opus")).status, 0);
+  assert.equal(run(makeProject(), agentCall("../agents/recense-reviewer", "opus")).status, 0);
 });
 
 test("other tools exit 0", () => {
@@ -156,7 +156,7 @@ function runWithTools(tools: string[]) {
   }
   chmodSync(bin, 0o755);
   return spawnSync(which("bash"), [hook], {
-    input: agentCall("emend-reviewer", "sonnet"),
+    input: agentCall("recense-reviewer", "sonnet"),
     encoding: "utf8",
     env: { PATH: bin, CLAUDE_PROJECT_DIR: makeProject() },
   });

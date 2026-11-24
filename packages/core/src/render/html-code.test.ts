@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter } from "parse5";
 import { afterEach, expect, test, vi } from "vitest";
 import { docText, HTML_ELEMENT_LIMIT, HTML_NESTING_LIMIT, nodeText, parseDocHtml } from "../place/html.ts";
@@ -266,7 +266,7 @@ test("colour computation rejects highlighter failures", async () => {
 
 test("a changed token text leaves the block unchanged", async () => {
   const highlighter = await highlighterModule.sharedHighlighter();
-  const changed = highlighter.codeToHast("const changed = 2;", { lang: "ts", theme: "emend" });
+  const changed = highlighter.codeToHast("const changed = 2;", { lang: "ts", theme: "recense" });
   vi.spyOn(highlighter, "codeToHast").mockReturnValueOnce(changed);
   const input = block("const seed = 1;");
   expect(await highlightHtmlCode(input)).toBe(input);

@@ -29,7 +29,7 @@ import {
   versionedManifestText,
 } from "./release.ts";
 
-const CLI_JSON = '{\r\n    "name": "@shllg/emend",\r\n    "version" : "0.1.0",\r\n    "other": "0.1.0"\r\n}\r\n';
+const CLI_JSON = '{\r\n    "name": "@shllg/recense",\r\n    "version" : "0.1.0",\r\n    "other": "0.1.0"\r\n}\r\n';
 const VERSION_TS = '// Version.\r\nexport const VERSION = "0.1.0";\r\nexport const OTHER = "0.1.0";\r\n';
 let counter = 0;
 
@@ -64,20 +64,20 @@ function write(root: string, file: string, text: string): void {
   writeFileSync(join(root, file), text);
 }
 
-function commit(root: string, subject: string, file = "apps/emend/change.ts", body?: string): void {
+function commit(root: string, subject: string, file = "apps/recense/change.ts", body?: string): void {
   write(root, file, `${++counter}\n`);
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", subject, ...(body ? ["-m", body] : []));
 }
 
 function fixture(t: TestContext, tagged = true): string {
-  const root = mkdtempSync(join(tmpdir(), "emend-release-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-release-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   git(root, "init", "-q", "-b", "main");
-  write(root, "apps/emend/package.json", CLI_JSON);
-  write(root, "apps/emend/src/version.ts", VERSION_TS);
+  write(root, "apps/recense/package.json", CLI_JSON);
+  write(root, "apps/recense/src/version.ts", VERSION_TS);
   write(root, "packages/contract/src/api.ts", 'export const MIN_CLIENT_VERSION = "0.1.0";\n');
-  write(root, "plugin/.claude-plugin/plugin.json", '{"name":"emend"}\n');
+  write(root, "plugin/.claude-plugin/plugin.json", '{"name":"recense"}\n');
   mkdirSync(join(root, "scripts"));
   copyFileSync(new URL("./release.ts", import.meta.url), join(root, "scripts/release.ts"));
   commit(root, "chore: start");
@@ -88,7 +88,7 @@ function fixture(t: TestContext, tagged = true): string {
 
 function cli(root: string, args: string[], env: NodeJS.ProcessEnv = {}) {
   // Files also capture child output on runners where Node's pipe handles are unavailable.
-  const capture = mkdtempSync(join(tmpdir(), "emend-release-output-"));
+  const capture = mkdtempSync(join(tmpdir(), "recense-release-output-"));
   const stdout = openSync(join(capture, "stdout"), "w");
   const stderr = openSync(join(capture, "stderr"), "w");
   try {
@@ -191,7 +191,7 @@ test("each shipped path counts, including the root packing hook", async (t) => {
 
 test("renaming a shipped file outside the shipped paths still counts", async (t) => {
   const root = fixture(t);
-  git(root, "mv", "apps/emend/change.ts", "internal.txt");
+  git(root, "mv", "apps/recense/change.ts", "internal.txt");
   git(root, "commit", "-q", "-m", "fix: remove shipped file");
   assert.equal((await run(root)).version, "0.1.1");
 });
@@ -298,12 +298,12 @@ test("notes contain only counted commits; GITHUB_OUTPUT appends the four values"
 test("stamp preserves every byte outside the two version literals", (t) => {
   const root = fixture(t);
   stampVersion(root, "0.12.3");
-  assert.equal(readFileSync(join(root, "apps/emend/package.json"), "utf8"), CLI_JSON.replace('"0.1.0"', '"0.12.3"'));
+  assert.equal(readFileSync(join(root, "apps/recense/package.json"), "utf8"), CLI_JSON.replace('"0.1.0"', '"0.12.3"'));
   assert.equal(
-    readFileSync(join(root, "apps/emend/src/version.ts"), "utf8"),
+    readFileSync(join(root, "apps/recense/src/version.ts"), "utf8"),
     VERSION_TS.replace('"0.1.0"', '"0.12.3"'),
   );
-  assert.equal(readFileSync(join(root, "plugin/.claude-plugin/plugin.json"), "utf8"), '{"name":"emend"}\n');
+  assert.equal(readFileSync(join(root, "plugin/.claude-plugin/plugin.json"), "utf8"), '{"name":"recense"}\n');
 });
 
 for (const version of [
@@ -329,19 +329,19 @@ for (const version of [
 for (const source of ["// missing\n", 'export const VERSION = "0.1.0";\nexport const VERSION = "0.1.0";\n']) {
   test(`stamp refuses missing/duplicate VERSION lines without changing the manifest`, (t) => {
     const root = fixture(t);
-    write(root, "apps/emend/src/version.ts", source);
+    write(root, "apps/recense/src/version.ts", source);
     assert.throws(() => stampVersion(root, "0.2.0"), /exactly one/);
-    assert.equal(readFileSync(join(root, "apps/emend/package.json"), "utf8"), CLI_JSON);
-    assert.equal(readFileSync(join(root, "apps/emend/src/version.ts"), "utf8"), source);
+    assert.equal(readFileSync(join(root, "apps/recense/package.json"), "utf8"), CLI_JSON);
+    assert.equal(readFileSync(join(root, "apps/recense/src/version.ts"), "utf8"), source);
   });
 }
 
 test("stamp refuses a nested first version instead of modifying the wrong key", (t) => {
   const root = fixture(t);
   const manifest = '{"nested":{"version":"0.1.0"},"version":"0.1.0"}';
-  write(root, "apps/emend/package.json", manifest);
+  write(root, "apps/recense/package.json", manifest);
   assert.throws(() => stampVersion(root, "0.2.0"), /top-level version/);
-  assert.equal(readFileSync(join(root, "apps/emend/package.json"), "utf8"), manifest);
+  assert.equal(readFileSync(join(root, "apps/recense/package.json"), "utf8"), manifest);
 });
 
 const PLUGIN_MANIFEST = "plugin/.claude-plugin/plugin.json";
@@ -353,7 +353,7 @@ test("repository manifests gain exactly one version line after the top-level nam
     [MARKETPLACE_MANIFEST, new URL("../.claude-plugin/marketplace.json", import.meta.url)],
   ] as const) {
     const original = readFileSync(url, "utf8");
-    const expected = original.replace('  "name": "emend",\n', '  "name": "emend",\n  "version": "0.3.0",\n');
+    const expected = original.replace('  "name": "recense",\n', '  "name": "recense",\n  "version": "0.3.0",\n');
     assert.notEqual(expected, original);
     assert.equal(versionedManifestText(original, file, "0.3.0"), expected);
   }
@@ -362,10 +362,10 @@ test("repository manifests gain exactly one version line after the top-level nam
 for (const [style, original, expected] of [
   [
     "CRLF and tabs",
-    '{\r\n\t"name" : "emend",\r\n\t"owner": {"name":"x"}\r\n}\r\n',
-    '{\r\n\t"name" : "emend",\r\n\t"version": "0.3.0",\r\n\t"owner": {"name":"x"}\r\n}\r\n',
+    '{\r\n\t"name" : "recense",\r\n\t"owner": {"name":"x"}\r\n}\r\n',
+    '{\r\n\t"name" : "recense",\r\n\t"version": "0.3.0",\r\n\t"owner": {"name":"x"}\r\n}\r\n',
   ],
-  ["compact JSON", '{"name":"emend"}\n', '{"name":"emend","version": "0.3.0"}\n'],
+  ["compact JSON", '{"name":"recense"}\n', '{"name":"recense","version": "0.3.0"}\n'],
   [
     "escaped name strings",
     '{"name":"e\\\"mend","other":true}',
@@ -379,7 +379,7 @@ for (const [style, original, expected] of [
 
 for (const version of ['"0.1.0"', "null", "false"]) {
   test(`manifest stamping refuses an existing top-level version of ${version}`, () => {
-    const original = `{"name":"emend","version":${version}}`;
+    const original = `{"name":"recense","version":${version}}`;
     assert.throws(() => versionedManifestText(original, PLUGIN_MANIFEST, "0.3.0"), {
       message: `release: ${PLUGIN_MANIFEST} must carry no version`,
     });
@@ -387,7 +387,7 @@ for (const version of ['"0.1.0"', "null", "false"]) {
 }
 
 test("manifest stamping refuses a nested first name instead of changing the wrong object", () => {
-  const original = '{"owner":{"name":"x"},"name":"emend"}';
+  const original = '{"owner":{"name":"x"},"name":"recense"}';
   assert.throws(
     () => versionedManifestText(original, PLUGIN_MANIFEST, "0.3.0"),
     (error) =>
@@ -398,7 +398,7 @@ test("manifest stamping refuses a nested first name instead of changing the wron
 
 test("manifest stamping reads the given commit and leaves a different HEAD and dirty checkout unchanged", (t) => {
   const root = fixture(t);
-  write(root, MARKETPLACE_MANIFEST, '{"name":"emend","plugins":[{"name":"emend","source":"./plugin"}]}\n');
+  write(root, MARKETPLACE_MANIFEST, '{"name":"recense","plugins":[{"name":"recense","source":"./plugin"}]}\n');
   commit(root, "chore: add marketplace");
   const source = git(root, "rev-parse", "HEAD").trim();
   const originals = [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST].map((file) => readFileSync(join(root, file), "utf8"));
@@ -421,7 +421,7 @@ test("manifest stamping reads the given commit and leaves a different HEAD and d
 for (const invalid of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) {
   test(`invalid ${invalid} prevents either manifest output from being written`, (t) => {
     const root = fixture(t);
-    write(root, MARKETPLACE_MANIFEST, '{"name":"emend"}\n');
+    write(root, MARKETPLACE_MANIFEST, '{"name":"recense"}\n');
     write(root, invalid, "{invalid JSON");
     commit(root, "chore: invalid manifest");
     const out = join(root, "output");
@@ -435,7 +435,7 @@ for (const invalid of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) {
 for (const missing of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) {
   test(`a commit missing ${missing} refuses stamping without writing either output`, (t) => {
     const root = fixture(t);
-    write(root, MARKETPLACE_MANIFEST, '{"name":"emend"}\n');
+    write(root, MARKETPLACE_MANIFEST, '{"name":"recense"}\n');
     rmSync(join(root, missing));
     commit(root, "chore: missing manifest");
     const source = git(root, "rev-parse", "HEAD").trim();
@@ -463,7 +463,7 @@ test("manifest stamping refuses non-plain versions before writing", (t) => {
 
 test("the manifests command takes version, commit and directory and stamps that commit", (t) => {
   const root = fixture(t);
-  write(root, MARKETPLACE_MANIFEST, '{"name":"emend"}\n');
+  write(root, MARKETPLACE_MANIFEST, '{"name":"recense"}\n');
   commit(root, "chore: add marketplace");
   const source = git(root, "rev-parse", "HEAD").trim();
   for (const file of [PLUGIN_MANIFEST, MARKETPLACE_MANIFEST]) write(root, file, '{"name":"later"}\n');
@@ -472,7 +472,7 @@ test("the manifests command takes version, commit and directory and stamps that 
   const result = cli(root, ["manifests", "0.3.0", source, out]);
   assert.equal(result.status, 0, result.stderr);
   for (const file of ["plugin.json", "marketplace.json"]) {
-    assert.equal(readFileSync(join(out, file), "utf8"), '{"name":"emend","version": "0.3.0"}\n');
+    assert.equal(readFileSync(join(out, file), "utf8"), '{"name":"recense","version": "0.3.0"}\n');
   }
 });
 
@@ -526,7 +526,7 @@ function pendingRelease(t: TestContext) {
   git(root, "tag", "v0.0.9");
   commit(root, "fix(cli): recover this release");
   git(root, "checkout", "-q", "-b", "tests");
-  commit(root, "test!: excluded tests", "apps/emend/recovery.test.ts");
+  commit(root, "test!: excluded tests", "apps/recense/recovery.test.ts");
   commit(root, "ci: excluded pipeline", "packages/pipeline.txt");
   git(root, "checkout", "-q", "main");
   git(root, "merge", "--no-ff", "-m", "feat!: excluded merge wrapper", "tests");
@@ -628,7 +628,7 @@ test("planning refuses a release head without a plugin manifest", async (t) => {
 for (const version of [null, false, "", "1.2", "01.2.3", "1.2.3-beta", "1.2.3\n"]) {
   test(`planning refuses a release head whose version is ${JSON.stringify(version)}`, async (t) => {
     const root = fixture(t);
-    write(root, PLUGIN_MANIFEST, JSON.stringify({ name: "emend", version }));
+    write(root, PLUGIN_MANIFEST, JSON.stringify({ name: "recense", version }));
     commit(root, "chore: invalid release version");
     const released = git(root, "rev-parse", "HEAD").trim();
     git(root, "update-ref", "refs/remotes/origin/release", released);
@@ -644,7 +644,7 @@ for (const version of [null, false, "", "1.2", "01.2.3", "1.2.3-beta", "1.2.3\n"
 
 test("planning refuses a release head whose plugin manifest is an array", async (t) => {
   const root = fixture(t);
-  write(root, PLUGIN_MANIFEST, '[{"name":"emend","version":"0.1.0"}]');
+  write(root, PLUGIN_MANIFEST, '[{"name":"recense","version":"0.1.0"}]');
   commit(root, "chore: invalid release manifest");
   const released = git(root, "rev-parse", "HEAD").trim();
   git(root, "update-ref", "refs/remotes/origin/release", released);
@@ -659,7 +659,7 @@ test("planning refuses a release head whose plugin manifest is an array", async 
 
 test("planning refuses a release head whose plugin manifest contains two JSON documents", async (t) => {
   const root = fixture(t);
-  write(root, PLUGIN_MANIFEST, '{"name":"emend","version":"0.1.0"}\n{"name":"emend","version":"0.2.0"}\n');
+  write(root, PLUGIN_MANIFEST, '{"name":"recense","version":"0.1.0"}\n{"name":"recense","version":"0.2.0"}\n');
   commit(root, "chore: invalid release manifest");
   const released = git(root, "rev-parse", "HEAD").trim();
   git(root, "update-ref", "refs/remotes/origin/release", released);
@@ -681,7 +681,7 @@ test("invalid JSON at the release head refuses planning", async (t) => {
 
 test("a versioned release commit without a parent is refused", (t) => {
   const root = fixture(t);
-  write(root, PLUGIN_MANIFEST, '{"name":"emend","version":"0.1.0"}');
+  write(root, PLUGIN_MANIFEST, '{"name":"recense","version":"0.1.0"}');
   git(root, "add", PLUGIN_MANIFEST);
   const tree = git(root, "write-tree").trim();
   const orphan = git(root, "commit-tree", tree, "-m", "chore: orphan stamp").trim();
@@ -821,7 +821,7 @@ for (const status of [200, 404, 302, 403, 429, 503]) {
     const { root, sha } = pendingRelease(t);
     if (status !== 404) git(root, "update-ref", "refs/remotes/origin/release", sha);
     const query = t.mock.method(globalThis, "fetch", async (url, options) => {
-      assert.equal(url, "https://registry.npmjs.org/@shllg%2Femend/0.1.1");
+      assert.equal(url, "https://registry.npmjs.org/@shllg%2Frecense/0.1.1");
       assert.equal(options.redirect, "manual");
       assert(options.signal instanceof AbortSignal);
       return new Response(null, { status });
@@ -871,7 +871,7 @@ for (const mode of ["new", "resume"] as const) {
       if (mode === "new") commit(root, "fix: new release candidate");
       const sha = git(root, "rev-parse", "HEAD").trim();
       git(root, "checkout", "-q", "-b", "release-work", relation === "ahead" ? sha : "v0.1.0");
-      commit(root, "fix: code already released", "apps/emend/released.ts");
+      commit(root, "fix: code already released", "apps/recense/released.ts");
       const releaseRef = "refs/heads/released";
       git(root, "update-ref", releaseRef, "HEAD");
       git(root, "checkout", "-q", "main");
@@ -963,7 +963,7 @@ test("a registry error when checking a new version is a refusal", async (t) => {
         throw new Error("registry unavailable");
       },
     }),
-    (error) => error instanceof ReleaseError && error.message === "release: could not check npm for @shllg/emend@0.1.1",
+    (error) => error instanceof ReleaseError && error.message === "release: could not check npm for @shllg/recense@0.1.1",
   );
 });
 

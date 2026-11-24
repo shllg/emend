@@ -10,8 +10,8 @@ const publicFile = (name: string) => readFile(join(publicRoot, name));
 test("manifest is installable and every placeholder PNG has the promised size", async () => {
   const manifest = JSON.parse((await publicFile("manifest.webmanifest")).toString());
   expect(manifest).toMatchObject({
-    name: "emend",
-    short_name: "emend",
+    name: "recense",
+    short_name: "recense",
     display: "standalone",
     start_url: "/",
     scope: "/",

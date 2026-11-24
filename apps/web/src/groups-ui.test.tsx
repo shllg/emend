@@ -1,4 +1,4 @@
-import { type InboxGroup, InboxItem } from "@emend/contract";
+import { type InboxGroup, InboxItem } from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -317,7 +317,7 @@ test.each(["<img src=x onerror=alert(1)>", "مشروع جديد"])("group names 
 });
 
 test("collapsed rail follows section order, regardless of group collapse or Kind filter", async () => {
-  localStorage.setItem("emend:inbox-kind", "review");
+  localStorage.setItem("recense:inbox-kind", "review");
   layoutStore.update({ inboxCollapsed: true });
   items[2] = item(3, { groupId: beta.id, kind: "publish" });
   mount(`/r/${items[0]?.id}`);

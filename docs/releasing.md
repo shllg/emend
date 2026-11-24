@@ -1,6 +1,6 @@
-# Releasing emend
+# Releasing recense
 
-This page is for maintainers. GitHub Actions releases `@shllg/emend` and moves the Claude Code
+This page is for maintainers. GitHub Actions releases `@shllg/recense` and moves the Claude Code
 marketplace branch. Nothing is committed back to main. The `release` branch gets one stamp commit
 per release.
 
@@ -112,7 +112,7 @@ an in-progress release.
 
 ## Version in the repository
 
-The committed version in `apps/emend/package.json` and `apps/emend/src/version.ts` stays as a floor.
+The committed version in `apps/recense/package.json` and `apps/recense/src/version.ts` stays as a floor.
 CI stamps the real release version into its build; it never commits those build files or updates
 `CHANGELOG.md`. From 0.1.1 onward, release notes live in GitHub Releases.
 
@@ -144,14 +144,14 @@ version; `version.test.ts` checks that the two CLI version literals agree.
    sends no custom author or committer. Allow the workflow to create tags and advance `release`
    normally; whoever can move that branch controls what marketplace users receive.
 3. On npmjs.com, add a GitHub Actions trusted publisher for user/organization **shllg**, repository
-   **emend**, workflow **release.yml**, environment **npm**. Its first publish must complete within
+   **recense**, workflow **release.yml**, environment **npm**. Its first publish must complete within
    **2 days** of creating the trusted publisher. If that deadline passes, delete and recreate the
-   trusted publisher before trying again. Keep `apps/emend/package.json`'s `repository.url` as
-   `git+https://github.com/shllg/emend.git`, matching that repository. No npm token secret is needed.
+   trusted publisher before trying again. Keep `apps/recense/package.json`'s `repository.url` as
+   `git+https://github.com/shllg/recense.git`, matching that repository. No npm token secret is needed.
 
    In the trusted publisher's **Allowed actions**, also allow direct publishing with `npm publish`.
    Trusted publishers created after **2026-09-03** allow only `npm stage publish` by default;
-   without direct publishing enabled, this workflow's publish job fails. emend uses direct trusted
+   without direct publishing enabled, this workflow's publish job fails. recense uses direct trusted
    publishing with no staged publish and no human approval step.
 
 4. After setup is complete, enable releases with the repository variable:
@@ -232,8 +232,8 @@ If GitHub refuses the workflow token's update of `release`, the owner moves it t
 printed in the failed step. Before updating the branch, check that commit:
 
 ```sh
-gh api repos/shllg/emend/git/commits/<stamp-sha> --jq '.parents[].sha'
-gh api repos/shllg/emend/compare/v<x.y.z>...<stamp-sha> --jq '.files[] | .filename, .patch'
+gh api repos/shllg/recense/git/commits/<stamp-sha> --jq '.parents[].sha'
+gh api repos/shllg/recense/compare/v<x.y.z>...<stamp-sha> --jq '.files[] | .filename, .patch'
 ```
 
 The parents must list the tagged commit first. The owner confirms that the comparison lists only
@@ -245,7 +245,7 @@ that scope lets any `gh` call change workflow files while it is granted.
 
 ```sh
 gh auth refresh -s workflow
-gh api --method PATCH repos/shllg/emend/git/refs/heads/release -f sha=<stamp-sha> -F force=false
+gh api --method PATCH repos/shllg/recense/git/refs/heads/release -f sha=<stamp-sha> -F force=false
 gh auth refresh --remove-scopes workflow
 ```
 
@@ -253,18 +253,18 @@ Then re-run the failed jobs. They find `release` already stamped and finish with
 
 ## What users see
 
-- **npm users** get the new version through `mise upgrade` or `npm install -g @shllg/emend`.
+- **npm users** get the new version through `mise upgrade` or `npm install -g @shllg/recense`.
 - **Claude Code users** get the new skills when `release` moves and they update the plugin, or
-  when they have plugin auto-update on. After `claude plugin marketplace update emend` and
-  `claude plugin update emend@emend`, `claude plugin list` shows the release version.
+  when they have plugin auto-update on. After `claude plugin marketplace update recense` and
+  `claude plugin update recense@recense`, `claude plugin list` shows the release version.
 
 ## Verify a release
 
 ```sh
-npm view @shllg/emend version --registry=https://registry.npmjs.org/
+npm view @shllg/recense version --registry=https://registry.npmjs.org/
 prefix="$(mktemp -d)"
-npm install -g --registry=https://registry.npmjs.org/ --prefix "$prefix" @shllg/emend@<version>
-"$prefix/bin/emend" --version
+npm install -g --registry=https://registry.npmjs.org/ --prefix "$prefix" @shllg/recense@<version>
+"$prefix/bin/recense" --version
 ```
 
 The versions must match the released one. Fetch the branch and tags, then check both manifests:
@@ -287,7 +287,7 @@ verification="$(mktemp -d)"
 (
   cd "$verification"
   npm init -y
-  npm install --registry=https://registry.npmjs.org/ @shllg/emend@<version>
+  npm install --registry=https://registry.npmjs.org/ @shllg/recense@<version>
   npm audit signatures
 )
 ```

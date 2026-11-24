@@ -1,4 +1,4 @@
-import { normalizeGlossaryForm } from "@emend/contract";
+import { normalizeGlossaryForm } from "@recense/contract";
 import { type HtmlElement, type HtmlRoot, renderData } from "./blocks.ts";
 import { type DocTermMatcher, longMarkRun, scanDocTerms } from "./doc-terms.ts";
 
@@ -157,7 +157,7 @@ function inlineNeighbours(tree: HtmlRoot) {
       if (frame.breaksRun) previous = undefined;
       stack.pop();
     } else if (node.type === "element") {
-      if (renderData(node).emendMedia !== undefined || renderData(node).emendDiagram !== undefined) {
+      if (renderData(node).recenseMedia !== undefined || renderData(node).recenseDiagram !== undefined) {
         previous = undefined;
         continue;
       }
@@ -192,12 +192,12 @@ export function markTerms() {
       if (node.type === "element") {
         if (
           skipped.has(node.tagName) ||
-          renderData(node).emendGlossary === true ||
-          renderData(node).emendMedia !== undefined ||
-          renderData(node).emendDiagram !== undefined ||
+          renderData(node).recenseGlossary === true ||
+          renderData(node).recenseMedia !== undefined ||
+          renderData(node).recenseDiagram !== undefined ||
           (Array.isArray(node.properties.className) &&
-            (node.properties.className.includes("emend-term") ||
-              node.properties.className.includes("emend-callout-marker")))
+            (node.properties.className.includes("recense-term") ||
+              node.properties.className.includes("recense-callout-marker")))
         )
           continue;
         stack.push({ parent: node, index: 0 });
@@ -252,7 +252,7 @@ export function markTerms() {
           replacements.push({
             type: "element",
             tagName: "span",
-            properties: { className: ["emend-term"], dataEmendTerm: String(entry) },
+            properties: { className: ["recense-term"], dataRecenseTerm: String(entry) },
             children: [{ type: "text", value: node.value.slice(start, finish) }],
           });
           end = finish;

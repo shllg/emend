@@ -493,7 +493,7 @@ export function checkIssue(repo: Repo): number {
   try {
     const n = issueFromBranch(repo.callerBranch ?? "");
     if (n === null || repo.callerBranch === `${BRANCH_PREFIX}${n}-` || !repo.callerTop)
-      throw new Error("Run issue check inside an emend-<n>-<slug> issue worktree.");
+      throw new Error("Run issue check inside a recense-<n>-<slug> issue worktree.");
     const metadata = worktreeIssue(repo.callerTop);
     if (metadata !== n) throw new Error("Worktree issue does not match the branch.");
     let snapshot: Record<string, unknown>;

@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { createHash } from "node:crypto";
-import type { RenderedBlock, RenderedWriteup, Target, ThemeBase, TopicMeta } from "@emend/contract";
+import type { RenderedBlock, RenderedWriteup, Target, ThemeBase, TopicMeta } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -87,7 +87,7 @@ const render = (
     theme,
   });
 const imageBlock = block(
-  `<span><img src="/api/v1/media/${sha}"><span class="emend-media-caption">A caption</span></span>`,
+  `<span><img src="/api/v1/media/${sha}"><span class="recense-media-caption">A caption</span></span>`,
 );
 function expectHead(html: string) {
   const head = parsed(html).find((el) => el.tagName === "head");
@@ -2764,7 +2764,7 @@ const threadPage = (kind: (typeof threadPageKinds)[number], threads: FileThreads
 
 // Reading CSS includes syntax base tokens; thread and diff CSS retain their original bytes.
 const systemStyleHashes = [
-  "39dd863644fe28083056a3bf37a039251672cd5050f5ed048de6e88410128cc2",
+  "c15f3e4c22c2c8ed2222242f2b2ec72ceaf49313e26ae05fda106c3a13fe9250",
   "4ccb0e73df0d25d3c35164825b62358d1f4475da66df85dff6e897350fce5e72",
   "b498db6a7c457faef4b17a4b2343cc19b0c9eeaf59ae33752fb9aa18ba983f97",
 ];
@@ -2773,7 +2773,7 @@ const pageStyles = (html: string) =>
     .filter((el) => el.tagName === "style")
     .map(hastText);
 
-test.each(["", "unknown-emend-language"])(
+test.each(["", "unknown-recense-language"])(
   "Markdown fence downloads use syntax colours without highlighting (language=%j)",
   async (language) => {
     const blocks = (await renderMarkdown(`\`\`\`${language}\nplain <code>\n\`\`\``, "overview")).map(({ html }) =>
@@ -3022,14 +3022,14 @@ async function commentsOffOutputs(builders: CompatibilityBuilders) {
 
 // Baseline without comments, updated for the syntax base CSS; HTML docs retain their original bytes.
 const commentsOffHashes = {
-  writeup: "599537df4bce2fbabee2af7809feb7ad7206e39c3d23eb2908d57fd5f105c7ca",
-  markdown: "f956df6e2ce53e2b4fe18db84588faa615aef76e55747da10ab1de22fe9ba842",
-  source: "a87967f30e8e49fc10a5236ab903a47d42baac6ce46a0613360ba55386603533",
-  emptySource: "7d5b76b40111b0a8e49bf4149f7265677bd321a0f54d30e4ee37264830ed7a99",
-  unrenderedSource: "d259e459fc2a0b6769658c42c1b8703b137bf52a3caf5b1f0ac119b4f03d5d28",
+  writeup: "acec6680b7bc6199e0b6407035cd6d1f793a3ef1ec689d85250bfa76e4849557",
+  markdown: "5f2e84a9adc2f7d4e616d611644e66cf411689917d2d503a15a18b8bcc3edae2",
+  source: "9860715147ebe3076a4044373541621f0823c452f0c03873d1e670838cd6e28e",
+  emptySource: "8df93cbc77310ef5501d436e7a157cf41598ea5f0c89a1dfbe6235fb3306dff8",
+  unrenderedSource: "50106d844e945d94924f43b21aa81314682f55caf656f165ae02971ecfcff7e8",
   html: "ebd1d21e1b7d438fa77910ed4a617b0850bbc687dc44b06aab36d42194f329e7",
-  overLimitHtml: "be2a7658625e0d556ec94d6b3757a834af3655504f254d89c0404592a5ef427b",
-  omitted: "be2a7658625e0d556ec94d6b3757a834af3655504f254d89c0404592a5ef427b",
+  overLimitHtml: "9de9dc4d7f4ed167e65cd59c78912e60a700a105ecb889e6920dd51a3bab4a1f",
+  omitted: "9de9dc4d7f4ed167e65cd59c78912e60a700a105ecb889e6920dd51a3bab4a1f",
 };
 test("comments-off output matches the pinned builder hashes", async () => {
   const outputs = await commentsOffOutputs({
@@ -3638,7 +3638,7 @@ test("an omitted doc keeps all its threads in input order, with labels and a bud
 });
 
 const pubCss =
-  '@layer emend-file,emend;@font-face{font-family:Example;src:url("data:font/woff2;base64,AA==")}@layer emend{body{color:CanvasText}}';
+  '@layer recense-file,recense;@font-face{font-family:Example;src:url("data:font/woff2;base64,AA==")}@layer recense{body{color:CanvasText}}';
 
 test.each([undefined, "dark", "light"] as const)(
   "HTML downloads put the pub stylesheet before page styles with mode=%s",
@@ -3675,22 +3675,22 @@ test("HTML downloads add theme variables in the bridge's layer and strip the fil
     look: { css: pubCss, mode: "light", theme },
   });
   expect(html.split(pubCss)).toHaveLength(2);
-  expect(html).not.toContain("data-emend-look");
-  expect(html).not.toContain("@layer emend-file{");
+  expect(html).not.toContain("data-recense-look");
+  expect(html).not.toContain("@layer recense-file{");
   const styles = parsed(html)
     .filter((node) => node.tagName === "style")
     .map(hastText);
   expect(styles).toEqual([
     pubCss,
-    "@layer emend{:root:root:root{--n-0:#ffffff;--bg-app:var(--n-0);}}",
+    "@layer recense{:root:root:root{--n-0:#ffffff;--bg-app:var(--n-0);}}",
     "p{color:#222}",
   ]);
 });
 
 test("HTML downloads keep the body after an unrecognised leading look chunk", async () => {
   const source =
-    '<!doctype html><meta charset="utf-8"><style data-emend-look>p{}</STYLE>' +
-    "<p>Shown in emend</p><!-- </style><p>Only in the download</p> -->";
+    '<!doctype html><meta charset="utf-8"><style data-recense-look>p{}</STYLE>' +
+    "<p>Shown in recense</p><!-- </style><p>Only in the download</p> -->";
   const html = await buildHtmlDocDownload({
     html: source,
     docPath: "plan.html",
@@ -3698,10 +3698,10 @@ test("HTML downloads keep the body after an unrecognised leading look chunk", as
     resolveAsset: async () => null,
     look: { css: pubCss },
   });
-  expect(html).toContain("<p>Shown in emend</p>");
+  expect(html).toContain("<p>Shown in recense</p>");
   expect(html).not.toContain("Only in the download");
   const body = parsed(html).find((node) => node.tagName === "body");
-  expect(body && hastText(body)).toBe("Shown in emend");
+  expect(body && hastText(body)).toBe("Shown in recense");
 });
 
 test.each(["</style><script>bad()</script>", "body{background:url(https://example.com/a)}"])(

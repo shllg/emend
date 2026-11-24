@@ -1,4 +1,4 @@
-import { type FileView, OTHER_TOPIC, type RevisionView, type TopicMeta } from "@emend/contract";
+import { type FileView, OTHER_TOPIC, type RevisionView, type TopicMeta } from "@recense/contract";
 import type { FileOrder } from "./layout-store.ts";
 
 const pathCollator = new Intl.Collator("en", { numeric: true });

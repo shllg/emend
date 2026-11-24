@@ -1,4 +1,4 @@
-import { ThemeColor } from "@emend/contract";
+import { ThemeColor } from "@recense/contract";
 import { expect, test } from "vitest";
 import { compositeThemeColor, normalizeThemeColor, parseThemeColor, themeColorHex, themeContrast } from "./color.ts";
 

@@ -1,4 +1,4 @@
-import { ReviewEvent, ReviewEventName, STREAM_PING_EVENT, STREAM_SILENCE_MS } from "@emend/contract";
+import { ReviewEvent, ReviewEventName, STREAM_PING_EVENT, STREAM_SILENCE_MS } from "@recense/contract";
 import { ApiError, head } from "../api/client.ts";
 
 type Notice = { kind: "open" } | { kind: "ping" } | { kind: "event"; type: string; data: string };
@@ -212,7 +212,7 @@ export function reconnectReviewEvents(timeoutMs = 3_000): Promise<boolean> {
 /**
  * One connection per origin where Web Locks and BroadcastChannel are available.
  *
- * The tab holding the "emend-events" lock is the leader: it owns the EventSource and relays every
+ * The tab holding the "recense-events" lock is the leader: it owns the EventSource and relays every
  * frame (pings included) over the channel. A suspended leader cannot say so. A visible follower
  * that sees no relayed frame for 40 s therefore steals the lock and opens its own stream. The old
  * leader's lock request then rejects, so it closes its stream and queues for the lock again.
@@ -236,7 +236,7 @@ export function subscribeReviewEvents(onEvent: (event: ReviewEvent) => void, onO
       direct.stop();
     };
   }
-  const channel = new BroadcastChannel("emend-events");
+  const channel = new BroadcastChannel("recense-events");
   channel.addEventListener("message", (event: MessageEvent<unknown>) => {
     if (parseNotice(event.data)) lastFrame = Date.now();
     receive(event.data);
@@ -266,7 +266,7 @@ export function subscribeReviewEvents(onEvent: (event: ReviewEvent) => void, onO
     // The Web Locks API does not allow `steal` together with `signal`.
     const options = steal ? { steal: true } : { signal: request.signal };
     navigator.locks
-      .request("emend-events", options, async () => {
+      .request("recense-events", options, async () => {
         if (stopped || request.signal.aborted) return;
         held = true;
         if (steal) {

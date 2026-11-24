@@ -53,7 +53,7 @@ export function PairPage() {
   }, [redeem]);
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col gap-5 px-6 pt-14 pb-6">
-      <p className="mb-3 font-mono text-[32px] font-medium leading-none text-fg-1">emend</p>
+      <p className="mb-3 font-mono text-[32px] font-medium leading-none text-fg-1">recense</p>
       <h1 className="text-24 font-semibold leading-(--lh-tight) tracking-(--tracking-tight)">
         {loopback ? "Sign in" : "Pair this device"}
       </h1>
@@ -63,7 +63,7 @@ export function PairPage() {
             <p role="status">Pairing…</p>
           ) : (
             <p className="text-15 text-fg-2">
-              Run <code>emend</code> in a terminal on the machine that runs emend. It opens this page signed in, or
+              Run <code>recense</code> in a terminal on the machine that runs recense. It opens this page signed in, or
               prints a one-time link you can open here.
             </p>
           )}

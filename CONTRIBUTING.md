@@ -1,12 +1,12 @@
-# Contributing to emend
+# Contributing to recense
 
-Thank you for helping. emend is small and maintained by one person, so the path below keeps
+Thank you for helping. recense is small and maintained by one person, so the path below keeps
 things simple for both of us.
 
 ## Report a bug or suggest a change
 
 Open an issue. Say what you saw or want, why it matters to you, and how to reproduce a bug: your
-emend version (`emend --version`), your OS and the steps. Screenshots help. Do not paste private
+recense version (`recense --version`), your OS and the steps. Screenshots help. Do not paste private
 code, tokens or anything from a client project: issues are public.
 
 For a security problem, do not open an issue: [SECURITY.md](SECURITY.md) says how to report it
@@ -32,7 +32,7 @@ A maintainer reads the issue, may ask questions, and labels it with a kind and a
 
 - CI runs on your pull request after a maintainer approves it. That is GitHub's rule for pull
   requests from forks.
-- A maintainer reviews the change in emend, and any comments come back as a review on your pull
+- A maintainer reviews the change in recense, and any comments come back as a review on your pull
   request. Push to the same branch to answer them.
 - When it is ready, the maintainer squash-merges it. GitHub keeps you as the author.
 

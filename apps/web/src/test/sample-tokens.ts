@@ -1,6 +1,6 @@
 import { globSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { type SampleView, THEME_TOKENS } from "@emend/contract";
+import { type SampleView, THEME_TOKENS } from "@recense/contract";
 import { SAMPLE_HTML } from "../../../../packages/core/src/sample/content.ts";
 
 const web = resolve(import.meta.dirname, "../..");
@@ -18,7 +18,7 @@ const sources = [...cssFiles("src/styles"), ...cssFiles("src/components")].map(r
 const references = (value: string) => [...value.matchAll(/var\(\s*--([\w-]+)/g)].map((match) => match[1] ?? "");
 const tokens = new Set<string>(THEME_TOKENS);
 
-// No emend element uses these tokens; remove a token as soon as an element uses it.
+// No recense element uses these tokens; remove a token as soon as an element uses it.
 export const TOKENS_NO_ELEMENT_USES = ["agent-working", "agent-approved"] as const;
 
 const escapePattern = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

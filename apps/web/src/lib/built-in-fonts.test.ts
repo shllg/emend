@@ -1,4 +1,4 @@
-import { DEFAULT_THEME_FONTS } from "@emend/contract";
+import { DEFAULT_THEME_FONTS } from "@recense/contract";
 import { expect, test } from "vitest";
 import { BUILT_IN_FONTS, shouldPrecacheAsset } from "./built-in-fonts.ts";
 

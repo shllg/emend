@@ -8,7 +8,7 @@ import { gzipSync } from "node:zlib";
 import { type Budgets, checkBundles, measureBundles } from "./check-bundle.ts";
 
 test("static closure deduplicates shared chunks and excludes dynamic imports and CSS", (t) => {
-  const dist = mkdtempSync(join(tmpdir(), "emend-bundle-test-"));
+  const dist = mkdtempSync(join(tmpdir(), "recense-bundle-test-"));
   t.after(() => rmSync(dist, { recursive: true, force: true }));
   const files = {
     "entry.js": "export const entry = 1;",
@@ -37,7 +37,7 @@ test("static closure deduplicates shared chunks and excludes dynamic imports and
 });
 
 test("worker assets of imported chunks count once and their growth fails the route budget", (t) => {
-  const dist = mkdtempSync(join(tmpdir(), "emend-worker-budget-test-"));
+  const dist = mkdtempSync(join(tmpdir(), "recense-worker-budget-test-"));
   t.after(() => rmSync(dist, { recursive: true, force: true }));
   const files = { "entry.js": "export {};", "diff.js": "export const diff = 1;", "worker.js": "postMessage(1);", "parse.worker.js": "postMessage(2);" };
   for (const [name, content] of Object.entries(files)) writeFileSync(join(dist, name), content);
@@ -58,7 +58,7 @@ test("worker assets of imported chunks count once and their growth fails the rou
 });
 
 test("index roots count classic scripts, deduplicate files and exclude module and non-script types", (t) => {
-  const dist = mkdtempSync(join(tmpdir(), "emend-classic-budget-test-"));
+  const dist = mkdtempSync(join(tmpdir(), "recense-classic-budget-test-"));
   t.after(() => rmSync(dist, { recursive: true, force: true }));
   const entry = "export const entry = 1;", boot = "window.syntheticTheme = 1;";
   writeFileSync(join(dist, "entry.js"), entry);
@@ -81,7 +81,7 @@ test("index roots count classic scripts, deduplicate files and exclude module an
 });
 
 test("commented-out scripts neither count nor require their files to exist", (t) => {
-  const dist = mkdtempSync(join(tmpdir(), "emend-comment-budget-test-"));
+  const dist = mkdtempSync(join(tmpdir(), "recense-comment-budget-test-"));
   t.after(() => rmSync(dist, { recursive: true, force: true }));
   const entry = "export {};", boot = "window.syntheticTheme = 1;";
   writeFileSync(join(dist, "entry.js"), entry);
@@ -101,7 +101,7 @@ test("commented-out scripts neither count nor require their files to exist", (t)
 });
 
 test("all classic JavaScript MIME types count, ignoring case and parameters", (t) => {
-  const dist = mkdtempSync(join(tmpdir(), "emend-script-types-test-"));
+  const dist = mkdtempSync(join(tmpdir(), "recense-script-types-test-"));
   t.after(() => rmSync(dist, { recursive: true, force: true }));
   const types = [
     "", "  ", "application/ecmascript", "application/javascript", "application/x-ecmascript",
@@ -126,7 +126,7 @@ test("all classic JavaScript MIME types count, ignoring case and parameters", (t
 });
 
 test("classic script paths cannot leave the build through traversal or symlinks", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-classic-path-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-classic-path-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const dist = join(root, "dist");
   mkdirSync(dist);
@@ -142,7 +142,7 @@ test("classic script paths cannot leave the build through traversal or symlinks"
 });
 
 test("empty roots and negative or fractional budgets are invalid", (t) => {
-  const dist = mkdtempSync(join(tmpdir(), "emend-invalid-budget-test-"));
+  const dist = mkdtempSync(join(tmpdir(), "recense-invalid-budget-test-"));
   t.after(() => rmSync(dist, { recursive: true, force: true }));
   for (const budget of [
     { roots: [], gzipBytes: 100 }, { roots: ["entry"], gzipBytes: -1 },

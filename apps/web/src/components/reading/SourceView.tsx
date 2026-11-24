@@ -1,4 +1,4 @@
-import type { RevisionView, SourceLinesTarget } from "@emend/contract";
+import type { RevisionView, SourceLinesTarget } from "@recense/contract";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";
 import { draftKey } from "../../lib/drafts.ts";

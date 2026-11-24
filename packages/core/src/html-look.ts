@@ -2,8 +2,8 @@ import { type DefaultTreeAdapterTypes, defaultTreeAdapter, html } from "parse5";
 import { stripHtmlLook } from "./html-look-file.ts";
 import { parseDocHtml } from "./place/html.ts";
 
-export type HtmlLook = "emend" | "custom";
-export type HtmlLookReason = "default" | "marked-emend" | "marked-custom" | "unreadable";
+export type HtmlLook = "recense" | "custom";
+export type HtmlLookReason = "default" | "marked-recense" | "marked-custom" | "unreadable";
 export type HtmlColorScheme = "light" | "auto";
 type HtmlLookResult = {
   look: HtmlLook;
@@ -196,10 +196,12 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
       isHtml &&
       name === "meta" &&
       mark === undefined &&
-      lower(attr("name").trim()) === "emend-look"
+      // Pages written before the rename carry `emend-look` and `emend`; they keep their meaning.
+      ["recense-look", "emend-look"].includes(lower(attr("name").trim()))
     ) {
       const value = lower(attr("content").trim());
-      if (value === "emend" || value === "custom") mark = value;
+      if (value === "recense" || value === "emend") mark = "recense";
+      else if (value === "custom") mark = "custom";
     }
     const stylesheet =
       isHtml &&
@@ -267,12 +269,12 @@ export function htmlLookFromTree(tree: DefaultTreeAdapterTypes.Document | null):
       shadow,
     });
   }
-  const look = mark ?? "emend";
+  const look = mark ?? "recense";
   return {
     look,
-    reason: mark ? (mark === "emend" ? "marked-emend" : "marked-custom") : "default",
+    reason: mark ? (mark === "recense" ? "marked-recense" : "marked-custom") : "default",
     ownStyles,
-    colorScheme: look === "emend" && colors && !darkRule ? "light" : "auto",
+    colorScheme: look === "recense" && colors && !darkRule ? "light" : "auto",
     outside: [...outside].sort(),
     otherOutside,
   };

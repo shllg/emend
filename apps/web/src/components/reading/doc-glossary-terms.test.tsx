@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -41,7 +41,7 @@ async function mount(markdown: string) {
       </ToastProvider>
     </QueryClientProvider>,
   );
-  return { ...view, doc, marks: [...view.container.querySelectorAll<HTMLElement>("span.emend-term")] };
+  return { ...view, doc, marks: [...view.container.querySelectorAll<HTMLElement>("span.recense-term")] };
 }
 const glossaryDoc = "# Guide\n\nThe budget is spent.\n\n## Glossary\n\n- **Budget:** Attempts a worker may spend.\n";
 
@@ -68,7 +68,7 @@ test("a tap on a marked term opens the card at once", async () => {
 
 test("the entry's own block is not marked", async () => {
   const { container } = await mount(glossaryDoc);
-  expect(container.querySelectorAll("li span.emend-term")).toHaveLength(0);
+  expect(container.querySelectorAll("li span.recense-term")).toHaveLength(0);
 });
 
 test("a doc without a glossary shows no marks or card", async () => {

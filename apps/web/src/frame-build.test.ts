@@ -135,7 +135,7 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
   expect(workerStubs.length).toBeGreaterThan(0);
   for (const [name] of workerStubs) expect(stubs.some((file) => file.fileName === name)).toBe(true);
   // Identical main/worker copies may share a filename after Vite deduplicates them.
-  const directory = await mkdtemp(join(tmpdir(), "emend-built-stubs-"));
+  const directory = await mkdtemp(join(tmpdir(), "recense-built-stubs-"));
   try {
     for (const [index, stub] of stubs.entries()) {
       const path = join(directory, `stub-${index}.mjs`);
@@ -148,7 +148,7 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
           importModuleDynamically: constants.USE_MAIN_CONTEXT_DEFAULT_LOADER,
         },
       );
-      await expect.soft(imported).rejects.toThrow("This diff backend is disabled. emend uses shiki-js.");
+      await expect.soft(imported).rejects.toThrow("This diff backend is disabled. recense uses shiki-js.");
     }
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -267,7 +267,7 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
   sandbox.window = window;
   sandbox.self = window;
   runInNewContext(code, sandbox, { contextCodeGeneration: { strings: false, wasm: false } });
-  const bridge = Reflect.get(sandbox, "EmendMermaidFrame") as { startFrame: (root: unknown) => () => void };
+  const bridge = Reflect.get(sandbox, "RecenseMermaidFrame") as { startFrame: (root: unknown) => () => void };
   const stop = bridge.startFrame(root);
   onTestFinished(stop);
   for (const source of [
@@ -303,7 +303,7 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
     direction LR
     L01a[Added]:::added ~~~ L01b[Changed]:::changed ~~~ L01c[Removed]:::removed
   end`,
-    // Hand-drawn diagrams cannot render in happy-dom; mermaid-classes.test.ts checks emend's rules skip them.
+    // Hand-drawn diagrams cannot render in happy-dom; mermaid-classes.test.ts checks recense's rules skip them.
     "flowchart LR\n  subgraph G01 [G01]\n    G01a --> G01b\n  end\n  G01 --> G01c\n  class G01 teal\n  class G01b breaks",
     '%%{init: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
     '%%{initialize: {"themeVariables": {"fontSize": ["16px;} text{fill:rgb(7,8,9) !important} .z{color:x"]}}}%%\nflowchart LR\n  B05a --> B05b',
@@ -366,7 +366,7 @@ test("built frame rejects diagram theme overrides without dynamic code generatio
       );
       expect(css).toMatch(/\.statediagram-cluster\.purple:not\(\[data-look=handDrawn\]\)\s+rect\.inner\b/);
 
-      // Scoped selectors distinguish emend's defaults from Mermaid's classDef rules.
+      // Scoped selectors distinguish recense's defaults from Mermaid's classDef rules.
       const names = colors.map((color) => color.name).join("|");
       const defaults = new RegExp(`\\.(?:node|cluster|statediagram-cluster)\\.(?:${names})\\b`);
       for (const [, selectors = "", declarations = ""] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {

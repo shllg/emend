@@ -1,4 +1,4 @@
-import type { ChartSpec } from "@emend/contract";
+import type { ChartSpec } from "@recense/contract";
 
 const exact = new Intl.NumberFormat("en-US", { maximumFractionDigits: 20 });
 const decimal = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });

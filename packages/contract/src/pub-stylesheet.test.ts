@@ -24,7 +24,7 @@ test("pub stylesheet accepts data fonts, media comparisons and the exact UTF-8 b
   for (const url of ["data:font/woff2;base64,AA==", ' "data:font/woff2;base64,AA=="', " 'DATA:font/woff2;base64,AA=='"])
     expect(
       pubStylesheetSafe(
-        `@layer emend{@font-face{font-family:Test;src:url(${url})}@media(width<=767px){body{max-width:none}}}`,
+        `@layer recense{@font-face{font-family:Test;src:url(${url})}@media(width<=767px){body{max-width:none}}}`,
       ),
     ).toBe(true);
   expect(pubStylesheetSafe('body::before{content:"<"}')).toBe(true);

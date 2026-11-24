@@ -63,7 +63,7 @@ export function emptyRegistry(): Registry {
 }
 
 export function stateDir(repo: Repo): string {
-  return join(repo.commonDir, "emend-wt");
+  return join(repo.commonDir, "recense-wt");
 }
 
 export function registryPath(repo: Repo): string {

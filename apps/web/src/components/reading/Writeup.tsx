@@ -1,4 +1,4 @@
-import type { RenderedWriteup, RevisionView } from "@emend/contract";
+import type { RenderedWriteup, RevisionView } from "@recense/contract";
 import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";

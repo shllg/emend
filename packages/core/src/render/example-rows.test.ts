@@ -1,4 +1,4 @@
-import type { TopicMeta } from "@emend/contract";
+import type { TopicMeta } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { expect, test } from "vitest";
@@ -45,59 +45,61 @@ test.each([
     expect(blockText(block.html)).toBe(blockText(original[index]?.html ?? ""));
   }
   const html = blocks[0]?.html ?? "";
-  expect(html).toContain('<p class="emend-example-rows">');
-  expect(html).toContain(`<span class="emend-example-label">${before}</span><span class="emend-example-value"> `);
-  expect(html).toContain(`<span class="emend-example-label">${after}</span>`);
-  expect(html.match(/class="emend-example-row"/g)).toHaveLength(2);
-  if (md.startsWith("An intro")) expect(html).toContain('<span class="emend-example-line">An intro.</span>\n');
+  expect(html).toContain('<p class="recense-example-rows">');
+  expect(html).toContain(`<span class="recense-example-label">${before}</span><span class="recense-example-value"> `);
+  expect(html).toContain(`<span class="recense-example-label">${after}</span>`);
+  expect(html.match(/class="recense-example-row"/g)).toHaveLength(2);
+  if (md.startsWith("An intro")) expect(html).toContain('<span class="recense-example-line">An intro.</span>\n');
   if (md.includes("  \n")) expect(html).toContain("</span><br>\n");
 });
 
 test.each([
   ["> [!NOTE]\n> Before: seed\n> After: plant", "\n"],
-  ["> [!NOTE]\\\n> Before: seed\n> After: plant", '<br class="emend-callout-marker-break">\n'],
+  ["> [!NOTE]\\\n> Before: seed\n> After: plant", '<br class="recense-callout-marker-break">\n'],
   [
     "<blockquote><p>[!NOTE] \t<br>Before: seed\nAfter: plant</p></blockquote>",
-    ' \t<br class="emend-callout-marker-break">',
+    ' \t<br class="recense-callout-marker-break">',
   ],
 ])("keeps a callout marker and its separators outside example rows: %s", async (md, separator) => {
   const blocks = await renderExample(md);
   const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
   expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
   const html = blocks[0]?.html ?? "";
-  expect(html).toContain(`<p class="emend-example-rows"><span class="emend-callout-marker">[!NOTE]</span>${separator}`);
-  const paragraph = withClass(html, "emend-example-rows")[0];
+  expect(html).toContain(
+    `<p class="recense-example-rows"><span class="recense-callout-marker">[!NOTE]</span>${separator}`,
+  );
+  const paragraph = withClass(html, "recense-example-rows")[0];
   expect(paragraph?.children[0]).toMatchObject({
     type: "element",
     tagName: "span",
-    properties: { className: ["emend-callout-marker"] },
+    properties: { className: ["recense-callout-marker"] },
     children: [{ type: "text", value: "[!NOTE]" }],
   });
   const rows = paragraph?.children.filter(
     (child) =>
       child.type === "element" &&
       Array.isArray(child.properties.className) &&
-      child.properties.className.includes("emend-example-row"),
+      child.properties.className.includes("recense-example-row"),
   );
   expect(rows?.map((row) => hastText(row))).toEqual(["Before: seed", "After: plant"]);
-  expect(withClass(html, "emend-example-line")).toHaveLength(0);
+  expect(withClass(html, "recense-example-line")).toHaveLength(0);
 });
 
 test("a no-break space after a callout marker stays inside the first example row", async () => {
   const [block] = await renderExample("> [!NOTE]\n> \u00a0Before: seed\n> After: plant");
-  const paragraph = withClass(block?.html ?? "", "emend-example-rows")[0];
+  const paragraph = withClass(block?.html ?? "", "recense-example-rows")[0];
   if (paragraph?.tagName !== "p") throw new Error("Missing example paragraph");
   const rows = paragraph.children.filter(
     (child) =>
       child.type === "element" &&
       Array.isArray(child.properties.className) &&
-      child.properties.className.includes("emend-example-row"),
+      child.properties.className.includes("recense-example-row"),
   );
   expect(rows).toHaveLength(2);
   const first = rows[0];
   if (!first) throw new Error("Missing first example row");
   expect(paragraph.children.slice(0, paragraph.children.indexOf(first))).toMatchObject([
-    { type: "element", tagName: "span", properties: { className: ["emend-callout-marker"] } },
+    { type: "element", tagName: "span", properties: { className: ["recense-callout-marker"] } },
     { type: "text", value: expect.stringMatching(/^[ \t\r\n\f]+$/) },
   ]);
   expect(hastText(first)).toBe("\u00a0Before: seed");
@@ -111,14 +113,14 @@ test("a callout introduction stays outside its marker's prefix", async () => {
   expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
   const html = blocks[0]?.html ?? "";
   expect(html).toContain(
-    '<span class="emend-callout-marker">[!NOTE]</span>\n<span class="emend-example-line">An intro.</span>',
+    '<span class="recense-callout-marker">[!NOTE]</span>\n<span class="recense-example-line">An intro.</span>',
   );
 });
 
 test("a colon inside a longer bold span leaves that line unlabelled", async () => {
   const [block] = await renderExample("**Before: one seed**\nAfter: two seeds");
-  expect(block?.html).toContain('<span class="emend-example-line"><strong>Before: one seed</strong></span>');
-  expect(block?.html.match(/class="emend-example-row"/g)).toHaveLength(1);
+  expect(block?.html).toContain('<span class="recense-example-line"><strong>Before: one seed</strong></span>');
+  expect(block?.html.match(/class="recense-example-row"/g)).toHaveLength(1);
 });
 
 test.each([
@@ -145,22 +147,22 @@ test("only Example sections opt into rows", async () => {
     [topic],
   );
   for (const section of writeup.sections) {
-    expect(section.blocks.some((block) => block.html.includes("emend-example-rows"))).toBe(
+    expect(section.blocks.some((block) => block.html.includes("recense-example-rows"))).toBe(
       section.key === "t-garden-example",
     );
   }
   const doc = await renderMarkdownWithBudget(md, "doc-12345678", { highlightedBytes: 0 });
-  expect(doc[0]?.html).not.toContain("emend-example");
+  expect(doc[0]?.html).not.toContain("recense-example");
 });
 
 test("example wrappers cannot be forged and hostile inline content stays inert", async () => {
   const md =
-    'Before: <script>bad()</script><img src=x onerror=bad()> [bad](javascript:bad())\nAfter: <span class="emend-example-label">safe</span> <svg onload=bad()></svg>\n\n<p class="emend-example-rows">Plain</p>';
+    'Before: <script>bad()</script><img src=x onerror=bad()> [bad](javascript:bad())\nAfter: <span class="recense-example-label">safe</span> <svg onload=bad()></svg>\n\n<p class="recense-example-rows">Plain</p>';
   const blocks = await renderExample(md);
   const html = blocks.map((block) => block.html).join("");
-  expect(html).toContain('class="emend-example-label"');
-  expect(html).toContain('class="user-content-emend-example-label"');
-  expect(html).toContain('class="user-content-emend-example-rows"');
+  expect(html).toContain('class="recense-example-label"');
+  expect(html).toContain('class="user-content-recense-example-label"');
+  expect(html).toContain('class="user-content-recense-example-rows"');
   expect(html).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
   const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
   expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
@@ -168,7 +170,7 @@ test("example wrappers cannot be forged and hostile inline content stays inert",
 
 test("hostile continuation content stays sanitized inside the first row without changing text or ids", async () => {
   const md =
-    'Before: one seed\nContinued: <script>bad()</script> <img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()></svg> <span class="emend-example-value">x</span>\nAfter: safe';
+    'Before: one seed\nContinued: <script>bad()</script> <img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()></svg> <span class="recense-example-value">x</span>\nAfter: safe';
   const blocks = await renderExample(md);
   const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
   expect(blocks).toHaveLength(1);
@@ -178,15 +180,15 @@ test("hostile continuation content stays sanitized inside the first row without 
     expect(blockText(block.html)).toBe(blockText(plain[index]?.html ?? ""));
   }
   const html = blocks[0]?.html ?? "";
-  expect(html).toContain('class="user-content-emend-example-value"');
-  const rows = withClass(html, "emend-example-row");
+  expect(html).toContain('class="user-content-recense-example-value"');
+  const rows = withClass(html, "recense-example-row");
   expect(rows).toHaveLength(2);
   const before = rows[0]?.children[1];
   if (before?.type !== "element") throw new Error("Missing first row value");
-  expect(before).toMatchObject({ tagName: "span", properties: { className: ["emend-example-value"] } });
+  expect(before).toMatchObject({ tagName: "span", properties: { className: ["recense-example-value"] } });
   expect(hastText(before)).toBe(" one seed\nContinued:   bad  x");
   expect(before.children.find((node) => node.type === "element" && node.tagName === "span")).toMatchObject({
-    properties: { className: ["user-content-emend-example-value"] },
+    properties: { className: ["user-content-recense-example-value"] },
     children: [{ type: "text", value: "x" }],
   });
   expect(rows[1] && hastText(rows[1])).toBe("After: safe");
@@ -203,7 +205,7 @@ test("Example and glossary keep hostile HTML inert and isolate Mermaid click dir
     const html = section.blocks.map((block) => block.html).join("");
     expect(html).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
     expect(section.blocks.find((block) => block.kind === "diagram")?.source).toBe(source);
-    expect(html.includes("emend-example-rows")).toBe(section.key === "t-garden-example");
+    expect(html.includes("recense-example-rows")).toBe(section.key === "t-garden-example");
   }
 });
 
@@ -222,11 +224,11 @@ test.each([
   expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
   const html = blocks[0]?.html ?? "";
   expect(blockText(html)).toBe(blockText(plain[0]?.html ?? ""));
-  const values = withClass(html, "emend-example-value");
+  const values = withClass(html, "recense-example-value");
   expect(values).toHaveLength(2);
   const first = values[0];
   expect(first && hastText(first)).toBe(before);
-  const intros = withClass(html, "emend-example-line");
+  const intros = withClass(html, "recense-example-line");
   expect(intros).toHaveLength(intro ? 1 : 0);
   if (intro) expect(intros[0] && hastText(intros[0])).toBe(intro);
   if (!md.includes("**"))
@@ -249,7 +251,7 @@ test("a glossary term spanning a soft break stays marked inside one value", asyn
   const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 });
   expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
   expect(blocks[0]?.html).toContain(
-    '<span class="emend-example-value"> exceeds the <span class="emend-term" data-emend-term="0">rate\nlimit</span>.</span>',
+    '<span class="recense-example-value"> exceeds the <span class="recense-term" data-recense-term="0">rate\nlimit</span>.</span>',
   );
   expect(blockText(blocks[0]?.html ?? "")).toBe(blockText(plain[0]?.html ?? ""));
 });
@@ -261,14 +263,14 @@ test.each([" ", "&nbsp;"])("keeps %s after the label inside the value", async (s
   expect(blocks.map(({ id, text }) => ({ id, text }))).toEqual(plain.map(({ id, text }) => ({ id, text })));
   const html = blocks[0]?.html ?? "";
   expect(blockText(html)).toBe(blockText(plain[0]?.html ?? ""));
-  const rows = withClass(html, "emend-example-row");
+  const rows = withClass(html, "recense-example-row");
   expect(rows).toHaveLength(2);
   for (const [index, row] of rows.entries()) {
     expect(row.children).toHaveLength(2);
-    expect(row.children[0]).toMatchObject({ type: "element", properties: { className: ["emend-example-label"] } });
+    expect(row.children[0]).toMatchObject({ type: "element", properties: { className: ["recense-example-label"] } });
     expect(row.children[1]).toMatchObject({
       type: "element",
-      properties: { className: ["emend-example-value"] },
+      properties: { className: ["recense-example-value"] },
       children: [{ type: "text", value: `${space === "&nbsp;" ? "\u00a0" : " "}${index === 0 ? "one" : "two"}` }],
     });
   }
@@ -289,12 +291,14 @@ test("Example screenshot captions with colons keep their media pair and effect",
   const plain = await renderMarkdownWithBudget(md, "t-garden-example", { highlightedBytes: 0 }, undefined, media);
   expect(blocks).toEqual(plain);
   const html = blocks[0]?.html ?? "";
-  const pairs = withClass(html, "emend-media-pair");
+  const pairs = withClass(html, "recense-media-pair");
   expect(pairs).toHaveLength(1);
   expect(pairs[0]?.tagName).toBe("p");
   expect(
-    pairs[0]?.children.filter((node) => node.type === "element" && node.properties.className?.includes("emend-media")),
+    pairs[0]?.children.filter(
+      (node) => node.type === "element" && node.properties.className?.includes("recense-media"),
+    ),
   ).toHaveLength(2);
-  expect(withClass(html, "emend-media-effect")).toHaveLength(1);
-  expect(html).not.toContain("emend-example-");
+  expect(withClass(html, "recense-media-effect")).toHaveLength(1);
+  expect(html).not.toContain("recense-example-");
 });

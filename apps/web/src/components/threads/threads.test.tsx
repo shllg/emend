@@ -7,7 +7,7 @@ import {
   type Target,
   type ThreadView,
   type UnplacedReason,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";

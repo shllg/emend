@@ -1,4 +1,4 @@
-import type { DocHeading, RenderedBlock, RevisionView } from "@emend/contract";
+import type { DocHeading, RenderedBlock, RevisionView } from "@recense/contract";
 
 export type HeadingDoc = {
   path: string;

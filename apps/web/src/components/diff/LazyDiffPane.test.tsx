@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { LazyDiffPane } from "./LazyDiffPane.tsx";

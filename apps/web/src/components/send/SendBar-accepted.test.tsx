@@ -5,7 +5,7 @@ import {
   type ReviewView,
   type RevisionView,
   SHORTCUT_DEFAULTS,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -167,8 +167,8 @@ function approve(name: string) {
   fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve" }));
 }
 const lostText =
-  "emend cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below.";
-const normalText = "No agent has picked this up yet. emend keeps it until one does.";
+  "recense cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below.";
+const normalText = "No agent has picked this up yet. recense keeps it until one does.";
 
 function revisionView(sent = false): RevisionView {
   const target = { kind: "file", path: "example.ts" } as const;

@@ -1,4 +1,4 @@
-import type { RenderedWriteup } from "@emend/contract";
+import type { RenderedWriteup } from "@recense/contract";
 import { type RefObject, useEffect } from "react";
 
 export function useCurrentTopic(

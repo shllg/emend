@@ -1,19 +1,19 @@
 ---
 paths:
-  - "apps/emend/src/cli.ts"
-  - "apps/emend/src/cli/**"
-  - "apps/emend/bin/**"
+  - "apps/recense/src/cli.ts"
+  - "apps/recense/src/cli/**"
+  - "apps/recense/bin/**"
 ---
 
-# Where the emend CLI and its helpers run from
+# Where the recense CLI and its helpers run from
 
-A repo under review may try to run its own code through emend: under mise, its tool config can
-point `emend`, `node` or `git` at code it controls, and agents run emend with full rights. These
+A repo under review may try to run its own code through recense: under mise, its tool config can
+point `recense`, `node` or `git` at code it controls, and agents run recense with full rights. These
 checks catch a copy inside the repo.
 
 - `publish`, `look`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
-  an emend whose Node.js or entry resolves inside a repository that holds the working directory
-  (`apps/emend/src/cli.ts`, `runtime-repository.ts`). The refusal comes before `main.ts` loads.
+  a recense whose Node.js or entry resolves inside a repository that holds the working directory
+  (`apps/recense/src/cli.ts`, `runtime-repository.ts`). The refusal comes before `main.ts` loads.
   `status --line` runs the same check but stays silent: a refusal or a failed check prints nothing
   and exits 0, because a status line never shows an error.
 - A `.git` folder counts unless it has no `HEAD` (git never accepts one without), so an empty one
@@ -22,21 +22,21 @@ checks catch a copy inside the repo.
   unreadable entry refuses.
 - Only a repository whose root is the home folder itself (a dotfiles repository) does not count.
   When the home folder is relative or missing, every repository counts; when it cannot be
-  resolved otherwise, emend refuses.
-- The config file (`config.json` in `$XDG_CONFIG_HOME/emend/` when that variable is absolute,
-  else `~/.config/emend/`) and the old one in the state folder get the same check
+  resolved otherwise, recense refuses.
+- The config file (`config.json` in `$XDG_CONFIG_HOME/recense/` when that variable is absolute,
+  else `~/.config/recense/`) and the old one in the state folder get the same check
   (`configRepository` in `cli/config.ts`). When the path, its real path or any symlink hop on the
   way, walked one hop at a time (at most 40), lies inside such a repository, `publish` and `open`
-  ignore the file, never copying or renaming it, and `emend config` refuses. Keep the hop walk: a
+  ignore the file, never copying or renaming it, and `recense config` refuses. Keep the hop walk: a
   link inside the repository could point the file at one the repository writes, whose `docRoots`
   would let `publish` read a folder such as `~/.ssh`. The server reads only `approvedActiveHours` and
   `keys` from that file, a bounded integer and a map of shortcut keys, without this check. It also
   reads each theme's `theme.json` in the `themes` folder beside it without this check: every value must be a
   checked colour, a scale step name, a font name or a density (`compact`, `regular` or `roomy`), and
-  none applies until the reviewer picks the theme. `emend theme list`, `copy` and `check`, and
-  `emend look` unless it gets `--no-theme`, refuse a themes folder inside such a repository.
+  none applies until the reviewer picks the theme. `recense theme list`, `copy` and `check`, and
+  `recense look` unless it gets `--no-theme`, refuse a themes folder inside such a repository.
 - Every helper program (git, systemctl, launchctl, tailscale, the browser opener, and mise, npm
-  and pnpm for `emend update`) comes from `findExecutable` (`executable.ts`): absolute `PATH`
+  and pnpm for `recense update`) comes from `findExecutable` (`executable.ts`): absolute `PATH`
   entries without `.` or `..` parts, where no part of the entry's path or of the program's path,
   link targets included, lies inside such a repository. The helper runs with only those entries on its `PATH`, minus any entry where a file
   of that name exists but leads into such a repository or cannot be checked. On macOS, tailscale
@@ -51,8 +51,8 @@ checks catch a copy inside the repo.
   mock of `executable.ts` refuses any lookup outside the test's own folders, so no test can reach a
   real `tailscale` or, on macOS, the Tailscale app. Tests of git run the system git with the
   fenced config above; tests of systemctl and launchctl use a fixture `PATH` and a mocked runner.
-- Tests use temporary `EMEND_HOME` folders and git repos built in the test, never real state.
-- `emend update` alone runs a package manager: it requires a terminal, a non-root user and HOME
+- Tests use temporary `RECENSE_HOME` folders and git repos built in the test, never real state.
+- `recense update` alone runs a package manager: it requires a terminal, a non-root user and HOME
   resolving to the account's home. It finds mise, npm or pnpm through `findExecutable` and runs
   from home. Its allowlisted environment drops Node options and incoming npm options; path-valued
   variables pass only when checked outside the working directory's repositories, hop by hop.
@@ -69,9 +69,9 @@ checks catch a copy inside the repo.
   macOS polls launchctl and proceeds only on status 113. Bare stop waits for process exit or discovery
   removal/replacement, even without a listener. Locale values containing / are dropped;
   a located downgrade refuses before executing it.
-  Local builds only get instructions. A located new emend inside those repositories is refused,
+  Local builds only get instructions. A located new recense inside those repositories is refused,
   including every symlink hop; its `--version` and `service install` use the running Node.js.
   After success it ends with notes; it compares the links in `~/.agents/skills` with the new
   package's skills by real path only and reads nothing else there; each note line is inert prose
-  starting with `emend: `.
+  starting with `recense: `.
   Tests use fake package managers on a fixture PATH.

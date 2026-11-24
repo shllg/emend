@@ -388,7 +388,7 @@ test("R6.1: joined diagnostics strip decorations and credential continuations ha
 test("R6.2: credential prefixes require boundaries and AWS prefixes keep their case", () => {
   for (const text of [
     "error: metadata: xyz",
-    "error in emend-task-012-x",
+    "error in recense-task-012-x",
     "Asia and asia",
     "akia example",
     "task-placeholder",
@@ -441,8 +441,8 @@ test("R7.1: joined prefix and token-run hits withhold every touched and subseque
 
 test("R7.2: branch names and build paths remain readable while credential segments are withheld", () => {
   for (const text of [
-    "fatal: couldn't find remote ref emend-1234-fix-public-content-gate-diagnostics",
-    "error: pathspec 'emend-123-some-very-long-branch-name-with-many-words-here' did not match any file(s) known to git",
+    "fatal: couldn't find remote ref recense-1234-fix-public-content-gate-diagnostics",
+    "error: pathspec 'recense-123-some-very-long-branch-name-with-many-words-here' did not match any file(s) known to git",
     "/tmp/build-2026/generated/components/example-component/index.ts",
   ])
     assert.equal(
@@ -475,10 +475,10 @@ test("round 8.1: separated base64, base36 and mixed-case paths are withheld but 
       "[line withheld: secret shape]\n[line withheld: secret shape]",
     );
   for (const value of [
-    "emend-1234-improve-es2022compatibility",
-    "emend-task-1234-improve-es2022compatibility",
-    "emend-1234-improve-es2022compatibility-for-fixtures",
-    "emend-task-1234-improve-es2022compatibility-for-fixtures",
+    "recense-1234-improve-es2022compatibility",
+    "recense-task-1234-improve-es2022compatibility",
+    "recense-1234-improve-es2022compatibility-for-fixtures",
+    "recense-task-1234-improve-es2022compatibility-for-fixtures",
     "/tmp/build-2026/generated/components/example-component/index.ts",
   ])
     assert.equal(pushDiagnostic(value), value);
@@ -497,7 +497,7 @@ test("round 8.2: loose-object and pack corruption diagnostics preserve object pa
 });
 
 test("round 8.3: credential keywords require credential syntax (prefixed forms tightened in round 9)", () => {
-  const branch = "fatal: couldn't find remote ref emend-1234-fix-authorization-header\nhint: retry";
+  const branch = "fatal: couldn't find remote ref recense-1234-fix-authorization-header\nhint: retry";
   assert.equal(pushDiagnostic(branch), branch);
   for (const value of [
     "authorization guide",
@@ -544,9 +544,9 @@ test("round 9.1: credential followers cover prefixed headers and the RFC bearer 
     );
   }
   for (const text of [
-    "emend-1234-fix-authorization-header",
-    "emend-12-fix-bearer-token",
-    "fatal: couldn't find remote ref emend-1234-fix-authorization-header",
+    "recense-1234-fix-authorization-header",
+    "recense-12-fix-bearer-token",
+    "fatal: couldn't find remote ref recense-1234-fix-authorization-header",
     "Bearer abc.def",
     "bearer_header example",
   ])
@@ -636,7 +636,7 @@ test("round 10.2: equals, colon, plus and quoted labels retain hex credential ma
 });
 
 test("round 10.3: qualified repository branches remain readable across diagnostic lines", () => {
-  for (const branch of ["emend-1234-improve-es2022compatibility", "emend-task-1234-improve-es2022compatibility"]) {
+  for (const branch of ["recense-1234-improve-es2022compatibility", "recense-task-1234-improve-es2022compatibility"]) {
     for (const prefix of ["", "refs/heads/", "refs/remotes/origin/", "origin/"]) {
       const ref = prefix + branch;
       for (const value of [ref, `error: cannot lock ref '${ref}': reference already exists`]) {
@@ -654,9 +654,9 @@ for (const [name, render] of [
     "remote object validation",
     (sha: string) => `remote: error: object ${sha}: badTimezone: invalid author/committer line`,
   ],
-  ["source object refspec", (sha: string) => `git push origin ${sha}:refs/heads/emend-1-x`],
+  ["source object refspec", (sha: string) => `git push origin ${sha}:refs/heads/recense-1-x`],
   ["object path lookup", (sha: string) => `fatal: ${sha}:README.md does not exist`],
-  ["destination object refspec", (sha: string) => `fatal: refs/heads/emend-12-x:${sha}`],
+  ["destination object refspec", (sha: string) => `fatal: refs/heads/recense-12-x:${sha}`],
   ["colon at end of line", (sha: string) => `error: object ${sha}:`],
 ] as const) {
   test(`round 11.1: ${name} keeps the object id readable`, () => {
@@ -733,7 +733,7 @@ test("round 12.7: long internal quote runs complete within the worker timeout", 
 test("round 12.8: force refspec object sources print but labelled plus-hex stays withheld", () => {
   for (const length of [40, 64]) {
     const hex = "ab01".repeat(length / 4);
-    const value = `hint: git push origin +${hex}:refs/heads/emend-12-fix`;
+    const value = `hint: git push origin +${hex}:refs/heads/recense-12-fix`;
     assert.equal(pushDiagnostic(`${value}\nhint: retry`), `${value}\nhint: retry`);
     assert.equal(pushDiagnostic(`label+${hex}`), "[line withheld: secret shape]");
   }
@@ -757,8 +757,8 @@ test("round 12.9: qualified hex exemptions require lower-case object ids", () =>
 });
 
 test("round 12.10: missing files retain owner-set environment terms in diagnostics", (t) => {
-  const before = process.env.EMEND_PRIVATE_TERMS;
-  process.env.EMEND_PRIVATE_TERMS = "fixture confidential phrase";
+  const before = process.env.RECENSE_PRIVATE_TERMS;
+  process.env.RECENSE_PRIVATE_TERMS = "fixture confidential phrase";
   const reader = t.mock.method(fs, "readFileSync", (): Buffer => {
     throw Object.assign(new Error("synthetic absent list"), { code: "ENOENT" });
   });
@@ -773,8 +773,8 @@ test("round 12.10: missing files retain owner-set environment terms in diagnosti
       "[diagnostic withheld: private terms file is invalid]",
     );
   } finally {
-    if (before === undefined) delete process.env.EMEND_PRIVATE_TERMS;
-    else process.env.EMEND_PRIVATE_TERMS = before;
+    if (before === undefined) delete process.env.RECENSE_PRIVATE_TERMS;
+    else process.env.RECENSE_PRIVATE_TERMS = before;
     reader.mock.restore();
     syncBuiltinESMExports();
   }

@@ -9,7 +9,7 @@ import {
   type RevisionView,
   type Target,
   type ThreadView,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -652,7 +652,7 @@ function prepareFrame(path: string) {
 
 test.each([
   { pixels: 390, link: "Inbox", pathname: "/", heading: "Inbox" },
-  { pixels: 1280, link: "emend", pathname: "/", heading: "Inbox" },
+  { pixels: 1280, link: "recense", pathname: "/", heading: "Inbox" },
   { pixels: 1280, link: "Devices", pathname: "/devices", heading: "Devices" },
 ])(
   "$link header link leaves a doc review in one click at $pixels px and Back restores its doc",
@@ -703,7 +703,7 @@ test("leaving as a doc commits keeps the inbox address ahead of pending effects"
       onRender={() => {
         if (searchAtClick !== undefined || !screen.queryByText("Water the seedlings")) return;
         searchAtClick = history.location.search;
-        screen.getByRole("link", { name: "emend" }).click();
+        screen.getByRole("link", { name: "recense" }).click();
       }}
     >
       <App queryClient={client} history={history} />
@@ -857,7 +857,7 @@ test.each(["row", "rail"])(
   async (entry) => {
     docsFixture();
     currentRevision.main = gardenDoc.path;
-    if (entry === "rail") localStorage.setItem("emend.layout.v1", JSON.stringify({ inboxCollapsed: true }));
+    if (entry === "rail") localStorage.setItem("recense.layout.v1", JSON.stringify({ inboxCollapsed: true }));
     const { history } = mount();
     await screen.findByText("Keep growing");
     const inboxLink = () =>
@@ -921,8 +921,8 @@ test.each([1280, 390])(
     expect(scroll.mock.calls[index]).toEqual([{ block: "start" }]);
     expect(scroll.mock.instances).not.toContain(document.getElementById(`thread-${id}`));
     const { frame, post } = prepareFrame(htmlDoc.path);
-    frameMessage(frame, { type: "emend:ready" });
-    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:scroll", threadId: id }, "*"));
+    frameMessage(frame, { type: "recense:ready" });
+    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "recense:scroll", threadId: id }, "*"));
     expect(scroll.mock.invocationCallOrder[index]).toBeLessThan(post.mock.invocationCallOrder.at(-1) ?? 0);
   },
 );
@@ -1218,7 +1218,7 @@ test("HTML doc messages navigate with history and fragment hand-off, and old win
   await screen.findByRole("heading", { name: "seed.html" });
   const { frame: first } = prepareFrame(htmlDoc.path);
   const fragment = "part é%#";
-  frameMessage(first, { type: "emend:navigate", path: otherHtmlDoc.path, fragment });
+  frameMessage(first, { type: "recense:navigate", path: otherHtmlDoc.path, fragment });
   const nextHeading = await screen.findByRole("heading", { name: "water.html" });
   await waitFor(() => expect(document.activeElement).toBe(nextHeading));
   await waitFor(() =>
@@ -1232,8 +1232,8 @@ test("HTML doc messages navigate with history and fragment hand-off, and old win
   expect(searchParams(history).get("rev")).toBe("1");
   expect(history.length).toBe(2);
   const { frame: second } = prepareFrame(otherHtmlDoc.path);
-  frameMessage(first, { type: "emend:navigate", path: gardenDoc.path, fragment: "" });
-  frameMessage(first, { type: "emend:anchor", quote: "seed", prefix: "", suffix: "" });
+  frameMessage(first, { type: "recense:navigate", path: gardenDoc.path, fragment: "" });
+  frameMessage(first, { type: "recense:anchor", quote: "seed", prefix: "", suffix: "" });
   expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
   expect(searchParams(history).get("doc")).toBe(otherHtmlDoc.path);
   act(() => history.back());
@@ -1241,7 +1241,7 @@ test("HTML doc messages navigate with history and fragment hand-off, and old win
   expect(container.querySelectorAll("iframe")).toHaveLength(1);
   expect(second.isConnected).toBe(false);
   const { frame: returned } = prepareFrame(htmlDoc.path);
-  frameMessage(returned, { type: "emend:navigate", path: gardenDoc.path, fragment: "heading" });
+  frameMessage(returned, { type: "recense:navigate", path: gardenDoc.path, fragment: "heading" });
   await screen.findByRole("heading", { name: "z garden.md" });
   expect(container.querySelector("iframe")).toBeNull();
 });
@@ -1251,7 +1251,7 @@ test("HTML navigation rejects foreign windows, other revisions, malformed messag
   const { history, container } = mount(`?tab=docs&doc=${encodeURIComponent(htmlDoc.path)}`);
   await screen.findByRole("heading", { name: "seed.html" });
   const { frame } = prepareFrame(htmlDoc.path);
-  const valid = { type: "emend:navigate", path: otherHtmlDoc.path, fragment: "seed" };
+  const valid = { type: "recense:navigate", path: otherHtmlDoc.path, fragment: "seed" };
   frameMessage(frame, valid, window);
   for (const data of [
     { ...valid, path: "previous-revision.html" },
@@ -1437,7 +1437,7 @@ describe("comment highlight navigation", () => {
     vi.stubGlobal("CSS", { highlights });
     vi.stubGlobal("Highlight", class extends Set<Range> {});
   });
-  const ranges = (active = false) => [...(highlights.get(active ? "emend-comment-active" : "emend-comment") ?? [])];
+  const ranges = (active = false) => [...(highlights.get(active ? "recense-comment-active" : "recense-comment") ?? [])];
   const quotes = (active = false) => ranges(active).map((range) => range.toString());
 
   test.each([1280, 390].flatMap((pixels) => ["writeup", "docs"].map((tab) => ({ pixels, tab }))))(
@@ -2014,7 +2014,7 @@ test("fix1 Resume expands a resolved card and focuses its unsent edit", async ()
       comments: thread.comments.map((comment) => ({ ...comment, sent: false, sentOn: null })),
     },
   ];
-  localStorage.setItem(`emend.draft.${id}.edit.${id}`, "Resume this edit");
+  localStorage.setItem(`recense.draft.${id}.edit.${id}`, "Resume this edit");
   mount("?tab=comments");
   fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
   const editor = await screen.findByRole("textbox", { name: "Edit comment" });
@@ -3804,11 +3804,11 @@ test("C3 HTML Contents gates goto on ready, replaces history and marks position 
   );
   await waitFor(() => expect(history.location.hash).toBe("#h-1"));
   expect(history.length).toBe(length);
-  expect(post.mock.calls.some(([data]) => data.type === "emend:goto")).toBe(false);
-  frameMessage(frame, { type: "emend:ready" });
-  await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second" }, "*"));
+  expect(post.mock.calls.some(([data]) => data.type === "recense:goto")).toBe(false);
+  frameMessage(frame, { type: "recense:ready" });
+  await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 1, label: "Second" }, "*"));
   const href = history.location.href;
-  frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.25 });
+  frameMessage(frame, { type: "recense:position", heading: 2, fraction: 0.25 });
   expect(history.location.href).toBe(href);
 
   expect(
@@ -3825,10 +3825,10 @@ test("C3 HTML positions reject untrusted messages and survive Back and reload wi
   await screen.findByRole("heading", { name: "Seed guide" });
   const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
   let { frame, post } = prepareFrame("seed.html");
-  const message = { type: "emend:position", heading: 1, fraction: 0.4 };
+  const message = { type: "recense:position", heading: 1, fraction: 0.4 };
   frameMessage(frame, message);
   expect(readingPosition.loadReadingPosition(key)).toBeUndefined();
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   for (const invalid of [
     { ...message, heading: -1 },
     { ...message, heading: 3 },
@@ -3845,8 +3845,8 @@ test("C3 HTML positions reject untrusted messages and survive Back and reload wi
   const stored = localStorage.getItem(readingPosition.readingKey);
   for (const forbidden of ["Second", "Seed guide", "/content/", "quote"]) expect(stored).not.toContain(forbidden);
   fireEvent.load(frame);
-  frameMessage(frame, { type: "emend:position", heading: 0, fraction: 0 });
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:position", heading: 0, fraction: 0 });
+  frameMessage(frame, { type: "recense:ready" });
   expect(localStorage.getItem(readingPosition.readingKey)).toBe(stored);
   fireEvent.click(screen.getByRole("button", { name: "Docs" }));
   fireEvent.click(
@@ -3858,18 +3858,18 @@ test("C3 HTML positions reject untrusted messages and survive Back and reload wi
   await screen.findByRole("heading", { name: "Seed guide" });
   const stale = frame;
   ({ frame, post } = prepareFrame("seed.html"));
-  frameMessage(stale, { type: "emend:position", heading: 0, fraction: 0 });
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(stale, { type: "recense:position", heading: 0, fraction: 0 });
+  frameMessage(frame, { type: "recense:ready" });
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
+    expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
   );
   app.unmount();
   app = mount("?tab=docs&doc=seed.html&rev=1&view=original");
   await screen.findByRole("heading", { name: "Seed guide" });
   ({ frame, post } = prepareFrame("seed.html"));
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
+    expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
   );
 });
 
@@ -3879,8 +3879,8 @@ test.each([390, 1280])("C3 HTML selection draft survives drawer close and Back a
   const { history } = mount("?tab=docs&doc=seed.html&rev=1");
   await screen.findByRole("heading", { name: "Seed guide" });
   const { frame } = prepareFrame("seed.html");
-  frameMessage(frame, { type: "emend:ready" });
-  frameMessage(frame, { type: "emend:anchor", quote: "A seed", prefix: "", suffix: "" });
+  frameMessage(frame, { type: "recense:ready" });
+  frameMessage(frame, { type: "recense:anchor", quote: "A seed", prefix: "", suffix: "" });
   fireEvent.click(await screen.findByRole("button", { name: "Comment on selection" }));
   fireEvent.change(await screen.findByRole("textbox", { name: "Comment" }), { target: { value: "Keep this draft" } });
   // A phone composer is its own sheet above the Comments sheet.
@@ -3915,20 +3915,20 @@ test("C3 HTML heading targets beat storage, but Back keeps the entry passage wit
   const { history } = mount("?tab=docs&doc=seed.html&rev=1#h-1");
   await screen.findByRole("heading", { name: "Seed guide" });
   let { frame, post } = prepareFrame("seed.html");
-  frameMessage(frame, { type: "emend:ready" });
-  await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second" }, "*"));
-  frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.6 });
+  frameMessage(frame, { type: "recense:ready" });
+  await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 1, label: "Second" }, "*"));
+  frameMessage(frame, { type: "recense:position", heading: 2, fraction: 0.6 });
   post.mockClear();
-  frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.6 });
-  expect(post.mock.calls.filter(([message]) => message.type === "emend:goto")).toEqual([]);
+  frameMessage(frame, { type: "recense:position", heading: 2, fraction: 0.6 });
+  expect(post.mock.calls.filter(([message]) => message.type === "recense:goto")).toEqual([]);
   await act(async () => history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
   await screen.findByRole("heading", { name: "water.md" });
   await act(async () => history.back());
   await screen.findByRole("heading", { name: "Seed guide" });
   ({ frame, post } = prepareFrame("seed.html"));
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 2, label: "Third", fraction: 0.6 }, "*"),
+    expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 2, label: "Third", fraction: 0.6 }, "*"),
   );
 });
 
@@ -3959,8 +3959,8 @@ test.each([390, 1280])(
     fireEvent.click(await screen.findByRole("link", { name: "Show in place" }));
     await screen.findByRole("heading", { name: "Seed guide" });
     const { frame, post } = prepareFrame("seed.html");
-    frameMessage(frame, { type: "emend:ready" });
-    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:scroll", threadId: id }, "*"));
+    frameMessage(frame, { type: "recense:ready" });
+    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "recense:scroll", threadId: id }, "*"));
     fireEvent.click(screen.getByRole("button", { name: "Comments (1)" }));
     const drawer = await screen.findByRole("dialog", { name: "Comments" });
     expect(within(drawer).getByText("Unsent seed question")).toBeTruthy();
@@ -3989,11 +3989,11 @@ test("C3 HTML restore rejects an undeclared saved index and keeps view positions
   const { history } = mount("?tab=docs&doc=seed.html&rev=1");
   await screen.findByRole("heading", { name: "Seed guide" });
   const { frame, post } = prepareFrame("seed.html");
-  frameMessage(frame, { type: "emend:ready" });
-  expect(post.mock.calls.some(([message]) => message.type === "emend:goto")).toBe(false);
+  frameMessage(frame, { type: "recense:ready" });
+  expect(post.mock.calls.some(([message]) => message.type === "recense:goto")).toBe(false);
   await act(async () => history.push(`/r/${id}?tab=docs&doc=seed.html&rev=1&view=reading`));
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.3 }, "*"),
+    expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 1, label: "Second", fraction: 0.3 }, "*"),
   );
   fireEvent.load(frame);
   post.mockClear();
@@ -4009,15 +4009,15 @@ test("C3 R1.3 returning to the introduction clears position and Contents, includ
   let app = mount("?tab=docs&doc=seed.html&rev=1");
   await screen.findByRole("heading", { name: "Seed guide" });
   let { frame, post } = prepareFrame("seed.html");
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
+    expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 1, label: "Second", fraction: 0.4 }, "*"),
   );
-  frameMessage(frame, { type: "emend:position", heading: 1, fraction: 0.4 });
+  frameMessage(frame, { type: "recense:position", heading: 1, fraction: 0.4 });
 
   const contents = await screen.findByRole("navigation", { name: "Document contents" });
   expect(within(contents).getByRole("button", { name: "Second" }).getAttribute("aria-current")).toBe("location");
-  frameMessage(frame, { type: "emend:position", heading: null, fraction: 0 });
+  frameMessage(frame, { type: "recense:position", heading: null, fraction: 0 });
   expect(readingPosition.loadReadingPosition(key)).toBeUndefined();
   expect(contents.querySelector('[aria-current="location"]')).toBeNull();
   await act(async () => app.history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
@@ -4025,15 +4025,15 @@ test("C3 R1.3 returning to the introduction clears position and Contents, includ
   await act(async () => app.history.back());
   await screen.findByRole("heading", { name: "Seed guide" });
   ({ frame, post } = prepareFrame("seed.html"));
-  frameMessage(frame, { type: "emend:ready" });
-  expect(post.mock.calls.some(([message]) => message.type === "emend:goto")).toBe(false);
+  frameMessage(frame, { type: "recense:ready" });
+  expect(post.mock.calls.some(([message]) => message.type === "recense:goto")).toBe(false);
   expect(document.querySelector('.em-doc-view [aria-current="location"]')).toBeNull();
   app.unmount();
   app = mount("?tab=docs&doc=seed.html&rev=1");
   await screen.findByRole("heading", { name: "Seed guide" });
   ({ frame, post } = prepareFrame("seed.html"));
-  frameMessage(frame, { type: "emend:ready" });
-  expect(post.mock.calls.some(([message]) => message.type === "emend:goto")).toBe(false);
+  frameMessage(frame, { type: "recense:ready" });
+  expect(post.mock.calls.some(([message]) => message.type === "recense:goto")).toBe(false);
   expect(document.querySelector('.em-doc-view [aria-current="location"]')).toBeNull();
 });
 
@@ -4043,10 +4043,10 @@ test.each(["Contents", "restore"])("C3 R1.4 %s posts nothing after an unexpected
   const { history } = mount("?tab=docs&doc=seed.html&rev=1");
   await screen.findByRole("heading", { name: "Seed guide" });
   const { frame, post } = prepareFrame("seed.html");
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   fireEvent.load(frame);
   post.mockClear();
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   if (kind === "Contents") {
     fireEvent.click(
       within(await screen.findByRole("navigation", { name: "Document contents" })).getByRole("button", {
@@ -4073,18 +4073,18 @@ test.each(["Contents", "restore"])(
     await screen.findByRole("heading", { name: "Seed guide" });
     const { frame, post } = prepareFrame("seed.html");
     const key = readingPosition.readingPositionKey(id, "docs", "seed.html", 1, "original");
-    frameMessage(frame, { type: "emend:ready" });
-    frameMessage(frame, { type: "emend:position", heading: 1, fraction: 0.4 });
-    frameMessage(frame, { type: "emend:anchor", quote: "seed", prefix: "", suffix: "" });
+    frameMessage(frame, { type: "recense:ready" });
+    frameMessage(frame, { type: "recense:position", heading: 1, fraction: 0.4 });
+    frameMessage(frame, { type: "recense:anchor", quote: "seed", prefix: "", suffix: "" });
     expect(screen.getByRole("button", { name: "Comment on selection" })).toBeTruthy();
     post.mockClear();
     // No load event: the replacement document's bridge runs before its resources finish loading.
-    frameMessage(frame, { type: "emend:ready" });
-    frameMessage(frame, { type: "emend:position", heading: 2, fraction: 0.8 });
+    frameMessage(frame, { type: "recense:ready" });
+    frameMessage(frame, { type: "recense:position", heading: 2, fraction: 0.8 });
     expect(readingPosition.loadReadingPosition(key)).toEqual({ id: "h-1", fraction: 0.4 });
-    frameMessage(frame, { type: "emend:anchor", quote: "replacement", prefix: "", suffix: "" });
-    frameMessage(frame, { type: "emend:navigate", path: "water.md", fragment: "" });
-    frameMessage(frame, { type: "emend:ready" });
+    frameMessage(frame, { type: "recense:anchor", quote: "replacement", prefix: "", suffix: "" });
+    frameMessage(frame, { type: "recense:navigate", path: "water.md", fragment: "" });
+    frameMessage(frame, { type: "recense:ready" });
     expect(screen.getByText("This doc navigated away.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
     expect(searchParams(history).get("doc")).toBe("seed.html");
@@ -4106,10 +4106,10 @@ test.each(["Contents", "restore"])(
     fireEvent.click(screen.getByRole("button", { name: "Reload seed.html" }));
     const next = prepareFrame("seed.html");
     expect(next.frame).not.toBe(frame);
-    frameMessage(next.frame, { type: "emend:ready" });
+    frameMessage(next.frame, { type: "recense:ready" });
     expect(screen.queryByText("This doc navigated away.")).toBeNull();
-    expect(next.post).toHaveBeenCalledWith({ type: "emend:docs", paths: ["seed.html", "water.md"] }, "*");
-    frameMessage(frame, { type: "emend:position", heading: 0, fraction: 0 });
+    expect(next.post).toHaveBeenCalledWith({ type: "recense:docs", paths: ["seed.html", "water.md"] }, "*");
+    frameMessage(frame, { type: "recense:position", heading: 0, fraction: 0 });
     expect(readingPosition.loadReadingPosition(key)).toEqual({ id: "h-1", fraction: 0.4 });
   },
 );
@@ -4149,7 +4149,7 @@ test("R4 an actual inset bridge report keeps the picked Contents marker and save
     content.dispatchEvent(new content.MessageEvent("message", { data, source: parent as unknown as BridgeWindow })),
   );
   try {
-    const source = readFileSync(join(import.meta.dirname, "../../emend/src/server/content/bridge.ts"), "utf8");
+    const source = readFileSync(join(import.meta.dirname, "../../recense/src/server/content/bridge.ts"), "utf8");
     const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
     runInNewContext(script, { window: content, document: content.document });
     content.document.dispatchEvent(new content.Event("DOMContentLoaded"));
@@ -4160,7 +4160,7 @@ test("R4 an actual inset bridge report keeps the picked Contents marker and save
         name: "First",
       }),
     );
-    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First" }, "*"));
+    await waitFor(() => expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 0, label: "First" }, "*"));
     await act(async () => content.happyDOM.waitUntilComplete());
 
     const contents = await screen.findByRole("navigation", { name: "Document contents" });
@@ -4186,19 +4186,19 @@ test("R5.1 stored zero fraction is explicitly sent on reload and Back", async ()
   const { history } = mount("?tab=docs&doc=seed.html&rev=1");
   await screen.findByRole("heading", { name: "Seed guide" });
   let { frame, post } = prepareFrame("seed.html");
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First", fraction: 0 }, "*"),
+    expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 0, label: "First", fraction: 0 }, "*"),
   );
-  frameMessage(frame, { type: "emend:position", heading: 0, fraction: 0 });
+  frameMessage(frame, { type: "recense:position", heading: 0, fraction: 0 });
   await act(async () => history.push(`/r/${id}?tab=docs&doc=water.md&rev=1`));
   await screen.findByRole("heading", { name: "water.md" });
   await act(async () => history.back());
   await screen.findByRole("heading", { name: "Seed guide" });
   ({ frame, post } = prepareFrame("seed.html"));
-  frameMessage(frame, { type: "emend:ready" });
+  frameMessage(frame, { type: "recense:ready" });
   await waitFor(() =>
-    expect(post).toHaveBeenCalledWith({ type: "emend:goto", heading: 0, label: "First", fraction: 0 }, "*"),
+    expect(post).toHaveBeenCalledWith({ type: "recense:goto", heading: 0, label: "First", fraction: 0 }, "*"),
   );
 });
 

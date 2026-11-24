@@ -21,7 +21,7 @@ import {
   githubPage,
   gitIn,
   installFake,
-  installFakeEmend,
+  installFakeRecense,
   issueRules,
   makeFixture,
   makeTestEnv,
@@ -65,7 +65,7 @@ function closingScenario(fn: (repo: Repo) => void): void {
     fn({
       mainRoot: top,
       callerTop: top,
-      callerBranch: "emend-42-fix-pane",
+      callerBranch: "recense-42-fix-pane",
       commonDir: join(top, ".git"),
       worktreesDir: join(top, ".claude/worktrees"),
     });
@@ -112,7 +112,7 @@ function mscenario(fn: Scenario): Promise<void> {
   return scenario((ctx) => {
     headSha = gitIn(ctx.fx.main, "rev-parse", "HEAD");
     gitIn(ctx.fx.main, "push", "--quiet", "origin", `${headSha}:refs/pull/7/head`);
-    installFakeEmend(ctx.env, headSha, [approvedReview(BRANCH, headSha)]);
+    installFakeRecense(ctx.env, headSha, [approvedReview(BRANCH, headSha)]);
     return fn(ctx);
   });
 }
@@ -402,9 +402,9 @@ for (const reference of ["&#32;", "&nbsp;", "&#x20;", "&Tab;", "&NewLine;", "&#1
   test(`closing guard decodes whitespace reference ${reference}`, () =>
     closingScenario((repo) => {
       for (const text of [`Fixes${reference}#57`, `Fixes #${reference}57`, `Closes #42${reference}#57`]) {
-        assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\n${text}`), WtError, text);
+        assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\n${text}`), WtError, text);
       }
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes${reference}#42`));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes${reference}#42`));
     }));
 }
 
@@ -416,11 +416,11 @@ test("closing guard decodes decimal and hexadecimal references for every Unicode
       const code = space.codePointAt(0) as number;
       for (const reference of [`&#${code};`, `&#x${code.toString(16)};`, `&#X0${code.toString(16)};`]) {
         assert.throws(
-          () => closingGuard(repo, "emend-42-fix-pane", `Closes #42\nFixes${reference}#57`),
+          () => closingGuard(repo, "recense-42-fix-pane", `Closes #42\nFixes${reference}#57`),
           WtError,
           reference,
         );
-        assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes${reference}#42`), reference);
+        assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes${reference}#42`), reference);
       }
     }
     for (const text of [
@@ -428,7 +428,7 @@ test("closing guard decodes decimal and hexadecimal references for every Unicode
       "Ordinary &#999999999999999999999999; text\nCloses #42",
       "Ordinary &#xD800; text\nCloses #42",
     ]) {
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", text));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", text));
     }
   }));
 
@@ -545,7 +545,7 @@ for (const [name, body] of [
 ] as const) {
   test(`closing guard refuses NEL in ${name}`, () =>
     closingScenario((repo) => {
-      assert.throws(() => closingGuard(repo, "emend-42-fix-pane", body), WtError);
+      assert.throws(() => closingGuard(repo, "recense-42-fix-pane", body), WtError);
     }));
 }
 
@@ -555,10 +555,10 @@ test("closing guard treats every Unicode White_Space character as a space", () =
       "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000";
     for (const space of spaces) {
       const label = `U+${space.codePointAt(0)?.toString(16)}`;
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes${space}#42`), label);
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes [${space}#42${space}](#42)`), label);
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes${space}#42`), label);
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes [${space}#42${space}](#42)`), label);
       assert.throws(() => closingGuard(repo, BRANCH, `Fixes${space}#57`), WtError, label);
-      assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42${space}#57`), WtError, label);
+      assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42${space}#57`), WtError, label);
     }
   }));
 
@@ -841,7 +841,7 @@ for (const body of [
 ]) {
   test(`closing guard refuses encoded closing instruction: ${body}`, () =>
     closingScenario((repo) => {
-      assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\n${body}`), WtError);
+      assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\n${body}`), WtError);
     }));
 }
 
@@ -854,14 +854,14 @@ test("closing references accept numeric and named own-issue text", () =>
       "&#x46;ixes #42",
       "&Copf;loses &num;42",
     ]) {
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", body));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", body));
     }
     for (const reference of ["&amp;", "&lt;", "&gt;", "&quot;"]) {
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Ordinary ${reference} text\nCloses #42`));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Ordinary ${reference} text\nCloses #42`));
     }
     assert.doesNotThrow(() => closingGuard(repo, BRANCH, "Ordinary &nbsp; text"));
-    assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", "Closes #42\n&Unknown;"));
-    assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", "Closes #42\nFixes &Unknown; #57"));
+    assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", "Closes #42\n&Unknown;"));
+    assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", "Closes #42\nFixes &Unknown; #57"));
   }));
 
 for (const body of [
@@ -872,7 +872,7 @@ for (const body of [
   test(`ordinary ampersands remain prose: ${body}`, () =>
     closingScenario((repo) => {
       assert.doesNotThrow(() => closingGuard(repo, BRANCH, body));
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\n${body}`));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\n${body}`));
     }));
 }
 
@@ -973,20 +973,20 @@ test("oneLine distinguishes invisible formatting from line breaks", () => {
 test("CommonMark own-issue references require a semicolon and bounded digits; HTML still warns", () =>
   closingScenario((repo) => {
     for (const reference of ["&#32", "&#x20", "&#00000032;", "&#x0000020;"]) {
-      assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes${reference}#42`), /must close issue/);
-      assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\nFixes${reference}#57`), {
+      assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes${reference}#42`), /must close issue/);
+      assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\nFixes${reference}#57`), {
         code: 2,
       });
     }
     for (const reference of ["&#0000032;", "&#x000020;"])
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes${reference}#42`));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes${reference}#42`));
     assert.throws(() => closingGuard(repo, BRANCH, `text${"&#769;".repeat(33)}`), /combining marks/);
   }));
 
 for (const reference of ["&NonBreakingSpace;", "&colon;", "&nbsp", "&nbsp;"]) {
   test(`named closing references fail closed: ${reference}`, () =>
     closingScenario((repo) => {
-      assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\nFixes${reference}#57`), WtError);
+      assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\nFixes${reference}#57`), WtError);
     }));
 }
 
@@ -1018,7 +1018,7 @@ for (const description of [
 ]) {
   test(`named references away from closing instructions remain prose: ${description}`, () =>
     closingScenario((repo) => {
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\n\n${description}`));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\n\n${description}`));
     }));
 }
 
@@ -1069,7 +1069,7 @@ for (const text of [
         for (const requireOwn of [false, true]) {
           const body = requireOwn ? `Closes #42\n${text}` : text;
           assert.throws(
-            () => closingGuard(repo, "emend-42-fix-pane", body, requireOwn),
+            () => closingGuard(repo, "recense-42-fix-pane", body, requireOwn),
             (error: unknown) => error instanceof WtError && error.code === 2,
           );
         }
@@ -1135,7 +1135,7 @@ for (const text of [
 ]) {
   test(`third reading removes inline markup: ${text}`, () =>
     closingScenario((repo) => {
-      assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\n${text}`), WtError);
+      assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\n${text}`), WtError);
     }));
 }
 
@@ -1145,10 +1145,10 @@ for (const length of [32_000, 320_000]) {
       const hashes = "#".repeat(length);
       const body = `Closes #42\n\n${hashes}`;
       const start = performance.now();
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", body));
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", body));
       t.diagnostic(`${length} hashes: ${(performance.now() - start).toFixed(2)} ms`);
       for (const attack of [`${body}\nFixes #57`, `Closes #42\n\nFixes ${hashes}57`])
-        assert.throws(() => closingGuard(repo, "emend-42-fix-pane", attack), { code: 2 });
+        assert.throws(() => closingGuard(repo, "recense-42-fix-pane", attack), { code: 2 });
     }));
 }
 
@@ -1173,7 +1173,7 @@ for (const text of [
     closingScenario((repo) => {
       for (const requireOwn of [true, false])
         assert.throws(
-          () => closingGuard(repo, "emend-42-fix-pane", requireOwn ? `Closes #42\n\n${text}` : text, requireOwn),
+          () => closingGuard(repo, "recense-42-fix-pane", requireOwn ? `Closes #42\n\n${text}` : text, requireOwn),
           (error: unknown) => error instanceof WtError && error.code === 2,
         );
     }));
@@ -1182,6 +1182,6 @@ for (const text of [
 test("cheap markup readings tolerate long unterminated HTML comments", () =>
   closingScenario((repo) => {
     const comments = "<!-- > ".repeat(8_000);
-    assert.doesNotThrow(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\n${comments}`));
-    assert.throws(() => closingGuard(repo, "emend-42-fix-pane", `Closes #42\n${comments} Fixes #57`), { code: 2 });
+    assert.doesNotThrow(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\n${comments}`));
+    assert.throws(() => closingGuard(repo, "recense-42-fix-pane", `Closes #42\n${comments} Fixes #57`), { code: 2 });
   }));

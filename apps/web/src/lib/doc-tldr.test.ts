@@ -1,4 +1,4 @@
-import type { RenderedBlock } from "@emend/contract";
+import type { RenderedBlock } from "@recense/contract";
 import { expect, test } from "vitest";
 import { docTldrRange } from "./doc-tldr.ts";
 

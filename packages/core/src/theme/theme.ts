@@ -13,7 +13,7 @@ import {
   ThemeScaleStep,
   type ThemeToken,
   type ThemeValid,
-} from "@emend/contract";
+} from "@recense/contract";
 import { THEME_BASES } from "./bases.ts";
 import { normalizeThemeColor, parseThemeColor, themeColorHex } from "./color.ts";
 import { type ResolvedTheme, themeReadabilityProblems } from "./readability.ts";

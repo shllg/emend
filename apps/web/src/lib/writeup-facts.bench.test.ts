@@ -1,4 +1,4 @@
-import type { RenderedWriteup, TopicMeta } from "@emend/contract";
+import type { RenderedWriteup, TopicMeta } from "@recense/contract";
 import { expect, test } from "vitest";
 import { undoFact } from "./writeup-facts.ts";
 

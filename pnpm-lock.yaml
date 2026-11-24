@@ -4,7 +4,7 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-pnpmfileChecksum: sha256-TIC/yeYjVBnCUb2mv5haAKBwbkic46ZPuW8hIeUeYCs=
+pnpmfileChecksum: sha256-zkkwfbJh71v+nnjYJInjl9U2rUjTELx9ng32XWBX7+A=
 
 importers:
 
@@ -23,15 +23,15 @@ importers:
         specifier: 5.0.5
         version: 5.0.5(@types/node@26.6.5)(happy-dom@21.0.4)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
 
-  apps/emend:
+  apps/recense:
     devDependencies:
-      '@emend/contract':
+      '@recense/contract':
         specifier: workspace:*
         version: link:../../packages/contract
-      '@emend/core':
+      '@recense/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@emend/web':
+      '@recense/web':
         specifier: workspace:*
         version: link:../web
       '@hono/node-server':
@@ -58,7 +58,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@emend/contract':
+      '@recense/contract':
         specifier: workspace:*
         version: link:../../packages/contract
       '@pierre/diffs':
@@ -140,7 +140,7 @@ importers:
 
   packages/core:
     dependencies:
-      '@emend/contract':
+      '@recense/contract':
         specifier: workspace:*
         version: link:../contract
       '@shikijs/rehype':

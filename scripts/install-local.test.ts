@@ -37,7 +37,7 @@ interface FixtureOptions {
 }
 
 function fixture(t: TestContext, options: FixtureOptions = {}) {
-  const base = mkdtempSync(join(tmpdir(), "emend-local-test-"));
+  const base = mkdtempSync(join(tmpdir(), "recense-local-test-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const root = join(base, "checkout with spaces");
   const temporaryRoot = join(base, "temporary");
@@ -55,13 +55,13 @@ function fixture(t: TestContext, options: FixtureOptions = {}) {
     writeFileSync(file, "synthetic executable; never run", { mode: 0o755 });
   };
   if (options.mise) executable(join(bin, "mise"));
-  if (options.path === "foreign") executable(join(bin, "emend"));
+  if (options.path === "foreign") executable(join(bin, "recense"));
   if (options.path === "checkout") {
-    const previous = join(root, "apps/emend/bin/emend");
+    const previous = join(root, "apps/recense/bin/recense");
     executable(previous);
-    symlinkSync(previous, join(bin, "emend"));
+    symlinkSync(previous, join(bin, "recense"));
   }
-  if (options.path === "shim") symlinkSync(join(bin, "mise"), join(bin, "emend"));
+  if (options.path === "shim") symlinkSync(join(bin, "mise"), join(bin, "recense"));
   if (options.path === "relative") env.PATH = "tools";
   // Real temporary history exercises the planner's tag selector without installing anything.
   const git = (...args: string[]) =>
@@ -99,8 +99,8 @@ function fixture(t: TestContext, options: FixtureOptions = {}) {
   }
   const commit = git("rev-parse", "HEAD");
   // An uncommitted manifest must never supply the installed version.
-  mkdirSync(join(root, "apps/emend"), { recursive: true });
-  writeFileSync(join(root, "apps/emend/package.json"), '{"version":"uncommitted"}');
+  mkdirSync(join(root, "apps/recense"), { recursive: true });
+  writeFileSync(join(root, "apps/recense/package.json"), '{"version":"uncommitted"}');
 
   const calls: { program: string; args: string[]; cwd: string; capture: boolean; label: string }[] = [];
   const stdout: string[] = [];
@@ -123,7 +123,9 @@ function fixture(t: TestContext, options: FixtureOptions = {}) {
             : program === "tar"
               ? "tar"
               : program === join(bin, "mise")
-                ? `mise ${args[0]}`
+                ? args[0] === "uninstall"
+                  ? "mise unlink old emend"
+                  : `mise ${args[0]}`
                 : `service ${args[1]}`;
     calls.push({ program, args, cwd: command.cwd, capture: command.capture, label });
     if (label === options.fail) throw new Error("Synthetic command failure");
@@ -158,41 +160,41 @@ function fixture(t: TestContext, options: FixtureOptions = {}) {
     }
     if (label === "tar") {
       const source = args[3];
-      mkdirSync(join(source, "apps/emend/src"), { recursive: true });
-      writeFileSync(join(source, "apps/emend/package.json"), '{"version":"1.2.3"}');
+      mkdirSync(join(source, "apps/recense/src"), { recursive: true });
+      writeFileSync(join(source, "apps/recense/package.json"), '{"version":"1.2.3"}');
       writeFileSync(
-        join(source, "apps/emend/src/version.ts"),
+        join(source, "apps/recense/src/version.ts"),
         options.missingVersion ? "// missing\n" : 'export const VERSION = "1.2.3";\n',
       );
     }
     if (label === "pnpm install") {
-      installedVersion = JSON.parse(readFileSync(join(command.cwd, "apps/emend/package.json"), "utf8")).version;
-      builtSource = readFileSync(join(command.cwd, "apps/emend/src/version.ts"), "utf8");
+      installedVersion = JSON.parse(readFileSync(join(command.cwd, "apps/recense/package.json"), "utf8")).version;
+      builtSource = readFileSync(join(command.cwd, "apps/recense/src/version.ts"), "utf8");
     }
     if (label === "pnpm pack") {
       const manifest = JSON.parse(readFileSync(join(command.cwd, "package.json"), "utf8"));
       const archive = calls.find((call) => call.args[0] === "archive");
-      assert.equal(manifest.emendLocalBuild, archive?.args.at(-1), "packed local builds carry the archived commit");
-      assert.equal(typeof manifest.emendLocalBuild, "string");
-      writeFileSync(join(args[2], `shllg-emend-${installedVersion}.tgz`), "synthetic tarball");
+      assert.equal(manifest.recenseLocalBuild, archive?.args.at(-1), "packed local builds carry the archived commit");
+      assert.equal(typeof manifest.recenseLocalBuild, "string");
+      writeFileSync(join(args[2], `shllg-recense-${installedVersion}.tgz`), "synthetic tarball");
     }
     if (label === "npm install") {
       folder = args[2] === "--prefix" ? args[3] : prefix;
       assert.equal(readFileSync(args[args.length - 1], "utf8"), "synthetic tarball");
-      const installed = join(folder, "bin/emend");
+      const installed = join(folder, "bin/recense");
       executable(installed);
-      if (options.path === "linked" || options.path === "relative") symlinkSync(installed, join(bin, "emend"));
+      if (options.path === "linked" || options.path === "relative") symlinkSync(installed, join(bin, "recense"));
     }
     if (label === "npm prefix") return `${prefix}\n`;
     if (label === "mise which") {
       if (options.miseWhich === "foreign") {
-        const foreign = join(base, "other/bin/emend");
+        const foreign = join(base, "other/bin/recense");
         executable(foreign);
         return `${foreign}\n`;
       }
-      return `${join(folder, "bin/emend")}\n`;
+      return `${join(folder, "bin/recense")}\n`;
     }
-    if (label === "service status") return options.service ?? "emend: service not installed\n";
+    if (label === "service status") return options.service ?? "recense: service not installed\n";
     return "";
   };
   return {
@@ -243,7 +245,7 @@ const buildSteps = ["git rev-parse", "git status", "git archive", "tar", "pnpm i
 
 for (const capture of [true, false]) {
   test(`command stdout ${capture ? "is captured quietly" : "inherits the terminal"}`, async (t) => {
-    const query = "a1b2c3d\n M tracked.ts\n?? untracked.ts\nemend: service not installed\n";
+    const query = "a1b2c3d\n M tracked.ts\n?? untracked.ts\nrecense: service not installed\n";
     const child = new childProcess.ChildProcess();
     const stream = new PassThrough();
     child.stdout = capture ? stream : null;
@@ -280,11 +282,11 @@ test("npm layout exports HEAD, builds outside the checkout, installs the tarball
   assert.equal(await f.run(), 0);
   assert.deepEqual(
     f.calls.map((call) => call.label),
-    [...buildSteps, "npm install", "npm prefix", "service status"],
+    [...buildSteps, "npm uninstall", "npm install", "npm prefix", "service status"],
   );
   const source = join(f.work, "src");
   const pack = join(f.work, "pack");
-  const installed = join(f.prefix, "bin/emend");
+  const installed = join(f.prefix, "bin/recense");
   assert.deepEqual(
     f.calls.map(({ program, args, cwd, capture }) => ({ program, args, cwd, capture })),
     [
@@ -299,16 +301,17 @@ test("npm layout exports HEAD, builds outside the checkout, installs the tarball
       { program: "tar", args: ["-xf", join(f.work, "src.tar"), "-C", source], cwd: f.root, capture: false },
       { program: "pnpm", args: ["install", "--frozen-lockfile"], cwd: source, capture: false },
       { program: "pnpm", args: ["build"], cwd: source, capture: false },
-      { program: "pnpm", args: ["pack", "--pack-destination", pack], cwd: join(source, "apps/emend"), capture: false },
-      { program: "npm", args: ["install", "-g", join(pack, "shllg-emend-1.2.3.tgz")], cwd: f.root, capture: false },
+      { program: "pnpm", args: ["pack", "--pack-destination", pack], cwd: join(source, "apps/recense"), capture: false },
+      { program: "npm", args: ["uninstall", "-g", "@shllg/emend"], cwd: f.root, capture: false },
+      { program: "npm", args: ["install", "-g", join(pack, "shllg-recense-1.2.3.tgz")], cwd: f.root, capture: false },
       { program: "npm", args: ["prefix", "-g"], cwd: f.root, capture: true },
       { program: installed, args: ["service", "status"], cwd: f.root, capture: true },
     ],
   );
   assert.deepEqual(f.stdout, [
-    `install:local: installed emend 1.2.3 (${f.commit}).`,
-    `install:local: emend is not on your PATH; add ${join(f.prefix, "bin")} to it.`,
-    "Next: emend service install, then emend skills install.",
+    `install:local: installed recense 1.2.3 (${f.commit}).`,
+    `install:local: recense is not on your PATH; add ${join(f.prefix, "bin")} to it.`,
+    "Next: recense service install, then recense skills install.",
   ]);
   assert.deepEqual(f.stderr, []);
   assert(existsSync(installed), "installation survives removal of the export");
@@ -321,9 +324,9 @@ for (const dirty of [" M tracked.ts\n", "?? untracked.ts\n"]) {
     assert.equal(await f.run(), 0);
     assert.deepEqual(f.stdout, [
       `install:local: uncommitted changes are not included; installing ${f.commit}.`,
-      `install:local: installed emend 1.2.3 (${f.commit}).`,
-      `install:local: emend is not on your PATH; add ${join(f.prefix, "bin")} to it.`,
-      "Next: emend service install, then emend skills install.",
+      `install:local: installed recense 1.2.3 (${f.commit}).`,
+      `install:local: recense is not on your PATH; add ${join(f.prefix, "bin")} to it.`,
+      "Next: recense service install, then recense skills install.",
     ]);
     assert(f.calls.some((call) => call.label === "npm install"));
     f.clean();
@@ -344,7 +347,7 @@ for (const choice of ["mise", "xdg", "home", "empty"] as const) {
     assert(f.env.HOME);
     const expected = join(
       choice === "mise" ? explicit : choice === "xdg" ? join(xdg, "mise") : join(f.env.HOME, ".local/share/mise"),
-      "linked-installs/npm-shllg-emend-local",
+      "linked-installs/npm-shllg-recense-local",
     );
     assert.equal(await f.run(), 0);
     assert.equal(f.folder, expected);
@@ -357,23 +360,43 @@ for (const choice of ["mise", "xdg", "home", "empty"] as const) {
       "-g",
       "--prefix",
       expected,
-      join(f.work, "pack/shllg-emend-1.2.3.tgz"),
+      join(f.work, "pack/shllg-recense-1.2.3.tgz"),
     ]);
     assert.deepEqual(f.calls.find((call) => call.label === "mise link")?.args, [
       "link",
       "--force",
-      "npm:@shllg/emend@local",
+      "npm:@shllg/recense@local",
       expected,
     ]);
-    assert.equal(f.calls.find((call) => call.label === "service status")?.program, join(expected, "bin/emend"));
+    assert.equal(f.calls.find((call) => call.label === "service status")?.program, join(expected, "bin/recense"));
     assert.deepEqual(f.stdout, [
-      `install:local: installed emend 1.2.3 (${f.commit}).`,
-      "Next: emend service install, then emend skills install.",
+      `install:local: installed recense 1.2.3 (${f.commit}).`,
+      "Next: recense service install, then recense skills install.",
     ]);
     assert.deepEqual(f.stderr, []);
     f.clean();
   });
 }
+
+test("the mise layout unlinks and removes an install of the name before the rename", async (t) => {
+  const data = join(tmpdir(), `recense-local-data-${process.pid}-${Date.now()}`);
+  t.after(() => rmSync(data, { recursive: true, force: true }));
+  const f = fixture(t, { mise: true, env: { MISE_DATA_DIR: data } });
+  const legacy = join(data, "linked-installs/npm-shllg-emend-local");
+  mkdirSync(join(legacy, "lib"), { recursive: true });
+  assert.equal(await f.run(), 0);
+  assert.deepEqual(
+    f.calls.map((call) => call.label),
+    [...buildSteps, "mise unlink old emend", "npm install", "mise link", "service status"],
+  );
+  assert.deepEqual(f.calls.find((call) => call.label === "mise unlink old emend")?.args, [
+    "uninstall",
+    "npm:@shllg/emend@local",
+  ]);
+  assert(!existsSync(legacy), "the old linked install folder is removed");
+  assert(f.stdout.includes("install:local: removed the old emend install."));
+  f.clean();
+});
 
 test("--npm overrides an available mise and keeps the user's npm environment", async (t) => {
   const f = fixture(t, { mise: true });
@@ -381,7 +404,7 @@ test("--npm overrides an available mise and keeps the user's npm environment", a
   assert.equal(f.folder, f.prefix);
   assert.deepEqual(
     f.calls.map((call) => call.label),
-    [...buildSteps, "npm install", "npm prefix", "service status"],
+    [...buildSteps, "npm uninstall", "npm install", "npm prefix", "service status"],
   );
   f.clean();
 });
@@ -399,23 +422,23 @@ for (const args of [["--unknown"], ["--help"], ["--npm", "--npm"], ["extra"], ["
 
 for (const path of ["missing", "foreign", "checkout", "linked", "relative"] as const) {
   test(`PATH compares real paths (${path}) and always calls the installed binary`, async (t) => {
-    const f = fixture(t, { path, service: "emend: service running\n" });
+    const f = fixture(t, { path, service: "recense: service running\n" });
     assert.equal(await f.run(), 0);
-    const hint = `install:local: emend is not on your PATH; add ${join(f.prefix, "bin")} to it.`;
+    const hint = `install:local: recense is not on your PATH; add ${join(f.prefix, "bin")} to it.`;
     assert.equal(f.stdout.includes(hint), path === "missing");
     if (path === "foreign" || path === "checkout") {
-      const found = join(f.bin, "emend");
+      const found = join(f.bin, "recense");
       assert(
         f.stdout.includes(
-          `install:local: the emend on your PATH is ${found} (${realpathSync(found)}), not this install; remove it or put ${join(f.prefix, "bin")} before it.`,
+          `install:local: the recense on your PATH is ${found} (${realpathSync(found)}), not this install; remove it or put ${join(f.prefix, "bin")} before it.`,
         ),
       );
     }
     assert.deepEqual(
       f.calls.slice(-2).map(({ program, args, capture }) => ({ program, args, capture })),
       [
-        { program: join(f.prefix, "bin/emend"), args: ["service", "status"], capture: true },
-        { program: join(f.prefix, "bin/emend"), args: ["service", "install"], capture: false },
+        { program: join(f.prefix, "bin/recense"), args: ["service", "status"], capture: true },
+        { program: join(f.prefix, "bin/recense"), args: ["service", "install"], capture: false },
       ],
     );
     assert(!f.stdout.some((line) => line.includes("Next:") || line.includes("skills")));
@@ -423,13 +446,13 @@ for (const path of ["missing", "foreign", "checkout", "linked", "relative"] as c
   });
 }
 
-for (const service of ["emend: service stopped\n", "", "emend: service not installed\r\n"]) {
+for (const service of ["recense: service stopped\n", "", "recense: service not installed\r\n"]) {
   test(`service branch is chosen only by the not-installed message (${JSON.stringify(service)})`, async (t) => {
     const f = fixture(t, { service });
     assert.equal(await f.run(), 0);
     assert.equal(
       f.calls.some((call) => call.label === "service install"),
-      service.trim() !== "emend: service not installed",
+      service.trim() !== "recense: service not installed",
     );
     f.clean();
   });
@@ -447,10 +470,10 @@ const failureLabels: Record<string, string> = {
   "npm prefix": "npm prefix",
   "service install": "service install",
 };
-const allSteps = [...buildSteps, "npm install", "npm prefix", "service status", "service install"];
+const allSteps = [...buildSteps, "npm uninstall", "npm install", "npm prefix", "service status", "service install"];
 for (const [fail, label] of Object.entries(failureLabels)) {
   test(`failure at ${fail} stops immediately and removes the export`, async (t) => {
-    const f = fixture(t, { fail, service: "emend: service running\n" });
+    const f = fixture(t, { fail, service: "recense: service running\n" });
     assert.equal(await f.run(), 1);
     assert.deepEqual(
       f.calls.map((call) => call.label),
@@ -530,10 +553,10 @@ for (const choice of ["matching", "foreign", "failed"] as const) {
     const lookup = f.calls.find((call) => call.label === "mise which");
     assert(lookup);
     assert.equal(lookup.capture, true);
-    assert.deepEqual(lookup.args, ["which", "emend"]);
-    const found = join(f.bin, "emend");
-    const effective = choice === "foreign" ? join(f.base, "other/bin/emend") : realpathSync(found);
-    const hint = `install:local: the emend on your PATH is ${found} (${effective}), not this install; remove it or put ${join(f.folder, "bin")} before it.`;
+    assert.deepEqual(lookup.args, ["which", "recense"]);
+    const found = join(f.bin, "recense");
+    const effective = choice === "foreign" ? join(f.base, "other/bin/recense") : realpathSync(found);
+    const hint = `install:local: the recense on your PATH is ${found} (${effective}), not this install; remove it or put ${join(f.folder, "bin")} before it.`;
     assert.equal(f.stdout.includes(hint), choice !== "matching");
     assert.equal(
       f.stdout.some((line) => line.includes("not this install")),
@@ -544,7 +567,7 @@ for (const choice of ["matching", "foreign", "failed"] as const) {
   });
 }
 
-test("--npm still resolves an emend mise shim for the PATH check", async (t) => {
+test("--npm still resolves a recense mise shim for the PATH check", async (t) => {
   const f = fixture(t, { mise: true, path: "shim" });
   assert.equal(await f.run(["--npm"]), 0);
   assert(f.calls.some((call) => call.label === "mise which"));
@@ -558,7 +581,7 @@ test("an unavailable service check keeps a successful install successful", async
   assert.equal(await f.run(), 0);
   assert.equal(
     f.stdout.at(-1),
-    "install:local: could not check the emend service; if you use it, run emend service install.",
+    "install:local: could not check the recense service; if you use it, run recense service install.",
   );
   assert.deepEqual(f.stderr, []);
   assert(!f.calls.some((call) => call.label === "service install"));
@@ -598,7 +621,7 @@ for (const userAgent of ["npm/11.0.0 node/v24.18.0 linux x64", "", undefined]) {
   test(`prepack refuses a non-pnpm user agent (${JSON.stringify(userAgent)})`, () => {
     assert.throws(() => requirePnpmPacking(userAgent), {
       message:
-        "package-docs: pack @shllg/emend with pnpm (pnpm pack or pnpm publish); npm would publish its private workspace devDependencies.",
+        "package-docs: pack @shllg/recense with pnpm (pnpm pack or pnpm publish); npm would publish its private workspace devDependencies.",
     });
   });
 }
@@ -609,10 +632,10 @@ test("package documents can be prepared again after a failed pack", (t) => {
   preparePackageDocs(f.root);
   preparePackageDocs(f.root);
   for (const name of ["README.md", "LICENSE"]) {
-    assert.deepEqual(readFileSync(join(f.root, "apps/emend", name)), readFileSync(join(f.root, name)));
+    assert.deepEqual(readFileSync(join(f.root, "apps/recense", name)), readFileSync(join(f.root, name)));
   }
   cleanPackageDocs(f.root);
-  for (const name of ["README.md", "LICENSE"]) assert(!existsSync(join(f.root, "apps/emend", name)));
+  for (const name of ["README.md", "LICENSE"]) assert(!existsSync(join(f.root, "apps/recense", name)));
 });
 
 for (const differing of ["README.md", "LICENSE"]) {
@@ -620,15 +643,15 @@ for (const differing of ["README.md", "LICENSE"]) {
     const f = fixture(t);
     for (const name of ["README.md", "LICENSE"]) writeFileSync(join(f.root, name), `synthetic ${name}\n`);
     preparePackageDocs(f.root);
-    const target = join(f.root, "apps/emend", differing);
+    const target = join(f.root, "apps/recense", differing);
     writeFileSync(target, "keep this differing document\n");
     assert.throws(() => preparePackageDocs(f.root), {
-      message: `package-docs: apps/emend/${differing} differs from the root ${differing}; remove it`,
+      message: `package-docs: apps/recense/${differing} differs from the root ${differing}; remove it`,
     });
     cleanPackageDocs(f.root);
     assert.equal(readFileSync(target, "utf8"), "keep this differing document\n");
     const other = differing === "README.md" ? "LICENSE" : "README.md";
-    assert(!existsSync(join(f.root, "apps/emend", other)));
+    assert(!existsSync(join(f.root, "apps/recense", other)));
   });
 }
 
@@ -643,8 +666,8 @@ for (const [tag, expected] of [
     assert.equal(await f.run(), 0);
     assert.equal(f.installedVersion, expected, "stamped before pnpm install");
     assert.equal(f.builtSource, `export const VERSION = "${expected}";\n`);
-    assert(f.stdout.includes(`install:local: installed emend ${expected} (${f.commit}).`));
-    assert.equal(readFileSync(join(f.root, "apps/emend/package.json"), "utf8"), '{"version":"uncommitted"}');
+    assert(f.stdout.includes(`install:local: installed recense ${expected} (${f.commit}).`));
+    assert.equal(readFileSync(join(f.root, "apps/recense/package.json"), "utf8"), '{"version":"uncommitted"}');
     f.clean();
   });
 }
@@ -687,13 +710,13 @@ test("local install resolves HEAD once and keeps the archive, tag and printed SH
   );
   assert.equal(f.calls.find((call) => call.label === "git archive")?.args.at(-1), f.commit);
   assert.equal(f.installedVersion, "1.3.0", "the newer HEAD's v9.0.0 tag must not be used");
-  assert(f.stdout.includes(`install:local: installed emend 1.3.0 (${f.commit}).`));
+  assert(f.stdout.includes(`install:local: installed recense 1.3.0 (${f.commit}).`));
   f.clean();
 });
 
 
 test("packing preserves the local-build marker while stripping workspace dependencies", () => {
-  const packed = hooks.beforePacking({ name: "@shllg/emend", emendLocalBuild: "abc123", devDependencies: { "@emend/core": "workspace:*" } });
-  assert.equal(packed.emendLocalBuild, "abc123");
+  const packed = hooks.beforePacking({ name: "@shllg/recense", recenseLocalBuild: "abc123", devDependencies: { "@recense/core": "workspace:*" } });
+  assert.equal(packed.recenseLocalBuild, "abc123");
   assert.equal(packed.devDependencies, undefined);
 });

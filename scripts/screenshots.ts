@@ -2,7 +2,7 @@
 //
 // Everything runs under one throwaway root: a server from this checkout's build, fixture git repos,
 // the CLI, and a Chromium profile. No child inherits the parent environment, the browser reaches
-// only the sealed origin, and the real emend server and state are never touched. The guards live in
+// only the sealed origin, and the real recense server and state are never touched. The guards live in
 // ./screenshots/safety.ts and are covered by scripts/screenshots.test.ts.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -37,7 +37,7 @@ import { api, createSealedLifecycle } from "./screenshots/sealed.ts";
 const here = dirname(fileURLToPath(import.meta.url));
 const checkout = resolve(here, "..");
 const fixturesDir = join(here, "screenshots", "fixtures");
-const entry = join(checkout, "apps", "emend", "dist", "emend.mjs");
+const entry = join(checkout, "apps", "recense", "dist", "recense.mjs");
 
 interface Options {
   keep: boolean;
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   // ---- Fixture repositories ---------------------------------------------------------------
   step("building fixture repositories");
   const reposDir = join(sealedRoot, "repos");
-  const repo = join(reposDir, "emend");
+  const repo = join(reposDir, "recense");
   mkdirSync(repo, { recursive: true });
   git(repo, "init", "-q");
   git(repo, "remote", "add", "origin", REMOTE_URL);
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
         title: "Read and write paths",
         summary: "BlobReader serves reads; BlobWriter extends it with the atomic write.",
       },
-      ["apps/emend/src/blobs/read.ts", "apps/emend/src/blobs/write.ts"],
+      ["apps/recense/src/blobs/read.ts", "apps/recense/src/blobs/write.ts"],
     ),
     base: baseCommit,
     head: blobHead,
@@ -200,15 +200,15 @@ async function main(): Promise<void> {
   git(repo, "checkout", "-q", MAIN_BRANCH.branch);
   const planPath = "docs/plans/review-pins.md";
   const fileTopics: Record<string, string> = {
-    "apps/emend/drizzle/0012_review_pins.sql": "migration",
-    "apps/emend/src/db/schema.ts": "migration",
-    "apps/emend/src/server/routes/pins.ts": "api",
-    "apps/emend/src/server/routes/reviews.ts": "api",
+    "apps/recense/drizzle/0012_review_pins.sql": "migration",
+    "apps/recense/src/db/schema.ts": "migration",
+    "apps/recense/src/server/routes/pins.ts": "api",
+    "apps/recense/src/server/routes/reviews.ts": "api",
     "packages/contract/src/review.ts": "api",
     "docs/api.md": "api",
     "apps/web/src/lib/inbox-order.ts": "inbox",
     "apps/web/src/components/inbox/ReviewRow.tsx": "inbox",
-    "apps/emend/src/server/routes/pins.test.ts": "tests",
+    "apps/recense/src/server/routes/pins.test.ts": "tests",
     "apps/web/src/lib/inbox-order.test.ts": "tests",
     [planPath]: "inbox",
   };
@@ -282,7 +282,7 @@ async function main(): Promise<void> {
     ?.blocks?.find((block) => block.text.startsWith("Each owner can pin at most ten reviews."));
   if (!limitsBlock) throw new Error("The Limits paragraph is missing from the rendered plan");
   const limitsQuote = "Each owner can pin at most ten reviews.";
-  const retireStart = lineOf(mainHead1, "apps/emend/src/server/routes/reviews.ts", "state,");
+  const retireStart = lineOf(mainHead1, "apps/recense/src/server/routes/reviews.ts", "state,");
   const sortLine = lineOf(mainHead1, "apps/web/src/lib/inbox-order.ts", "return ga === \"open\"");
   const threadIds: Record<string, string> = {};
   const comment = async (key: keyof typeof COMMENTS, target: unknown) => {
@@ -293,7 +293,7 @@ async function main(): Promise<void> {
     })) as { threadId: string };
     threadIds[key] = created.threadId;
   };
-  await comment("retire", lineTarget(mainHead1, "apps/emend/src/server/routes/reviews.ts", retireStart, retireStart + 1));
+  await comment("retire", lineTarget(mainHead1, "apps/recense/src/server/routes/reviews.ts", retireStart, retireStart + 1));
   await comment("sort", lineTarget(mainHead1, "apps/web/src/lib/inbox-order.ts", sortLine, sortLine));
   await comment("limits", {
     kind: "doc-span",
@@ -344,9 +344,9 @@ async function main(): Promise<void> {
   await api(desktop, "POST", `/api/v1/reviews/${drafts.reviewId}/sends`, { revision: 1, kind: "approve" });
   const blobTarget = lineTarget(
     blobHead,
-    "apps/emend/src/blobs/write.ts",
-    lineOf(blobHead, "apps/emend/src/blobs/write.ts", "const temporary"),
-    lineOf(blobHead, "apps/emend/src/blobs/write.ts", "const temporary"),
+    "apps/recense/src/blobs/write.ts",
+    lineOf(blobHead, "apps/recense/src/blobs/write.ts", "const temporary"),
+    lineOf(blobHead, "apps/recense/src/blobs/write.ts", "const temporary"),
   );
   await api(desktop, "POST", `/api/v1/reviews/${blobs.reviewId}/threads`, {
     revision: 1,

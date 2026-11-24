@@ -1,4 +1,4 @@
-import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@emend/contract";
+import { type FileView, OTHER_TOPIC, type RevisionView, type Target } from "@recense/contract";
 import { useIsMutating } from "@tanstack/react-query";
 import { useCallback, useContext, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";

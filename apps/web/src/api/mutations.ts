@@ -11,7 +11,7 @@ import {
   type SettingsView,
   type SnoozeRequest,
   type ViewedRequest,
-} from "@emend/contract";
+} from "@recense/contract";
 import { type MutationFilters, type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useSyncExternalStore } from "react";
 import {

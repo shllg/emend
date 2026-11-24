@@ -5,7 +5,7 @@ import { cn } from "../ui/utils.ts";
 
 /** The command that resumes a review's feedback loop, a Copy button, and the line for other agents. */
 export function ResumeCommand({ reviewId, compact = false }: { reviewId: string; compact?: boolean }) {
-  const command = `/emend:emend-feedback ${reviewId}`;
+  const command = `/recense:recense-feedback ${reviewId}`;
   const { text, copy, result, status } = useCopyText(command, "command");
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", compact && "gap-1")}>
@@ -24,8 +24,8 @@ export function ResumeCommand({ reviewId, compact = false }: { reviewId: string;
         </span>
       </div>
       <p className="m-0 text-fg-3 [font:var(--type-meta)]">
-        Run <code className="font-mono">emend feedback {reviewId}</code> and handle the result with the emend-feedback
-        skill.
+        Run <code className="font-mono">recense feedback {reviewId}</code> and handle the result with the
+        recense-feedback skill.
       </p>
     </div>
   );

@@ -1,4 +1,4 @@
-import { type KeyBinding, type SettingsView, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@emend/contract";
+import { type KeyBinding, type SettingsView, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@recense/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import {

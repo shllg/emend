@@ -417,7 +417,7 @@ export type NotifyKind = "question" | "review-ready" | "merged" | "blocked";
 
 const NOTIFY_TEXT: Record<NotifyKind, [string, string]> = {
   question: ["your answer is needed", "A question waits in this session"],
-  "review-ready": ["review ready", "The emend review waits for you"],
+  "review-ready": ["review ready", "The recense review waits for you"],
   merged: ["merged", "The change is merged; this workspace closes"],
   blocked: ["blocked", "This session stopped and needs you"],
 };
@@ -550,7 +550,7 @@ function closeHcTerminal(worktreePath: string, branch: string | null, entry?: Wo
       cwd === null ||
       !samePath(cwd, worktreePath) ||
       !isRecord(info.labels) ||
-      info.labels["emend.branch"] !== branch
+      info.labels["recense.branch"] !== branch
     ) {
       say("The recorded herdr desktop terminal does not match the removed worktree; none was closed.");
       return;
@@ -592,7 +592,7 @@ export interface SpawnResult {
   agent: string;
   path: string;
   port: number;
-  emendHome: string;
+  recenseHome: string;
   issue: { number: number; url: string };
   workspaceId: string;
   workspaceLabel: string;
@@ -675,7 +675,7 @@ export function agentName(branch: string): string {
 }
 
 export function spawnPrompt(issueRef: string, mode: "github" | "local"): string {
-  const answer = mode === "local" ? "Land locally after an emend review." : "Open a ready PR and finalize it.";
+  const answer = mode === "local" ? "Land locally after a recense review." : "Open a ready PR and finalize it.";
   return `/loop /e-work ${issueRef} Closing answer from /e-spawn: ${answer}`;
 }
 
@@ -734,7 +734,7 @@ type Stage = "brief" | "opening" | "already_open" | "starting" | "not_ready" | "
  * opens a workspace, waits for its shell, starts the agent and sends the prompt.
  * After setup a failure prints what exists and the cleanup command and changes nothing else: no cleanup,
  * no retry, and a prompt is never sent twice.
- * The worktree's EMEND_HOME and port are returned and printed but never given to the started session.
+ * The worktree's RECENSE_HOME and port are returned and printed but never given to the started session.
  */
 export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spawnClock): Promise<SpawnResult> {
   // ---- preflight: nothing exists yet
@@ -952,7 +952,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
     agent,
     path: wt.path,
     port: wt.port,
-    emendHome: wt.emendHome,
+    recenseHome: wt.recenseHome,
     issue: { number: issue.number, url: issue.url },
     workspaceId,
     workspaceLabel,
@@ -976,11 +976,11 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
         "--outlive-parent",
         "--no-notify",
         "--label",
-        `emend.loop=${hcAddress(process.env.HC_TERMINAL_ID)}`,
+        `recense.loop=${hcAddress(process.env.HC_TERMINAL_ID)}`,
         "--label",
-        `emend.branch=${branch}`,
+        `recense.branch=${branch}`,
       ];
-      args.push("--label", `emend.issue=${issue.number}`);
+      args.push("--label", `recense.issue=${issue.number}`);
       // One launch. Claude receives its initial prompt as argv, never via a second send.
       const started = hcCall([...args, "--", claudePath, ...claudeArgs, prompt]);
       const address = hcAddress(started.address);
@@ -1107,7 +1107,7 @@ const spawnCommand: Command = async ({ repo, args }) => {
   say(`Branch: ${r.branch}`);
   say(`Port: ${r.port}`);
   say(`Worktree: ${r.path}`);
-  say(`EMEND_HOME: ${r.emendHome}`);
+  say(`RECENSE_HOME: ${r.recenseHome}`);
   const where = `${r.backend === "hc" ? "herdr desktop terminal" : "herdr workspace"} ${r.workspaceLabel} (${r.workspaceId})`;
   if (r.state === "blocked") {
     say(`Claude agent ${r.agent} started and is waiting for an answer in ${where}.`);

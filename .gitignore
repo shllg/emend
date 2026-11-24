@@ -22,5 +22,5 @@ spikes/
 .pnpm-store/
 
 # Temporary package documents, copied by prepack and removed by postpack.
-/apps/emend/README.md
-/apps/emend/LICENSE
+/apps/recense/README.md
+/apps/recense/LICENSE

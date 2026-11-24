@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { expect, test } from "vitest";
 import { openingView } from "./opening-view.ts";
 

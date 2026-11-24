@@ -1,4 +1,4 @@
-import type { FileView, Target, TopicMeta } from "@emend/contract";
+import type { FileView, Target, TopicMeta } from "@recense/contract";
 import { FileCode, FileText, ListTree, MessageSquare, TextSelect } from "lucide-react";
 import { plural } from "../../lib/count.ts";
 import { rankedTopics } from "../../lib/topics.ts";

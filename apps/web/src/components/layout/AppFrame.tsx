@@ -215,7 +215,7 @@ function AppFrameContent({ isReview = false, children }: { isReview?: boolean; c
           </Link>
         ) : (
           <Link to="/" className="font-mono text-15 font-medium leading-none text-fg-3 no-underline hover:text-fg-1">
-            emend
+            recense
           </Link>
         )}
         {layout !== "phone" && <PaletteButton />}
@@ -249,7 +249,7 @@ function AppFrameContent({ isReview = false, children }: { isReview?: boolean; c
       <div role="status">
         {update.state === "reload-needed" && (
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line-1 bg-sunken py-1.5 pr-2 pl-4 text-13 text-fg-2">
-            <p>emend was updated in another window. Reload to keep working.</p>
+            <p>recense was updated in another window. Reload to keep working.</p>
             <Button size="sm" icon={RotateCw} onClick={() => gate.request("reload")}>
               Reload
             </Button>

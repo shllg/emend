@@ -1,4 +1,4 @@
-import type { ThreadState, ThreadView } from "@emend/contract";
+import type { ThreadState, ThreadView } from "@recense/contract";
 import { plural } from "../../lib/count.ts";
 
 export type ShownThreadState = ThreadState | "unsent";

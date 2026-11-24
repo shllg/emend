@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { useSyncExternalStore } from "react";
 import { listDrafts, type SavedDraft, subscribeDrafts } from "../../lib/drafts.ts";
 import { layoutStore, useLayoutPreferences } from "../../lib/layout-store.ts";

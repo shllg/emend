@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, html } from "parse5";
 import { htmlPart } from "./place/html.ts";
 import { blockHash } from "./render/hash.ts";

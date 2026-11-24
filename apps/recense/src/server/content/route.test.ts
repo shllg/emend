@@ -1,0 +1,976 @@
+import { createHash, randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { type FileHandle, mkdir, open, rename, symlink, truncate, utimes, writeFile } from "node:fs/promises";
+import { type ClientRequest, createServer, request as httpRequest } from "node:http";
+import { join } from "node:path";
+import { LIMITS, PublishResponse, RevisionView } from "@recense/contract";
+import { applyHtmlLook, docText, htmlLook, parseDocHtml, stripHtmlLook } from "@recense/core";
+import { and, eq, sql } from "drizzle-orm";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { devices, files, reviews, revisions } from "../../db/schema.ts";
+import { HTML_DOC_CSP } from "../http/headers.ts";
+import { mailboxFixture } from "../mailbox/test-support.ts";
+import { executeWork } from "../publish/work.ts";
+import { nodeRequestHandler } from "../serve.ts";
+import { BRIDGE_SOURCE } from "./bridge.ts";
+import { clearCodeColourCache } from "./code-colours.ts";
+import { injectBridge, injectLook } from "./inject.ts";
+import { FALLBACK_PUB_CSS } from "./look.ts";
+
+let f: Awaited<ReturnType<typeof mailboxFixture>>;
+let docUrl: string;
+let secondUrl: string;
+const origin = "http://127.0.0.1:3636";
+const csp =
+  "sandbox allow-scripts; default-src 'none'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; media-src 'self'; connect-src 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'self'";
+const docCsp = csp.replace(
+  "script-src 'none'",
+  `script-src 'sha256-${createHash("sha256").update(BRIDGE_SOURCE).digest("base64")}'`,
+);
+const source =
+  '<body><p>Synthetic seeds</p><pre class="mermaid" onclick="alert(1)">flowchart LR; A --&gt; B</pre><link rel="stylesheet" href="shared.css"><script src="classic.js"></script><img src="seed.svg"></body>';
+const bigCss = "/* synthetic */\n".padEnd(200 * 1024, " ");
+const bigSha = createHash("sha256").update(bigCss).digest("hex");
+beforeEach(async () => {
+  clearCodeColourCache();
+  f = await mailboxFixture();
+  const entries = [
+    ["docs/a #é.html", "doc", source],
+    ["docs/b.html", "doc", source],
+    ["docs/shared.css", "asset", "p { color: green; }"],
+    ["docs/classic.js", "asset", "window.synthetic = true;"],
+    ["docs/seed.svg", "asset", '<svg xmlns="http://www.w3.org/2000/svg"/>'],
+    ["docs/data.css", "asset", '{"synthetic":true}'],
+    ["docs/big.css", "asset", bigCss],
+    ["docs/unlisted.css", "asset", "p {}"],
+    ["docs/change.html", "diff", "<script>synthetic()</script>"],
+  ];
+  const inputFiles = [];
+  for (const [path, role, text] of entries) {
+    if (!path || !role || text === undefined) throw new Error("Invalid fixture");
+    const hash = await f.deps.blobs.put(f.ownerId, Buffer.from(text), "application/octet-stream");
+    inputFiles.push({
+      path,
+      role,
+      oldPath: null,
+      oldBlob: null,
+      newBlob: hash,
+      flag: null,
+      ...(role === "doc"
+        ? { assets: ["docs/shared.css", "docs/classic.js", "docs/seed.svg", "docs/data.css", "docs/big.css"] }
+        : {}),
+      ...(role === "asset" ? { parent: "docs/a #é.html" } : {}),
+    });
+  }
+  const published = await f.request(
+    "/publish",
+    "POST",
+    {
+      reviewId: f.reviewId,
+      reviewKey: "a".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic HTML",
+      base: null,
+      head: null,
+      topics: [],
+      files: inputFiles,
+      writeup: { overview: "Synthetic", tldr: "Summary", decisions: null, topics: {} },
+    },
+    "agent",
+  );
+  expect(published.status).toBe(200);
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ mediaType: "application/json" })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "docs/data.css"))),
+  );
+  const view = RevisionView.parse(await (await f.request(`/reviews/${f.reviewId}/revisions/2`, "GET")).json());
+  const first = view.docs[0],
+    second = view.docs[1];
+  if (first?.kind !== "html" || second?.kind !== "html") throw new Error("Missing docs");
+  docUrl = first.contentUrl;
+  secondUrl = second.contentUrl;
+});
+afterEach(async () => {
+  clearCodeColourCache();
+  vi.restoreAllMocks();
+  await f.cleanup();
+});
+function request(path: string, method = "GET", headers: Record<string, string> = {}) {
+  return f.app.request(`${origin}${path}`, { method, headers: { Host: "127.0.0.1:3636", ...headers } });
+}
+function headers(response: Response, asset = false) {
+  expect(response.headers.get("Content-Security-Policy")).toBe(response.ok && !asset ? docCsp : csp);
+  if (response.ok && !asset) {
+    expect(response.headers.get("Content-Security-Policy")).toContain("frame-src 'none'");
+    expect(response.headers.get("Content-Security-Policy")).toContain("connect-src 'none'");
+    expect(response.headers.get("Content-Security-Policy")?.match(/script-src ([^;]+)/)?.[1]).toBe(
+      `'sha256-${createHash("sha256").update(BRIDGE_SOURCE).digest("base64")}'`,
+    );
+  }
+  expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+  expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe(asset ? "cross-origin" : "same-origin");
+  expect(response.headers.get("Cache-Control")).toBe("no-store");
+  expect(response.headers.has("X-Frame-Options")).toBe(false);
+  expect(response.headers.get("Access-Control-Allow-Origin")).toBe(asset ? "*" : null);
+}
+
+async function setDocLook(look: "recense" | "custom" | null, newBlob?: string) {
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ look, colorScheme: null, ...(newBlob ? { newBlob } : {}) })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "docs/a #é.html"))),
+  );
+}
+
+test.each(["custom", null] as const)("%s look preserves the previous response bytes", async (look) => {
+  await setDocLook(look);
+  await writeFile(join(f.dir, "pub-frame.css"), "@layer recense{body{margin:0}}");
+  for (const query of ["", "?theme=dark", "?theme=light"]) {
+    const response = await request(docUrl + query);
+    headers(response);
+    expect(await response.text()).toBe(injectBridge(source));
+  }
+});
+
+test.each(["recense", "custom", null] as const)("%s look serves code with the existing CSP", async (look) => {
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
+  const page = '<body><pre><code class="language-ts">const seed: string = "fern";</code></pre></body>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook(look, sha);
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  headers(response);
+  expect(response.headers.get("Content-Security-Policy")).toBe(docCsp);
+  const body = await response.text();
+  if (look === "recense") {
+    expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
+    expect(execute).toHaveBeenCalledExactlyOnceWith({
+      kind: "code-colours",
+      page,
+    });
+  } else {
+    expect(body).not.toContain("<span");
+    expect(body).toBe(injectBridge(page));
+    expect(execute).not.toHaveBeenCalled();
+  }
+});
+
+test("a recense-look doc with two stored BOMs keeps code offsets after decoding", async () => {
+  const stored = '\uFEFF\uFEFF<pre><code class="language-ts">const seed = 1;</code></pre>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(stored, "utf8"), "text/html");
+  await setDocLook("recense", sha);
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  headers(response);
+  const body = await response.text();
+  const codeStart = '<code class="language-ts">';
+  expect(body).toContain(`${codeStart}<span style=`);
+  expect(execute).toHaveBeenCalledExactlyOnceWith({ kind: "code-colours", page: stored.slice(1) });
+  const result = await execute.mock.results[0]?.value;
+  if (result?.kind !== "code-colours") throw new Error("Missing code colours");
+  expect(result.colours).toHaveLength(1);
+  expect(body.slice(body.indexOf(codeStart) + codeStart.length, body.lastIndexOf("<script>"))).toBe(
+    `${result.colours[0]?.markup}</code></pre>`,
+  );
+  expect(docText(body)).toBe(docText(stored.slice(1)));
+});
+
+test("two GETs of one recense-look doc compute colours once across themes", async () => {
+  const page = '<body><pre><code class="language-ts">const seed = 1;</code></pre></body>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook("recense", sha);
+  const execute = vi.fn(executeWork);
+  f.deps.publishExecutor = execute;
+  for (const theme of ["light", "dark"]) {
+    const response = await request(`${docUrl}?theme=${theme}`);
+    expect(response.status).toBe(200);
+    headers(response);
+    const body = await response.text();
+    expect(body).toContain(`<html data-theme="${theme}">`);
+    expect(body).toContain('<span style="color:var(--syn-keyword)">const</span>');
+  }
+  expect(execute).toHaveBeenCalledExactlyOnceWith({
+    kind: "code-colours",
+    page,
+  });
+});
+
+test.each([
+  { query: "?theme=dark", theme: "dark" },
+  { query: "?theme=light", theme: "light" },
+  ...["?theme=DARK", "?theme=dark%20", "?theme=%3Chtml%20data-theme%3Ddark%3E", "?theme=", ""].map((query) => ({
+    query,
+    theme: undefined,
+  })),
+])("recense look accepts only an exact theme query: $query", async ({ query, theme }) => {
+  const page = '<!doctype html><html lang="en"><body>Plan</body></html>';
+  const sha = await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html");
+  await setDocLook("recense", sha);
+  const css = "@layer recense{body{margin:0}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  const response = await request(docUrl + query);
+  headers(response);
+  const start = theme ? `<html data-theme="${theme}">` : "";
+  expect(await response.text()).toBe(injectBridge(`<!doctype html>${start}<style>${css}</style>${page.slice(15)}`));
+});
+
+test("a light-only doc ignores a dark theme query", async () => {
+  await setDocLook("recense");
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ colorScheme: "light" })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "docs/a #é.html"))),
+  );
+  const response = await request(`${docUrl}?theme=dark`);
+  headers(response);
+  expect(await response.text()).toBe(injectBridge(injectLook(source, FALLBACK_PUB_CSS, "light")));
+});
+
+test.each([
+  { name: "light-only", mark: "", rules: "p{color:#222}", look: "recense", light: true },
+  {
+    name: "custom",
+    mark: '<meta name="recense-look" content="custom">',
+    rules: "p{color:#222}",
+    look: "custom",
+    light: false,
+  },
+  {
+    name: "both modes",
+    mark: "",
+    rules: "p{color:#222}@media(prefers-color-scheme:dark){p{color:white}}",
+    look: "recense",
+    light: false,
+  },
+  { name: "no colours", mark: "", rules: "p{margin:1px}", look: "recense", light: false },
+  { name: "command-styled light-only", mark: "", rules: "p{color:#222}", look: "recense", light: true, styled: true },
+  { name: "command-styled plain", mark: "", rules: "", look: "recense", light: false, styled: true },
+])(
+  "published $name page stores and serves its appearance with unchanged headers",
+  async ({ mark, rules, look, light, styled }) => {
+    const original = `<!doctype html><html data-theme="dark" lang="en"><head>${mark}<style>${rules}</style></head><body><p>Plan</p></body></html>`;
+    const css = "@layer recense{:root{color-scheme:light dark}:root[data-theme=light]{color-scheme:light}}";
+    const page = styled ? applyHtmlLook(original, { css, lightOnly: light }) : original;
+    expect(htmlLook(page)).toEqual(htmlLook(original));
+    await writeFile(join(f.dir, "pub-frame.css"), css);
+    const response = await f.request(
+      "/publish",
+      "POST",
+      {
+        reviewId: f.reviewId,
+        reviewKey: "a".repeat(64),
+        repo: null,
+        branch: null,
+        title: "Synthetic appearance",
+        base: null,
+        head: null,
+        topics: [],
+        writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+        files: [
+          {
+            path: "page.html",
+            role: "doc",
+            oldPath: null,
+            oldBlob: null,
+            newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html"),
+            flag: null,
+            assets: [],
+          },
+        ],
+      },
+      "agent",
+    );
+    expect(response.status).toBe(200);
+    const published = PublishResponse.parse(await response.json());
+    const appearance = { look, ...(light ? { colorScheme: "light" } : {}) };
+    expect(published.htmlLooks).toEqual([{ path: "page.html", ...appearance }]);
+    const row = await f.db.read((q) =>
+      q
+        .select()
+        .from(files)
+        .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "page.html")))
+        .get(),
+    );
+    expect(row).toMatchObject({ look, colorScheme: light ? "light" : null });
+    const view = RevisionView.parse(
+      await (await f.request(`/reviews/${f.reviewId}/revisions/${published.revision}`, "GET")).json(),
+    );
+    const doc = view.docs[0];
+    expect(doc).toMatchObject({ kind: "html", ...appearance });
+    if (doc?.kind !== "html") throw new Error("Missing HTML doc");
+    if (!light) expect(doc).not.toHaveProperty("colorScheme");
+    const served = await request(doc.contentUrl);
+    headers(served);
+    const body = await served.text();
+    expect(body).toBe(
+      injectBridge(look === "recense" ? injectLook(stripHtmlLook(page), css, light ? "light" : undefined) : page),
+    );
+    if (look === "recense") {
+      if (rules) expect(body.indexOf(css)).toBeLessThan(body.indexOf(rules));
+      if (styled) {
+        expect(body).not.toContain("<style data-recense-look>");
+        expect(body).not.toContain("@layer recense-file{");
+      }
+      expect(body).toContain(`<style>${rules}</style>`);
+    } else expect(body).not.toContain(css);
+    if (light) {
+      expect(body).toContain('<!doctype html><html data-theme="light"><style>');
+      expect(body.match(/<html data-theme="light">/g)).toHaveLength(1);
+      const root = parseDocHtml(body)?.childNodes.find((node) => node.nodeName === "html");
+      expect(root && "attrs" in root ? root.attrs : []).toEqual([
+        { name: "data-theme", value: "light" },
+        { name: "lang", value: "en" },
+      ]);
+    } else expect(body).not.toContain('<html data-theme="light">');
+  },
+);
+
+test("a leading look copy cannot hide content that the Download shows", async () => {
+  const page =
+    '<!doctype html><meta charset="utf-8"><style data-recense-look>.x{display:none}</style><p>Seen</p><p class="x">Only in the download</p>';
+  const response = await f.request(
+    "/publish",
+    "POST",
+    {
+      reviewId: f.reviewId,
+      reviewKey: "a".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic leading look copy",
+      base: null,
+      head: null,
+      topics: [],
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      files: [
+        {
+          path: "page.html",
+          role: "doc",
+          oldPath: null,
+          oldBlob: null,
+          newBlob: await f.deps.blobs.put(f.ownerId, Buffer.from(page), "text/html"),
+          flag: null,
+          assets: [],
+        },
+      ],
+    },
+    "agent",
+  );
+  expect(response.status).toBe(200);
+  const published = PublishResponse.parse(await response.json());
+  expect(published.htmlLooks).toEqual([{ path: "page.html", look: "recense" }]);
+  const view = RevisionView.parse(
+    await (await f.request(`/reviews/${f.reviewId}/revisions/${published.revision}`, "GET")).json(),
+  );
+  const doc = view.docs[0];
+  if (doc?.kind !== "html") throw new Error("Missing HTML doc");
+  const served = await request(doc.contentUrl);
+  headers(served);
+  const body = await served.text();
+  expect(body).not.toContain(".x{display:none}");
+  expect(body).not.toContain("data-recense-look");
+  expect(body).toContain("<p>Seen</p>");
+  expect(body).toContain('<p class="x">Only in the download</p>');
+});
+
+test("recense look injects the installed stylesheet, caches it and leaves assets unchanged", async () => {
+  const css =
+    "@layer recense{body{color:var(--fg-reading)}@font-face{font-family:Synthetic;src:url(data:font/woff2;base64,AA==)}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  await setDocLook("recense");
+  const response = await request(docUrl);
+  headers(response);
+  expect(response.headers.get("Content-Security-Policy")).toBe(HTML_DOC_CSP);
+  expect(await response.text()).toBe(injectBridge(injectLook(source, css)));
+  await writeFile(join(f.dir, "pub-frame.css"), "changed");
+  expect(await (await request(docUrl)).text()).toBe(injectBridge(injectLook(source, css)));
+  const asset = await request(new URL("shared.css", origin + docUrl).pathname);
+  headers(asset, true);
+  expect(await asset.text()).toBe("p { color: green; }");
+});
+
+test.each(["missing", "closing-tag", "invalid-utf8", "oversize", "directory", "outside-root"])(
+  "recense look uses readable fallback for a %s stylesheet",
+  async (kind) => {
+    const path = join(f.dir, "pub-frame.css");
+    if (kind === "closing-tag") await writeFile(path, "</style><script>alert(1)</script>");
+    if (kind === "invalid-utf8") await writeFile(path, Buffer.from([0xff]));
+    if (kind === "oversize") await writeFile(path, " ".repeat(LIMITS.pubStylesheetBytes + 1));
+    if (kind === "directory") await mkdir(path);
+    if (kind === "outside-root") {
+      await writeFile(path, "outside stylesheet");
+      const root = join(f.dir, "web");
+      await mkdir(root);
+      await symlink(path, join(root, "pub-frame.css"));
+      f.deps.config.webRoot = root;
+    }
+    await setDocLook("recense");
+    const response = await request(docUrl);
+    headers(response);
+    expect(await response.text()).toBe(injectBridge(injectLook(source, FALLBACK_PUB_CSS)));
+  },
+);
+
+test("hostile marked-recense content retains the exact CSP and cannot enter the injected pub style", async () => {
+  const css = "@layer recense{body{color:var(--fg-reading)}}";
+  await writeFile(join(f.dir, "pub-frame.css"), css);
+  const hostile =
+    '<!doctype html><meta name="recense-look" content="recense"><body><script>alert(1)</script>' +
+    '<img src=x onerror=alert(1)><a href="javascript:alert(1)">Link</a>' +
+    '<style>@import url("https://evil.example/x.css"); body{background:url(https://evil.example/a.png)}</style></body>';
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from(hostile), "text/html");
+  await setDocLook("recense", newBlob);
+  const response = await request(docUrl);
+  headers(response);
+  expect(response.headers.get("Content-Security-Policy")).toBe(HTML_DOC_CSP);
+  expect(HTML_DOC_CSP).toContain(`script-src 'sha256-${createHash("sha256").update(BRIDGE_SOURCE).digest("base64")}'`);
+  for (const directive of [
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'none'",
+  ])
+    expect(HTML_DOC_CSP).toContain(directive);
+  const html = await response.text();
+  expect(html).toBe(injectBridge(injectLook(hostile, css)));
+  expect(/<style>([\s\S]*?)<\/style>/.exec(html)?.[1]).toBe(css);
+  expect(html.split(BRIDGE_SOURCE)).toHaveLength(2);
+});
+
+async function assetHandlePrototype() {
+  const handle = await open(join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha), "r");
+  const prototype: FileHandle = Object.getPrototypeOf(handle);
+  await handle.close();
+  return prototype;
+}
+
+async function assetDescriptors() {
+  const stats = vi.spyOn(await assetHandlePrototype(), "stat");
+  const opens = vi.spyOn(f.deps.blobs, "open");
+  const handles = () => [...new Set(stats.mock.contexts as FileHandle[])];
+  return {
+    opens,
+    handles,
+    expectClosed(count: number) {
+      expect(opens).toHaveBeenCalledTimes(count);
+      expect(handles()).toHaveLength(count);
+      expect(handles().filter((handle) => handle.fd === -1)).toHaveLength(count);
+    },
+  };
+}
+
+test("large assets stream byte-exact with their isolation headers and content length", async () => {
+  const descriptors = await assetDescriptors();
+  const get = vi.spyOn(f.deps.blobs, "get");
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(200);
+  headers(response, true);
+  expect(response.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
+  expect(response.headers.get("Content-Length")).toBe(String(Buffer.byteLength(bigCss)));
+  expect(Buffer.from(await response.arrayBuffer())).toEqual(Buffer.from(bigCss));
+  expect(get).not.toHaveBeenCalled();
+  descriptors.expectClosed(1);
+});
+
+test("parallel query variants verify an asset once before any response body is pulled", async () => {
+  const descriptors = await assetDescriptors();
+  const reads = vi.spyOn(await assetHandlePrototype(), "read");
+  const path = new URL("big.css", origin + docUrl).pathname;
+  const responses = await Promise.all(Array.from({ length: 20 }, (_, i) => request(`${path}?${i + 1}`)));
+  expect(reads).toHaveBeenCalledTimes(Math.ceil(Buffer.byteLength(bigCss) / (64 * 1024)) + 1);
+  await Promise.all(
+    responses.map(async (response) => {
+      expect(response.status).toBe(200);
+      headers(response, true);
+      expect(Buffer.from(await response.arrayBuffer()).equals(Buffer.from(bigCss))).toBe(true);
+    }),
+  );
+  descriptors.expectClosed(20);
+});
+
+test("cancelling twenty parallel asset responses after one chunk closes every descriptor", async () => {
+  const descriptors = await assetDescriptors();
+  const path = new URL("big.css", origin + docUrl).pathname;
+  const responses = await Promise.all(Array.from({ length: 20 }, (_, i) => request(`${path}?${i + 1}`)));
+  const readers = responses.map((response) => {
+    expect(response.status).toBe(200);
+    headers(response, true);
+    if (!response.body) throw new Error("Missing asset body");
+    return response.body.getReader();
+  });
+  const chunks = await Promise.all(readers.map((reader) => reader.read()));
+  for (const chunk of chunks) {
+    expect(chunk.done).toBe(false);
+    expect(chunk.value?.byteLength).toBe(64 * 1024);
+  }
+  expect(descriptors.handles().filter((handle) => handle.fd !== -1)).toHaveLength(20);
+  await Promise.all(readers.map((reader) => reader.cancel()));
+  descriptors.expectClosed(20);
+});
+
+test("aborting while an asset open is awaiting returns only an isolated error and closes the descriptor", async () => {
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<AbortSignal | undefined>();
+  const controller = new AbortController();
+  const originalOpen = f.deps.blobs.open.bind(f.deps.blobs);
+  const descriptors = await assetDescriptors();
+  descriptors.opens.mockImplementation(async (owner, sha, signal) => {
+    entered.resolve(signal);
+    await gate.promise;
+    return originalOpen(owner, sha, signal);
+  });
+  const pending = f.app.request(
+    f.keep(
+      new Request(new URL("big.css", origin + docUrl), {
+        headers: { Host: "127.0.0.1:3636" },
+        signal: controller.signal,
+      }),
+    ),
+  );
+  try {
+    const signal = await entered.promise;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    controller.abort();
+    expect(signal?.aborted).toBe(true);
+    gate.resolve();
+    const response = await pending;
+    expect(response.status).toBe(404);
+    headers(response);
+    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+    expect(await descriptors.opens.mock.results[0]?.value).toBeNull();
+    descriptors.expectClosed(1);
+  } finally {
+    gate.resolve();
+    await pending;
+    const read = await descriptors.opens.mock.results[0]?.value;
+    await read?.close();
+  }
+});
+
+test("disconnecting while an asset open is awaiting closes the descriptor before returning a body", async () => {
+  const gate = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<AbortSignal | undefined>();
+  const closed = Promise.withResolvers<FileHandle>();
+  const handled = Promise.withResolvers<void>();
+  const prototype = await assetHandlePrototype();
+  const originalStat = prototype.stat;
+  const closes: FileHandle[] = [];
+  const stats = vi.spyOn(prototype, "stat").mockImplementationOnce(function (this: FileHandle, ...args) {
+    const originalClose = this.close.bind(this);
+    vi.spyOn(this, "close").mockImplementation(async () => {
+      await originalClose();
+      closes.push(this);
+      closed.resolve(this);
+    });
+    return originalStat.apply(this, args);
+  });
+  const originalOpen = f.deps.blobs.open.bind(f.deps.blobs);
+  const openBlob = vi.spyOn(f.deps.blobs, "open").mockImplementation(async (owner, sha, signal?: AbortSignal) => {
+    entered.resolve(signal);
+    await gate.promise;
+    return originalOpen(owner, sha, signal);
+  });
+  const handler = nodeRequestHandler(f.app, f.deps.config);
+  const server = createServer((incoming, outgoing) => {
+    void handler(incoming, outgoing).then(handled.resolve, handled.reject);
+  });
+  let client: ClientRequest | undefined;
+  try {
+    const listening = once(server, "listening");
+    server.listen(0, "127.0.0.1");
+    await listening;
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing server address");
+    client = httpRequest({
+      hostname: "127.0.0.1",
+      port: address.port,
+      path: new URL("big.css", origin + docUrl).pathname,
+      headers: { Host: "127.0.0.1:3636" },
+      agent: false,
+    });
+    // Destroying the client intentionally emits ECONNRESET; failures before entry must unblock the test.
+    client.on("error", entered.reject);
+    client.end();
+    const signal = await entered.promise;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    if (!signal) throw new Error("Missing request signal");
+    const aborted = once(signal, "abort");
+    client.destroy();
+    await aborted;
+    expect(signal.aborted).toBe(true);
+    gate.resolve();
+    expect(await openBlob.mock.results[0]?.value).toBeNull();
+    const handle = await closed.promise;
+    await handled.promise;
+    expect(handle.fd).toBe(-1);
+    expect(closes).toEqual([handle]);
+    expect([...new Set(stats.mock.contexts as FileHandle[])]).toEqual([handle]);
+  } finally {
+    client?.destroy();
+    gate.resolve();
+    const read = await openBlob.mock.results[0]?.value;
+    await read?.close();
+    server.closeAllConnections();
+    if (server.listening)
+      await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+  }
+});
+
+test("an asset truncated after open errors its response body and closes its descriptor", async () => {
+  const descriptors = await assetDescriptors();
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(200);
+  expect(descriptors.handles().filter((handle) => handle.fd !== -1)).toHaveLength(1);
+  await truncate(join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha), 0);
+  await expect(response.arrayBuffer()).rejects.toThrow("Blob ended before its verified size");
+  descriptors.expectClosed(1);
+});
+
+test("HEAD verifies an asset and closes its descriptor without creating a body stream", async () => {
+  const descriptors = await assetDescriptors();
+  const response = await request(new URL("big.css", origin + docUrl).pathname, "HEAD");
+  expect(response.status).toBe(200);
+  headers(response, true);
+  expect(response.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
+  expect(response.headers.get("Content-Length")).toBe(String(Buffer.byteLength(bigCss)));
+  expect(await response.text()).toBe("");
+  descriptors.expectClosed(1);
+  const read = await descriptors.opens.mock.results[0]?.value;
+  expect(() => read?.stream()).toThrow();
+});
+
+test.each(["HEAD", "GET"])("%s setup failures retain content error headers and close the asset", async (method) => {
+  const originalOpen = f.deps.blobs.open.bind(f.deps.blobs);
+  const opens = vi.spyOn(f.deps.blobs, "open").mockImplementation(async (...args) => {
+    const read = await originalOpen(...args);
+    if (!read) throw new Error("Missing blob");
+    if (method === "HEAD") {
+      const close = read.close.bind(read);
+      vi.spyOn(read, "close").mockImplementation(async () => {
+        await close();
+        throw new Error("Synthetic close failure");
+      });
+    } else {
+      vi.spyOn(read, "stream").mockImplementation(() => {
+        throw new Error("Synthetic stream failure");
+      });
+    }
+    return read;
+  });
+  const response = await request(new URL("big.css", origin + docUrl).pathname, method);
+  const read = await opens.mock.results[0]?.value;
+  try {
+    expect(response.status).toBe(500);
+    headers(response);
+    expect(response.headers.has("Content-Length")).toBe(false);
+    expect(response.headers.has("Content-Disposition")).toBe(false);
+    expect(response.headers.get("Content-Type")).toContain("application/json");
+    expect(read?.closed).toBe(true);
+    if (method === "HEAD") expect(await response.text()).toBe("");
+    else expect(await response.json()).toMatchObject({ error: { code: "internal" } });
+  } finally {
+    await read?.close().catch(() => {});
+  }
+});
+
+test("HTML doc reads stay on the read-only database scope", async () => {
+  const query = vi.spyOn(f.deps.db, "query");
+  const get = vi.spyOn(f.deps.blobs, "get");
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("<p>Synthetic seeds</p>");
+  expect(get).toHaveBeenCalledTimes(1);
+  expect(get.mock.calls[0]?.[2]).toBeDefined();
+  expect(query).not.toHaveBeenCalled();
+});
+
+test.each(["hash", "size"])("an asset with a mismatched %s returns only an isolated error", async (mismatch) => {
+  const descriptors = await assetDescriptors();
+  const wrong = Buffer.alloc(mismatch === "hash" ? Buffer.byteLength(bigCss) : 100, "Z");
+  await writeFile(join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha), wrong);
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(404);
+  headers(response);
+  expect(response.headers.get("Content-Type")).not.toContain("text/css");
+  expect(response.headers.has("Content-Length")).toBe(false);
+  const body = await response.text();
+  expect(body).not.toContain("Z");
+  expect(body).not.toContain("synthetic");
+  expect(JSON.parse(body)).toMatchObject({ error: { code: "not_found" } });
+  expect(await descriptors.opens.mock.results[0]?.value).toBeNull();
+  descriptors.expectClosed(1);
+});
+
+test.each(["rename", "in-place rewrite"])(
+  "a verified asset corrupted by %s is reverified and never served",
+  async (change) => {
+    const descriptors = await assetDescriptors();
+    const reads = vi.spyOn(await assetHandlePrototype(), "read");
+    const path = new URL("big.css", origin + docUrl).pathname;
+    const original = await request(path);
+    expect(original.status).toBe(200);
+    expect(await original.text()).toBe(bigCss);
+    descriptors.expectClosed(1);
+    const file = join(f.dir, "state", "blobs", bigSha.slice(0, 2), bigSha);
+    const wrong = Buffer.alloc(Buffer.byteLength(bigCss), "Z");
+    if (change === "rename") {
+      await writeFile(`${file}.replacement`, wrong, { mode: 0o600 });
+      await rename(`${file}.replacement`, file);
+    } else {
+      await writeFile(file, wrong);
+      await utimes(file, 1000, 1000);
+    }
+    reads.mockClear();
+    const response = await request(path);
+    expect(response.status).toBe(404);
+    headers(response);
+    expect(reads).toHaveBeenCalledTimes(Math.ceil(wrong.length / (64 * 1024)) + 1);
+    const body = await response.text();
+    expect(body).not.toContain("Z");
+    expect(JSON.parse(body)).toMatchObject({ error: { code: "not_found" } });
+    descriptors.expectClosed(2);
+  },
+);
+
+test("an asset that cannot be opened retains content error headers without CORS", async () => {
+  vi.spyOn(f.deps.blobs, "open").mockResolvedValue(null);
+  const response = await request(new URL("big.css", origin + docUrl).pathname);
+  expect(response.status).toBe(404);
+  headers(response);
+});
+test("doc key names one HTML doc; GET/HEAD serve injected docs and byte-exact relative assets", async () => {
+  expect(docUrl).toMatch(/^\/content\/[A-Za-z0-9_-]{43}[0-9a-f]{32}\/docs\/a%20%23%C3%A9.html$/);
+  for (const method of ["GET", "HEAD"]) {
+    const response = await request(docUrl, method, { Cookie: "recense_session=ignored", Authorization: "ignored" });
+    expect(response.status).toBe(200);
+    headers(response);
+    expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+    const text = await response.text();
+    if (method === "HEAD") expect(text).toBe("");
+    else {
+      const scripts = [...text.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+      expect(scripts).toEqual([BRIDGE_SOURCE]);
+      const hash = createHash("sha256")
+        .update(scripts[0] ?? "")
+        .digest("base64");
+      expect(response.headers.get("Content-Security-Policy")).toContain(`script-src 'sha256-${hash}';`);
+      expect(text).toContain("<p>Synthetic seeds</p>");
+    }
+    for (const [path, type, bytes] of [
+      ["shared.css", "text/css; charset=utf-8", "p { color: green; }"],
+      ["classic.js", "text/javascript; charset=utf-8", "window.synthetic = true;"],
+      ["seed.svg", "image/svg+xml; charset=utf-8", '<svg xmlns="http://www.w3.org/2000/svg"/>'],
+      ["data.css", "application/json; charset=utf-8", '{"synthetic":true}'],
+    ]) {
+      const url = new URL(path ?? "", origin + docUrl);
+      const asset = await request(url.pathname, method, { Origin: "null" });
+      expect(asset.status).toBe(200);
+      headers(asset, true);
+      expect(asset.headers.get("Content-Type")).toBe(type);
+      expect(await asset.text()).toBe(method === "HEAD" ? "" : bytes);
+    }
+  }
+});
+test("shared asset loads under both doc keys, but other docs, diff files and unlisted assets never do", async () => {
+  for (const url of [docUrl, secondUrl]) {
+    const shared = await request(new URL("shared.css", origin + url).pathname);
+    expect(shared.status).toBe(200);
+    expect(await shared.text()).toBe("p { color: green; }");
+    for (const path of ["unlisted.css", "change.html", "missing.css", url === docUrl ? "b.html" : "a%20%23%C3%A9.html"])
+      expect((await request(new URL(path, origin + url).pathname)).status).toBe(404);
+  }
+});
+test("script text before the real body close preserves the injected script and its CSP hash", async () => {
+  const html = '<body><p>Seed</p><script>const ending = "</body>";</script></body>';
+  const blob = await f.deps.blobs.put(f.ownerId, Buffer.from(html), "text/html");
+  await f.db.query((q) =>
+    q
+      .update(files)
+      .set({ newBlob: blob })
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.path, "docs/a #é.html"))),
+  );
+  const response = await request(docUrl);
+  expect(response.status).toBe(200);
+  headers(response);
+  const texts = [...(await response.text()).matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+  expect(texts).toEqual(['const ending = "</body>";', BRIDGE_SOURCE]);
+  const hash = createHash("sha256")
+    .update(texts[1] ?? "")
+    .digest("base64");
+  expect(response.headers.get("Content-Security-Policy")).toContain(`script-src 'sha256-${hash}';`);
+});
+test("bad keys and paths have content headers even with a valid reviewer cookie", async () => {
+  const key = docUrl.split("/")[2] ?? "";
+  const revision = await f.db.read((q) =>
+    q
+      .select()
+      .from(revisions)
+      .where(and(eq(revisions.ownerId, f.ownerId), eq(revisions.seq, 2)))
+      .get(),
+  );
+  if (!revision) throw new Error("Missing revision");
+  const otherKey = "Z".repeat(43);
+  await f.db.query((q) =>
+    q
+      .update(revisions)
+      .set({ contentKey: otherKey })
+      .where(and(eq(revisions.ownerId, f.ownerId), eq(revisions.id, f.revisionId))),
+  );
+  const { createToken, SESSION_MS } = await import("../auth/tokens.ts");
+  const deviceId = randomUUID();
+  await f.db.query((q) =>
+    q.insert(devices).values({ id: deviceId, ownerId: f.ownerId, kind: "browser", name: "Synthetic" }),
+  );
+  const session = await createToken(f.db, f.ownerId, "reviewer", { deviceId, expiresAt: f.deps.now() + SESSION_MS });
+  expect((await request("/api/v1/reviews", "GET", { Cookie: `recense_session=${session.secret}` })).status).toBe(200);
+  for (const path of [
+    `/content/${key.slice(1)}/docs/b.html`,
+    `/content/${key}0/docs/b.html`,
+    `/content/${revision.contentKey}${randomUUID().replaceAll("-", "")}/docs/b.html`,
+    `/content/${otherKey}${key.slice(43)}/docs/b.html`,
+    `/content/${key}/docs/%`,
+    `/content/${key}/docs//shared.css`,
+    `/content/${key}/docs/%2e%2e%2fshared.css`,
+    `/content/${key}/docs/%00`,
+    `/content/${key}/docs/%2Fshared.css`,
+    "/content/",
+  ]) {
+    const response = await request(path, "GET", { Cookie: `recense_session=${session.secret}` });
+    expect(response.status, path).toBe(404);
+    headers(response);
+  }
+  for (const method of ["POST", "PUT", "DELETE", "OPTIONS"]) {
+    const response = await request(docUrl, method);
+    expect(response.status).toBe(404);
+    headers(response);
+  }
+  const refused = await request(docUrl, "GET", { Host: "invalid.example" });
+  expect(refused.status).toBe(403);
+  headers(refused);
+});
+test("blob failures retain content headers without CORS", async () => {
+  vi.spyOn(f.deps.blobs, "get").mockResolvedValue(null);
+  const response = await request(docUrl);
+  expect(response.status).toBe(404);
+  headers(response);
+});
+test("asset associations are owner/revision constrained and content keys are unique", async () => {
+  const rows = await f.db.read((q) =>
+    q
+      .select()
+      .from(files)
+      .where(and(eq(files.ownerId, f.ownerId), eq(files.role, "doc"))),
+  );
+  const doc = rows[0];
+  if (!doc) throw new Error("Missing doc");
+  await expect(
+    f.db.query((q) =>
+      q.run(sql`INSERT INTO doc_assets VALUES (${f.otherOwnerId}, ${doc.revisionId}, ${doc.id}, ${doc.id})`),
+    ),
+  ).rejects.toThrow();
+  await expect(
+    f.db.query((q) => q.run(sql`INSERT INTO doc_assets VALUES (${f.ownerId}, ${f.revisionId}, ${doc.id}, ${doc.id})`)),
+  ).rejects.toThrow();
+  const key = docUrl.split("/")[2]?.slice(0, 43);
+  await expect(
+    f.db.query((q) =>
+      q
+        .update(revisions)
+        .set({ contentKey: key })
+        .where(and(eq(revisions.ownerId, f.ownerId), eq(revisions.id, f.revisionId))),
+    ),
+  ).rejects.toThrow();
+});
+
+test("a real foreign doc id cannot be combined with this revision capability", async () => {
+  const reviewId = randomUUID(),
+    revisionId = randomUUID(),
+    fileId = randomUUID();
+  await f.db.query(async (q) => {
+    await q.insert(reviews).values({
+      id: reviewId,
+      ownerId: f.otherOwnerId,
+      originInstanceId: f.instanceId,
+      reviewKey: "b".repeat(64),
+      title: "Synthetic foreign review",
+    });
+    await q
+      .insert(revisions)
+      .values({ id: revisionId, ownerId: f.otherOwnerId, reviewId, seq: 1, contentKey: "f".repeat(43) });
+    await q.insert(files).values({
+      id: fileId,
+      ownerId: f.otherOwnerId,
+      revisionId,
+      role: "doc",
+      path: "docs/b.html",
+      mediaType: "text/html",
+      ord: 0,
+    });
+  });
+  const key = docUrl.split("/")[2]?.slice(0, 43);
+  const response = await request(`/content/${key}${fileId.replaceAll("-", "")}/docs/b.html`);
+  expect(response.status).toBe(404);
+  headers(response);
+});
+
+test("publishing more than 500 associations retains every shared asset under both docs", async () => {
+  const blob = await f.deps.blobs.put(f.ownerId, Buffer.from("p {}"), "text/css");
+  const assets = Array.from({ length: 501 }, (_, i) => `many/${i}.css`);
+  const published = await f.request(
+    "/publish",
+    "POST",
+    {
+      reviewId: f.reviewId,
+      reviewKey: "a".repeat(64),
+      repo: null,
+      branch: null,
+      title: "Synthetic shared assets",
+      base: null,
+      head: null,
+      topics: [],
+      writeup: { overview: "Synthetic", tldr: "Summary", decisions: null, topics: {} },
+      files: [
+        ...["many/a.html", "many/b.html"].map((path) => ({
+          path,
+          role: "doc",
+          oldPath: null,
+          oldBlob: null,
+          newBlob: blob,
+          flag: null,
+          assets,
+        })),
+        ...assets.map((path) => ({
+          path,
+          role: "asset",
+          oldPath: null,
+          oldBlob: null,
+          newBlob: blob,
+          flag: null,
+          parent: "many/a.html",
+        })),
+      ],
+    },
+    "agent",
+  );
+  expect(published.status).toBe(200);
+  const view = RevisionView.parse(await (await f.request(`/reviews/${f.reviewId}/revisions/3`, "GET")).json());
+  for (const doc of view.docs) {
+    if (doc.kind !== "html") throw new Error("Missing HTML doc");
+    for (const name of ["0.css", "499.css", "500.css"]) {
+      const response = await request(new URL(name, origin + doc.contentUrl).pathname);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe("p {}");
+    }
+  }
+  expect(await f.db.read((q) => q.values(sql`SELECT count(*) FROM doc_assets WHERE owner_id = ${f.ownerId}`))).toEqual([
+    [1012],
+  ]);
+});

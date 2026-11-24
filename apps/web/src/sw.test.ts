@@ -35,7 +35,7 @@ test("the blocking theme script is served from the shell cache offline", async (
   const caches = { open: vi.fn(async () => ({ match })) } as unknown as CacheStorage;
   const fetcher = vi.fn().mockRejectedValue(new TypeError("offline"));
   const req = request("/theme-boot.js", "no-cors");
-  expect(await shellResponse(req, "asset", "emend-shell-new", caches, fetcher)).toBe(cached);
+  expect(await shellResponse(req, "asset", "recense-shell-new", caches, fetcher)).toBe(cached);
   expect(match).toHaveBeenCalledWith(req);
   expect(fetcher).not.toHaveBeenCalled();
 });
@@ -46,10 +46,10 @@ test("navigation is network first and offline falls back to cached shell without
   const caches = { open: vi.fn(async () => ({ match, put })) } as unknown as CacheStorage;
   const fetcher = vi.fn(async () => new Response("network"));
   const req = request("/devices");
-  expect(await (await shellResponse(req, "navigation", "emend-shell-new", caches, fetcher)).text()).toBe("network");
+  expect(await (await shellResponse(req, "navigation", "recense-shell-new", caches, fetcher)).text()).toBe("network");
   expect(match).not.toHaveBeenCalled();
   fetcher.mockRejectedValue(new TypeError("offline"));
-  expect(await (await shellResponse(req, "navigation", "emend-shell-new", caches, fetcher)).text()).toBe(
+  expect(await (await shellResponse(req, "navigation", "recense-shell-new", caches, fetcher)).text()).toBe(
     "cached shell",
   );
   expect(match).toHaveBeenCalledWith("/index.html");
@@ -59,12 +59,12 @@ test("activate deletes only old app shell caches", async () => {
   const remove = vi.fn(async () => true);
   await activateShell(
     {
-      keys: async () => ["emend-shell-old", "emend-shell-new", "unrelated"],
+      keys: async () => ["recense-shell-old", "recense-shell-new", "unrelated"],
       delete: remove,
     } as unknown as CacheStorage,
-    "emend-shell-new",
+    "recense-shell-new",
   );
-  expect(remove.mock.calls).toEqual([["emend-shell-old"]]);
+  expect(remove.mock.calls).toEqual([["recense-shell-old"]]);
 });
 
 test("settings, sample and integrations hard loads use the app shell", () => {

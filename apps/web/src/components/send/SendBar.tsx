@@ -1,4 +1,4 @@
-import { DEFAULT_MODE, type GoMode, LIMITS } from "@emend/contract";
+import { DEFAULT_MODE, type GoMode, LIMITS } from "@recense/contract";
 import { Check, Pencil, Send } from "lucide-react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { mutationMessage, useReviewMutation } from "../../api/mutations.ts";

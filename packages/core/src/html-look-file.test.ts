@@ -10,9 +10,9 @@ import {
 } from "./html-look-file.ts";
 
 const css =
-  '@layer emend-file,emend;@font-face{font-family:Example;src:url("data:font/woff2;base64,AA==")}@layer emend{body{color:CanvasText}}';
+  '@layer recense-file,recense;@font-face{font-family:Example;src:url("data:font/woff2;base64,AA==")}@layer recense{body{color:CanvasText}}';
 const input = { css, lightOnly: false };
-const marker = '<meta charset="utf-8"><style data-emend-look>';
+const marker = '<meta charset="utf-8"><style data-recense-look>';
 
 test.each([
   "",
@@ -21,17 +21,17 @@ test.each([
   "\uFEFF \n<!-- leading -->\n<!DOCTYPE html>\n",
 ])("inserts the exact chunk after preamble %j and strips it losslessly", (preamble) => {
   const page = `${preamble}<html lang="en"><head><title>Plan</title></head><body>Seeds</body></html>`;
-  expect(HTML_LOOK_FILE_LAYER).toBe("emend-file");
+  expect(HTML_LOOK_FILE_LAYER).toBe("recense-file");
   expect(htmlLookInsertAt(page)).toBe(preamble.length);
   const styled = applyHtmlLook(page, input);
-  expect(styled).toBe(`${preamble}${marker}@layer emend-file{${css}}</style>\n${page.slice(preamble.length)}`);
+  expect(styled).toBe(`${preamble}${marker}@layer recense-file{${css}}</style>\n${page.slice(preamble.length)}`);
   expect(applyHtmlLook(styled, input)).toBe(styled);
   expect(stripHtmlLook(styled)).toBe(page);
 });
 
 test.each([
   "<p>Unstyled</p>",
-  "<style data-emend-look>body{}</style><p>No charset marker</p>",
+  "<style data-recense-look>body{}</style><p>No charset marker</p>",
   `${marker}body{}`,
   `<p>Not at the insertion point</p>${marker}body{}</style>`,
 ])("leaves a page without a complete leading chunk unchanged: %s", (page) => {
@@ -44,7 +44,7 @@ test("strips only one directly following newline", () => {
 });
 
 test.each([
-  `<!doctype html>${marker}p{}</STYLE><p>Shown in emend</p><!-- </style><p>Only in the download</p> -->`,
+  `<!doctype html>${marker}p{}</STYLE><p>Shown in recense</p><!-- </style><p>Only in the download</p> -->`,
   `${marker}p{}</style ><p>Kept</p><!-- </style> -->`,
   `${marker}p{}</style data-end><p>Kept</p><!-- </style> -->`,
   `${marker}p{content:"</not-style>"}</style><p>Kept</p>`,
@@ -105,4 +105,13 @@ test("the generated chunk has no script and only data URLs", () => {
   expect(chunk).not.toMatch(/<script/i);
   const urls = [...chunk.matchAll(/url\(["']?([^)'" ]+)/gi)].map((match) => match[1]);
   expect(urls).toEqual(["data:font/woff2;base64,AA=="]);
+});
+
+test("strips the chunk the command wrote before the rename, with or without the light-only prefix", () => {
+  const legacy = '<meta charset="utf-8"><style data-emend-look>@layer emend-file{body{color:red}}</style>\n';
+  const page = "<html><head><title>Plan</title></head><body>Seeds</body></html>";
+  expect(stripHtmlLook(`${legacy}${page}`)).toBe(page);
+  expect(stripHtmlLook(`<html data-theme="light">${legacy}${page}`)).toBe(page);
+  // Applying the look to such a page replaces the old chunk instead of stacking a second one.
+  expect(applyHtmlLook(`${legacy}${page}`, input)).toBe(applyHtmlLook(page, input));
 });

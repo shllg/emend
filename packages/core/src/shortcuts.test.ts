@@ -1,4 +1,4 @@
-import { type KeyBinding, KeysSetting, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@emend/contract";
+import { type KeyBinding, KeysSetting, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@recense/contract";
 import { expect, test } from "vitest";
 import { resolveShortcuts } from "./index.ts";
 

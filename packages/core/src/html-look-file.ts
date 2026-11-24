@@ -5,9 +5,9 @@ import {
   type ThemeBase,
   ThemeColor,
   ThemeScaleStep,
-} from "@emend/contract";
+} from "@recense/contract";
 
-export const HTML_LOOK_FILE_LAYER = "emend-file";
+export const HTML_LOOK_FILE_LAYER = "recense-file";
 export type HtmlLookTheme = {
   base: ThemeBase;
   scales: Record<string, string>;
@@ -85,11 +85,16 @@ export function htmlLookThemeRules(theme: HtmlLookTheme): string {
 }
 
 const lightStart = '<html data-theme="light">';
-const marker = '<meta charset="utf-8"><style data-emend-look>';
+const marker = '<meta charset="utf-8"><style data-recense-look>';
+// The chunk `emend look` wrote before the rename; stripping it keeps a re-run from stacking a second look.
+const legacyMarker = '<meta charset="utf-8"><style data-emend-look>';
 
 export function stripHtmlLook(html: string): string {
   const at = htmlLookInsertAt(html);
-  if (!html.startsWith(marker, at) && !html.startsWith(lightStart + marker, at)) return html;
+  const present = [marker, legacyMarker].some(
+    (candidate) => html.startsWith(candidate, at) || html.startsWith(lightStart + candidate, at),
+  );
+  if (!present) return html;
   const close = html.indexOf("</", at);
   if (close < 0 || !html.startsWith("</style>", close)) return html;
   let end = close + "</style>".length;

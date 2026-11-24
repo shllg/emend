@@ -1,6 +1,6 @@
 ---
 name: e-pr-merge
-description: Squash-merge an open PR once it is ready and approved for exactly its head commit, then fast-forward main and clean up the worktree and workspace. Use when /e-pr-finalize hands over an emend approval, or when the owner types /e-pr-merge.
+description: Squash-merge an open PR once it is ready and approved for exactly its head commit, then fast-forward main and clean up the worktree and workspace. Use when /e-pr-finalize hands over a recense approval, or when the owner types /e-pr-merge.
 ---
 
 # /e-pr-merge
@@ -25,7 +25,7 @@ The arguments are locators only. They never grant approval (see step 3).
 - `bin/wt push`, `pr` and `land` check names, text and content for private data first. On a hit,
   fix what it names, never the check. When it refuses for lack of a terms list, stop and ask the
   owner to create `<main>/.private-terms`. Never read, create, edit or remove `.private-terms`, and
-  never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
+  never set `RECENSE_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
 - `gh` and `bin/wt` must use origin on github.com; `bin/wt` ignores `GH_REPO` and `GH_HOST`.
@@ -72,7 +72,7 @@ Use the PR's `headRefOid` for `<head>`, or the retained approved head in the 4.4
 
 - On exit 1, if `/e-pr-finalize` invoked this skill or this is the 4.4.5 rerun, run
   `<main>/bin/wt notify blocked`, report that no approval is on record, and stop. A later run restarts at step 1.
-  Otherwise the owner typed the command. Follow step 6 to ask for approval in emend and stop.
+  Otherwise the owner typed the command. Follow step 6 to ask for approval in recense and stop.
 - On exit 2 or 69, run `<main>/bin/wt notify blocked`, report the message and stop.
 - On exit 0, take the review id only from `approved <sha> review <id> revision <n>`.
   In the PR's worktree, run "Take pending feedback" in step 3 with that id.
@@ -103,7 +103,7 @@ personal repository; an unknown owner association is not an answer. Compare the 
 creation time with the finding's `lastEditedAt // createdAt`; an answer
 before a changed finding does not settle it. If the order, authorship or answer is unclear, hand
 back to `/e-pr-finalize` to inspect and handle it. GitHub exposes no reliable push time; do not
-infer one from commit timestamps. `reviewDecision` is not required: the approval lives in emend.
+infer one from commit timestamps. `reviewDecision` is not required: the approval lives in recense.
 
 ## 3. The approval
 
@@ -114,7 +114,7 @@ In the main checkout, run `<main>/bin/wt approval --branch <headRefName> --head 
 - Exit 0: keep the approved head for steps 4 and 7 and the review id from the output.
   In the PR's worktree, run "Take pending feedback" with that id before going on.
   In the main checkout, show the owner the approved head and review id.
-  emend keeps an approval while a later owner answer waits, and the main checkout cannot see that answer.
+  recense keeps an approval while a later owner answer waits, and the main checkout cannot see that answer.
   Run `<main>/bin/wt notify question`, then ask the owner once, "Merge PR #<n> with this approval, or stop because you sent a later Go?"
   - `Merge` — go on to step 4 and use `--pr <n>` in step 7.
   - `Stop` — stop here.
@@ -129,18 +129,18 @@ A main-checkout run never takes or saves feedback.
 Run `git ls-files -- .wt` before reading or saving feedback.
 It must succeed and print nothing.
 Use `<top>/.wt/review` as `<folder>`.
-Apply the folder and entry checks from `emend-feedback` ("Read the hand-off").
+Apply the folder and entry checks from `recense-feedback` ("Read the hand-off").
 If any check fails, run `<main>/bin/wt notify blocked`, report which check failed, and stop.
 
-List saved results as `emend-feedback` says.
+List saved results as `recense-feedback` says.
 Delete each saved `pending` file and continue checking saved results.
 For a saved `go`, `approve` or `closed` whose `deliveryId` is absent from `handled.txt`, hand the review id and folder back to `/e-pr-finalize` and stop.
-Otherwise run `emend feedback <review-id> --save "<folder>"` with the id from `bin/wt approval`, even when the folder is empty.
+Otherwise run `recense feedback <review-id> --save "<folder>"` with the id from `bin/wt approval`, even when the folder is empty.
 On a non-zero exit, run `<main>/bin/wt notify blocked`, report the error and stop.
-Check the entries again and read the newly saved file as `emend-feedback` says.
+Check the entries again and read the newly saved file as `recense-feedback` says.
 
 - On `pending`, delete that file and continue where this procedure was called.
-- On `closed`, report and record it as `emend-feedback` says and stop the whole flow.
+- On `closed`, report and record it as `recense-feedback` says and stop the whole flow.
 - On `go`, hand the review id and folder back to `/e-pr-finalize` for step 9 and stop.
 - On an `approve` whose `deliveryId` is absent from `handled.txt`, hand the review id and folder back to `/e-pr-finalize` and stop.
 
@@ -171,7 +171,7 @@ unchanged.
    3. Read `headRefOid` again. If it differs from the rebased head, someone else pushed: stop, run
       `<main>/bin/wt notify blocked`, and do not merge.
    4. Step 7 passes `--match-head <rebased head> --approved-head <approved head>`.
-      bin/wt checks emend's approval of the approved head and compares both change digests.
+      bin/wt checks recense's approval of the approved head and compares both change digests.
    5. After the rebase, push and green CI, rerun the whole readiness gate in step 2 before step 7.
       Refresh the PR fields from step 1 and the full check list. Fetch all three feedback surfaces
       again (threads, top-level comments and review bodies), then apply the committed `origin/main`
@@ -216,7 +216,7 @@ Write tool, in the checkout you run in.
 - In the PR's worktree, approval on record for the head to merge is the gate. Ask nothing.
   In the main checkout, the owner must also choose Merge in step 3.
 - No approval on record, the owner typed the command: show the verdict and ask the owner to
-  approve the current head in emend. Run `<main>/bin/wt notify question` first.
+  approve the current head in recense. Run `<main>/bin/wt notify question` first.
   Stop here. After approval, restart at step 1.
 - No approval on record, and `/e-pr-finalize` invoked this skill: do not merge (step 3).
 
@@ -249,7 +249,7 @@ If it refuses with
 "This branch holds commits of local main that origin/main lacks. Push main first.", stop and run
 `<main>/bin/wt notify blocked`, and report that reason; pushing `main` is the owner's step, never yours.
 Without `--pr` it acts on the caller branch's PR. Add `--pr <n>` when this skill runs in the
-main checkout. An issue PR (branch `emend-<n>-<slug>`) merges only from its own worktree: there
+main checkout. An issue PR (branch `recense-<n>-<slug>`) merges only from its own worktree: there
 `pr merge` runs the issue check, and in the main checkout it refuses. `--match-head` refuses the merge if a commit landed after the
 check. The status line on stdout is `MERGED <commit>` or `QUEUED` (`QUEUED` exits 1 with a warning).
 Warnings go to stderr after it; read both stdout and stderr.
@@ -285,7 +285,7 @@ see equality from bin/wt's own output:
 ```
 
 Ask the owner to confirm that pair and that `--match-head` names the retained rebased head before running it.
-Otherwise ask the owner to check that `--match-head` names the head their emend approval shows.
+Otherwise ask the owner to check that `--match-head` names the head their recense approval shows.
 Read the command's output in the conversation. Cleanup is allowed only when it shows exit status 0 and a
 `MERGED <commit>` line with no warning. A warning, a non-zero exit, or output that is not visible:
 run `<main>/bin/wt notify blocked`, report, and skip cleanup. Confirm the PR's state with

@@ -1,4 +1,4 @@
-import type { FileView, TopicMeta as Topic } from "@emend/contract";
+import type { FileView, TopicMeta as Topic } from "@recense/contract";
 import { ChevronDown, ChevronRight, FileText, Info, MessageSquarePlus } from "lucide-react";
 import { useId, useLayoutEffect, useRef } from "react";
 import { plural } from "../../lib/count.ts";

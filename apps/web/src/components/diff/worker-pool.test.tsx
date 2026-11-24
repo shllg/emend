@@ -1,4 +1,4 @@
-import type { ReviewView, RevisionView } from "@emend/contract";
+import type { ReviewView, RevisionView } from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";

@@ -63,7 +63,7 @@ function bridge(html: string, options: { captionNodes?: number; gallerySteps?: n
   const post = vi.fn();
   const parent = { postMessage: post };
   Object.defineProperty(window, "parent", { value: parent });
-  const source = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../recense/src/server/content/bridge.ts", import.meta.url), "utf8");
   try {
     let script: string = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
     if (options.captionNodes !== undefined) {
@@ -99,7 +99,7 @@ function bridge(html: string, options: { captionNodes?: number; gallerySteps?: n
     image.dispatchEvent(event);
     return event;
   };
-  const images = () => post.mock.calls.filter(([data]) => data.type === "emend:image").map(([data]) => data);
+  const images = () => post.mock.calls.filter(([data]) => data.type === "recense:image").map(([data]) => data);
   const close = async () => {
     try {
       await window.happyDOM.close();
@@ -124,7 +124,7 @@ test("image clicks report the page-order gallery and cleaned figure, alt and emp
     expect(b.click("#second").defaultPrevented).toBe(true);
     expect(b.images()).toEqual([
       {
-        type: "emend:image",
+        type: "recense:image",
         images: [
           { path: "images/a #é.png", caption: "Caption one" },
           { path: "docs/b.png", caption: "Alt two" },
@@ -184,7 +184,7 @@ test.each([
     expect(b.click("#bad").defaultPrevented).toBe(false);
     expect(b.images()).toEqual([]);
     b.click("#good");
-    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/good.png", caption: "" }], index: 0 }]);
+    expect(b.images()).toEqual([{ type: "recense:image", images: [{ path: "docs/good.png", caption: "" }], index: 0 }]);
   } finally {
     await b.close();
   }
@@ -220,7 +220,7 @@ test("overlong decoded paths are skipped while 4096-character paths remain in a 
     expect(b.images()).toEqual([]);
     expect(b.click("#last").defaultPrevented).toBe(true);
     expect(b.images()[0]).toEqual({
-      type: "emend:image",
+      type: "recense:image",
       images: [
         { path: "docs/first.png", caption: "" },
         { path: atLimit, caption: "" },
@@ -259,7 +259,7 @@ test("linked images are excluded from a plain image's gallery", async () => {
     expect(b.click("#second").defaultPrevented).toBe(true);
     expect(b.images()).toEqual([
       {
-        type: "emend:image",
+        type: "recense:image",
         images: [
           { path: "docs/first.png", caption: "First" },
           { path: "docs/second.png", caption: "Second" },
@@ -279,14 +279,14 @@ test.each(["#part", "other.html#part"])("linked images retain bridge navigation 
     b.window.dispatchEvent(
       new b.window.MessageEvent("message", {
         source: b.window.parent,
-        data: { type: "emend:docs", paths: ["docs/other.html"] },
+        data: { type: "recense:docs", paths: ["docs/other.html"] },
       }),
     );
     expect(b.click("img").defaultPrevented).toBe(true);
     expect(b.images()).toEqual([]);
     if (href.startsWith("#")) expect(scroll).toHaveBeenCalled();
     else
-      expect(b.post).toHaveBeenCalledWith({ type: "emend:navigate", path: "docs/other.html", fragment: "part" }, "*");
+      expect(b.post).toHaveBeenCalledWith({ type: "recense:navigate", path: "docs/other.html", fragment: "part" }, "*");
   } finally {
     await b.close();
   }
@@ -372,7 +372,7 @@ test("open shadow images and slotted light images form a gallery in flat-tree or
     expect(event.defaultPrevented).toBe(true);
     expect(b.images()).toEqual([
       {
-        type: "emend:image",
+        type: "recense:image",
         images: [
           { path: "docs/before.png", caption: "" },
           { path: "docs/shadow-first.png", caption: "Shadow caption" },
@@ -403,7 +403,7 @@ test.each(["summary", "label", "button"])(
       expect(b.images()).toEqual([]);
       b.click("#plain");
       expect(b.images()).toEqual([
-        { type: "emend:image", images: [{ path: "docs/plain.png", caption: "" }], index: 0 },
+        { type: "recense:image", images: [{ path: "docs/plain.png", caption: "" }], index: 0 },
       ]);
     } finally {
       await b.close();
@@ -545,7 +545,7 @@ test.each([
         ),
       ).toHaveLength(reads * click);
       expect(b.images()[click - 1]).toEqual({
-        type: "emend:image",
+        type: "recense:image",
         images: [
           { path: "docs/plain.png", caption: "" },
           ...(chosen
@@ -618,7 +618,7 @@ test.each([
   );
   try {
     expect(b.click("#target").defaultPrevented).toBe(true);
-    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/own.png", caption: "" }], index: 0 }]);
+    expect(b.images()).toEqual([{ type: "recense:image", images: [{ path: "docs/own.png", caption: "" }], index: 0 }]);
   } finally {
     await b.close();
   }
@@ -645,7 +645,7 @@ test.each([5, 7])("gallery step budget %i includes the initial clicked-image che
     // The initial check and each path cost two steps; collection spends the budget before caption lookup.
     expect(b.images()).toEqual([
       {
-        type: "emend:image",
+        type: "recense:image",
         images: [
           { path: "docs/first.png", caption: "" },
           ...(gallerySteps === 7 ? [{ path: "docs/second.png", caption: "" }] : []),
@@ -668,7 +668,9 @@ test("rejected images consume the gallery step budget", async () => {
   );
   try {
     expect(b.click("#first").defaultPrevented).toBe(true);
-    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/first.png", caption: "" }], index: 0 }]);
+    expect(b.images()).toEqual([
+      { type: "recense:image", images: [{ path: "docs/first.png", caption: "" }], index: 0 },
+    ]);
     b.post.mockClear();
     expect(b.click("#last").defaultPrevented).toBe(false);
     expect(b.images()).toEqual([]);
@@ -723,7 +725,9 @@ test("a picture containing thousands of sourceless images leaves only the valid 
   const b = bridge(`<body><img id="valid" src="valid.png"><picture>${'<img alt="x">'.repeat(3000)}</picture></body>`);
   try {
     expect(b.click("#valid").defaultPrevented).toBe(true);
-    expect(b.images()).toEqual([{ type: "emend:image", images: [{ path: "docs/valid.png", caption: "" }], index: 0 }]);
+    expect(b.images()).toEqual([
+      { type: "recense:image", images: [{ path: "docs/valid.png", caption: "" }], index: 0 },
+    ]);
   } finally {
     await b.close();
   }

@@ -4,12 +4,12 @@ Run one pass of the work loop over the GitHub issues, then pace the next pass as
 `/loop` without a prompt in the main checkout runs this file (`/loop` or `/loop <interval>`), and so
 does `/loop /e-loop` or `/loop <interval> /e-loop`. The loop keeps up to three worker sessions busy
 on `ready` issues that do not collide, answers their questions, steers them to finish instead of
-polishing, and watches each one through its PR and the owner's emend review to the merge. To stop
+polishing, and watches each one through its PR and the owner's recense review to the merge. To stop
 it, the owner says stop or, without an interval, presses Esc while it waits.
 
 This session coordinates. Workers do the work: each one is a Claude session in its own worktree and
 herdr workspace or herdr desktop terminal, started with `bin/wt spawn --issue`, running `/e-work`
-through `/e-pr`, `/e-pr-finalize` and, after the owner approves in emend, `/e-pr-merge`. This session never writes
+through `/e-pr`, `/e-pr-finalize` and, after the owner approves in recense, `/e-pr-merge`. This session never writes
 code, never merges, and never edits an issue's text.
 
 ## Rules
@@ -121,7 +121,7 @@ Use the survey's `items` for PR lookups. For each worker, and each journal issue
     `/e-work` step 4 says.
   - **stalled:** its last `progress` or `started` line is over 60 minutes old, and no `in-review`
     line follows it. Read its screen once with
-    `<main>/bin/wt agent read '<target>' --lines 80`. When it shows the emend wait, journal
+    `<main>/bin/wt agent read '<target>' --lines 80`. When it shows the recense wait, journal
     `in-review` and send nothing. Otherwise ask it what it waits on and what is left. When it is
     still stalled an hour after `steered stalled`, and no `asked-owner` line follows that line, tell
     the owner and journal `asked-owner`.
@@ -136,7 +136,7 @@ Use the survey's `items` for PR lookups. For each worker, and each journal issue
     dependency, anything destructive): run `<main>/bin/wt notify question`, tell the owner the issue
     number and the workspace, and journal `asked-owner`. Do not restate the worker's text.
   - A question dialog on its screen: the owner answers it there. Notify as above; never send keys.
-- **Idle or done, worktree still there:** read its screen. A worker waiting on the owner's emend
+- **Idle or done, worktree still there:** read its screen. A worker waiting on the owner's recense
   review shows the wait: journal `in-review` once and leave it. Otherwise ask it for its state, and
   report a worker that stays stuck to the owner.
 - **Merged:** find its PR with `<main>/bin/wt pr number --branch '<branch>' --state merged`, then
@@ -205,7 +205,7 @@ Start at most one worker per pass when the queue holds several bugs that touch t
    the history report stay in `<main>/.wt/perf/`, so the report compares this week with earlier
    weeks.
 4. On its completion notification with exit 0: in `<main>`, run
-   `emend publish '<main>/.wt/perf/report.html'`. The same path adds a revision at the same URL
+   `recense publish '<main>/.wt/perf/report.html'`. The same path adds a revision at the same URL
    each week. Give the owner the URL it prints, and journal `perf <commit>`. Any other exit:
    tell the owner once and journal `perf-failed <exit code>`.
 

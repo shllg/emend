@@ -582,7 +582,7 @@ function groomCandidates(repo: Repo): Map<string, string> {
     const parts = path.split("/");
     if (
       parts.at(-1) === "pnpm-lock.yaml" ||
-      ["apps/emend/drizzle/", "docs/images/", "docs/vendor/"].some((prefix) => path.startsWith(prefix)) ||
+      ["apps/recense/drizzle/", "docs/images/", "docs/vendor/"].some((prefix) => path.startsWith(prefix)) ||
       parts.slice(0, -1).includes("fixtures") ||
       /\.(png|jpg|jpeg|gif|webp|ico|svg|woff|woff2|ttf)$/i.test(path)
     )

@@ -39,12 +39,12 @@ description: Walk the code a few files per pass and record confirmed findings lo
    (and `docs/ui.md` once it exists). It returns one JSON array of
    `{path, line, kind, title, detail, why}`. The registry kinds are `bug`, `defect`, `test`, `docs`,
    `ux`, `react-perf`, `react-style`, `architecture` and `security`.
-   When Codex cannot run, dispatch `emend-reviewer` with `model: "sonnet"`, read-only, with the
+   When Codex cannot run, dispatch `recense-reviewer` with `model: "sonnet"`, read-only, with the
    same commission as a stand-in. Say that the stand-in ran and why in the report.
 6. Write the returned array, unchanged, with the Write tool to a new file in the temporary
    folder. A reply that is not one JSON array makes the pass incomplete. Do not send it to the
    manager; continue at step 8.
-7. Dispatch `emend-review-manager` with `model: "opus"`, mode `confirm`, the candidates file,
+7. Dispatch `recense-review-manager` with `model: "opus"`, mode `confirm`, the candidates file,
    the pass name and the scanning vendor (`codex`, or `claude` for the stand-in). It checks
    candidates, confirms them with the other vendor, and records survivors in the local registry.
    The pass is incomplete if the reply lacks exactly one parseable JSON block, `mode` is not

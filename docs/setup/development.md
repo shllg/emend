@@ -1,4 +1,4 @@
-# Develop emend from a checkout
+# Develop recense from a checkout
 
 A checkout installs the same way as a release: `pnpm install:local` builds the committed `HEAD` in
 a temporary folder, packs it and installs the package. Use a clone that no agent or tool writes to,
@@ -9,14 +9,14 @@ pnpm install
 pnpm install:local
 ```
 
-If you linked `apps/emend/bin/emend` into a folder on your `PATH` before (the earlier development
-steps and `install.sh` did), remove that link, and stop every emend server that runs from a
+If you linked `apps/recense/bin/recense` into a folder on your `PATH` before (the earlier development
+steps and `install.sh` did), remove that link, and stop every recense server that runs from a
 checkout: `pgrep -af '[e]mend.mjs serve'` lists them with their paths (`pgrep -lf` on macOS).
 Otherwise the commands your agents run, and the server that serves the review app, run the
 checkout's build, which agents can change.
 
 With mise on your `PATH`, the package goes to a folder in mise's data folder that `mise link`
-registers as `npm:@shllg/emend@local`; pass `--npm` to use `npm install -g` instead. If `emend` is
+registers as `npm:@shllg/recense@local`; pass `--npm` to use `npm install -g` instead. If `recense` is
 not on your `PATH` yet, the command prints the folder to add. It also restarts an installed
 service, so the new build runs.
 
@@ -24,12 +24,12 @@ For Claude Code, add the checkout as a plugin marketplace instead of the GitHub 
 
 ```text
 /plugin marketplace add <path to your checkout>
-/plugin install emend@emend
+/plugin install recense@recense
 ```
 
 Claude Code reads the skills from the checkout's `plugin/` folder, uncommitted changes included. A
 pulled change takes effect at the next session start or after `/reload-plugins`. For other agents,
-run `emend skills install` once; its links point into the installed package.
+run `recense skills install` once; its links point into the installed package.
 
 `pnpm verify` is the single local gate. It runs `verify:static`, `verify:test`,
 `verify:build` and `verify:harness` in order. `verify:static` includes `pnpm check:public`, which
@@ -38,12 +38,12 @@ secret shapes and attribution lines out of tracked files, file names and commit 
 names only the place and the rule. CI runs those same checks in parallel on Node 24
 and 26, with 4 Vitest shards per Node version. `pnpm bench` runs non-gating measurements with
 temporary state and prints JSON lines; it has no timing assertions and does not run in CI.
-[AGENTS.md](https://github.com/shllg/emend/blob/main/AGENTS.md)
+[AGENTS.md](https://github.com/shllg/recense/blob/main/AGENTS.md)
 holds the working rules. Maintainers: [releasing.md](../releasing.md) holds the release policy
 and checklist.
 
-The tests never touch your own emend state or your Tailscale setup. Vitest's global setup gives
-each run a temporary `EMEND_HOME`, home folder and XDG folders. Only `emend serve --tailscale`
+The tests never touch your own recense state or your Tailscale setup. Vitest's global setup gives
+each run a temporary `RECENSE_HOME`, home folder and XDG folders. Only `recense serve --tailscale`
 runs `tailscale`, and its tests reach a fake one only:
 
 - Every call under test gets an environment the test owns, never the live `PATH`. A test that
@@ -52,14 +52,14 @@ runs `tailscale`, and its tests reach a fake one only:
   the test's own folder throws, also after the test ended and also for the macOS app fallback.
 - The tailscale-process tests stub both the lookup and the process spawn. Their one real child
   runs a fake from the test's folder, with a fixed platform and a missing app path.
-- The serve-signals tests run emend in a child whose `PATH` holds only the test's folder and its
+- The serve-signals tests run recense in a child whose `PATH` holds only the test's folder and its
   fake `tailscale`. Their cleanup first kills the child's process group if the child still runs.
   Only then can it remove that folder; normally it also waits for the child to close first.
 
 `pnpm screenshots` rebuilds the checkout and regenerates the pictures in `docs/images/` from a
 sealed demo round. It needs Chromium (`--chromium <path>` or `CHROMIUM_PATH` names it) and
 `script(1)` from util-linux or macOS. It runs its own server, state and browser profile in a
-throwaway folder, never reaches your own emend server or state, and removes the folder at the end.
+throwaway folder, never reaches your own recense server or state, and removes the folder at the end.
 Run it as `pnpm screenshots`, which rebuilds first; `node scripts/screenshots.ts` alone uses whatever
 build is there. Prefer a Chromium installed from your system packages or `--chromium <path>`: a snap
 or flatpak build may ignore the throwaway profile folder.
@@ -71,8 +71,8 @@ comment, opening and switching publication docs, and CLI publication. It reuses 
 screenshot setup with synthetic data, a throwaway server and headless Chromium. JSON runs and a
 self-contained history report go in `.wt/perf/`. Pass `--ref <commit>` to export and build an older
 commit outside the checkout with an offline install, or `--no-build` to measure the current build.
-The export goes to a private folder under `$XDG_CACHE_HOME/emend-perf` (by default
-`~/.cache/emend-perf`) and is removed after the run unless `--keep` is passed. The run resolves
+The export goes to a private folder under `$XDG_CACHE_HOME/recense-perf` (by default
+`~/.cache/recense-perf`) and is removed after the run unless `--keep` is passed. The run resolves
 symbolic links in that path, then refuses when the resolved folder or any of its parents is not a
 directory, belongs to a user other than you or root, or is writable by its group or by others. An
 export left behind by a killed run is removed at the start of the next `--ref` run once its process

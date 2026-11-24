@@ -1,6 +1,6 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { ok } from "node:assert/strict";
-import { type RenderedBlock, RenderedWriteup, type RevisionView, type ThreadView } from "@emend/contract";
+import { type RenderedBlock, RenderedWriteup, type RevisionView, type ThreadView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { type ReactNode, StrictMode } from "react";
@@ -63,14 +63,14 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  expect(highlights.has("emend-comment")).toBe(false);
-  expect(highlights.has("emend-comment-active")).toBe(false);
+  expect(highlights.has("recense-comment")).toBe(false);
+  expect(highlights.has("recense-comment-active")).toBe(false);
   client.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 function ranges(active = false) {
-  return [...(highlights.get(active ? "emend-comment-active" : "emend-comment") ?? [])];
+  return [...(highlights.get(active ? "recense-comment-active" : "recense-comment") ?? [])];
 }
 function quotes(active = false) {
   return ranges(active).map((range) => range.toString());
@@ -266,7 +266,7 @@ test("writeup and Markdown readers divide active and ordinary ranges without ove
   expect(quotes(true)).toEqual(["seed"]);
   const active = ranges(true)[0];
   expect(ranges()).not.toContain(active);
-  expect(required(highlights.get("emend-comment-active") as MockHighlight | undefined).priority).toBe(1);
+  expect(required(highlights.get("recense-comment-active") as MockHighlight | undefined).priority).toBe(1);
   first.unmount();
   expect(quotes()).toEqual([]);
   expect(ranges(true)).toEqual([active]);
@@ -650,7 +650,7 @@ test.each(["mapping", "range", "registration"])(
 test("a registry write failure clears partial highlights without interrupting the reader", () => {
   const set = highlights.set.bind(highlights);
   vi.spyOn(highlights, "set").mockImplementation((name, value) => {
-    if (name === "emend-comment-active") throw new Error("Synthetic registry failure");
+    if (name === "recense-comment-active") throw new Error("Synthetic registry failure");
     return set(name, value);
   });
   const view = mount(<Writeup {...props} writeup={writeup()} />);

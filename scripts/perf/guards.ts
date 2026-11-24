@@ -14,7 +14,7 @@ export function refParent(
   parent: Record<string, string | undefined> = process.env,
   parentHome = homedir(),
 ): string {
-  return join(cacheHome(parent, parentHome), "emend-perf");
+  return join(cacheHome(parent, parentHome), "recense-perf");
 }
 
 export function pidNamespace(platform = process.platform, readlink: (path: string) => string = readlinkSync): string | null | undefined {
@@ -27,7 +27,7 @@ export function pidNamespace(platform = process.platform, readlink: (path: strin
 }
 
 export function writeRefMarker(folder: string, keep: boolean, pid = process.pid, host = hostname(), pidns = pidNamespace()): void {
-  writeFileSync(join(folder, ".emend-perf-ref"), JSON.stringify({ pid, host, pidns: pidns === undefined ? false : pidns, keep }), { flag: "wx", mode: 0o600 });
+  writeFileSync(join(folder, ".recense-perf-ref"), JSON.stringify({ pid, host, pidns: pidns === undefined ? false : pidns, keep }), { flag: "wx", mode: 0o600 });
 }
 
 export function processAlive(pid: number, kill = process.kill): boolean {
@@ -67,7 +67,7 @@ export function removeStaleRefExports(
     try {
       const entry = lstatSync(folder);
       if (entry.isSymbolicLink() || !entry.isDirectory() || entry.uid !== uid) continue;
-      const markerPath = join(folder, ".emend-perf-ref");
+      const markerPath = join(folder, ".recense-perf-ref");
       const markerStat = lstatSync(markerPath);
       if (markerStat.isSymbolicLink() || !markerStat.isFile()) continue;
       const marker = JSON.parse(readFileSync(markerPath, "utf8"));

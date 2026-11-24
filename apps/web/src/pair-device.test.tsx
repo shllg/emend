@@ -1,4 +1,4 @@
-import type { PairingCreated } from "@emend/contract";
+import type { PairingCreated } from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -11,7 +11,7 @@ import { takePairingIntent } from "./lib/pairing-intent.ts";
 const origin = "https://hub.example.ts.net";
 const secret = `emp_${"a".repeat(43)}`;
 const loopbackMessage =
-  "This hub accepts connections from this computer only. To pair a phone, start emend with --tailscale.";
+  "This hub accepts connections from this computer only. To pair a phone, start recense with --tailscale.";
 const clients: QueryClient[] = [];
 function pairing(overrides: Partial<PairingCreated> = {}): PairingCreated {
   return {
@@ -436,7 +436,7 @@ test("in-app navigation away refreshes the inactive Devices list without creatin
   await screen.findByText("ABCD-EFGH");
   const gets = fetcher.mock.calls.filter(([path]) => path === "/api/v1/devices").length;
   client.setQueryDefaults(["devices"], { staleTime: Infinity });
-  fireEvent.click(screen.getByRole("link", { name: "emend", hidden: true }), { button: 0 });
+  fireEvent.click(screen.getByRole("link", { name: "recense", hidden: true }), { button: 0 });
   await screen.findByRole("heading", { name: "Inbox" });
   await waitFor(() => expect(fetcher.mock.calls.filter(([path]) => path === "/api/v1/devices")).toHaveLength(gets + 1));
   await act(async () => history.back());

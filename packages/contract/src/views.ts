@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentNoteView } from "./agent-note.ts";
-import { DocHeadings, DocTitle, SourceContent } from "./doc.ts";
+import { DocHeadings, DocTitle, HtmlLookValue, SourceContent } from "./doc.ts";
 import { InboxListGroup } from "./groups.ts";
 import { LIMITS } from "./limits.ts";
 import { IssueRefs, PublishLinks, RepoUrl } from "./links.ts";
@@ -27,7 +27,7 @@ export const PublishResponse = z.object({
   unplaced: z.int().nonnegative(),
   unrendered: z.array(FilePath).max(LIMITS.filesPerRevision).default([]),
   htmlLooks: z
-    .array(z.object({ path: FilePath, look: z.enum(["emend", "custom"]), colorScheme: z.enum(["light"]).optional() }))
+    .array(z.object({ path: FilePath, look: HtmlLookValue, colorScheme: z.enum(["light"]).optional() }))
     .max(LIMITS.filesPerRevision)
     .optional(),
 });
@@ -110,7 +110,7 @@ export const AgentReviewList = z.object({ items: z.array(AgentReviewItem).max(LI
 export type AgentReviewList = z.infer<typeof AgentReviewList>;
 /**
  * Query of `GET /api/v1/agent/reviews`: `head` is a full commit object id, no prefix or `worktree`.
- * `key` is a stored review key: 64 lowercase hex characters, the `reviewKey` emend publish sends.
+ * `key` is a stored review key: 64 lowercase hex characters, the `reviewKey` recense publish sends.
  */
 export const AgentReviewQuery = z.object({ head: commit.optional(), key: Sha256.optional() });
 export type AgentReviewQuery = z.infer<typeof AgentReviewQuery>;
@@ -340,7 +340,7 @@ export const RevisionView = z
             // Absent on revisions published before parts were stored.
             changes: HtmlDocChanges.optional(),
             images: z.array(FilePath).max(LIMITS.filesPerRevision).optional(),
-            look: z.enum(["emend", "custom"]).optional(),
+            look: HtmlLookValue.optional(),
             colorScheme: z.enum(["light"]).optional(),
             title: DocTitle.optional(),
             headings: DocHeadings.optional(),

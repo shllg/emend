@@ -1,5 +1,5 @@
 {
-  "name": "@emend/core",
+  "name": "@recense/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@emend/contract": "workspace:*",
+    "@recense/contract": "workspace:*",
     "@shikijs/rehype": "4.5.0",
     "diff": "9.0.0",
     "hast-util-from-html": "2.0.3",

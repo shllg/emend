@@ -1,7 +1,7 @@
 # React
 
-This guide covers `apps/web/src`, emend's Vite single-page app with no server rendering.
-`emend-react-reviewer` checks changes against it. Full rule texts are in
+This guide covers `apps/web/src`, recense's Vite single-page app with no server rendering.
+`recense-react-reviewer` checks changes against it. Full rule texts are in
 [docs/vendor/vercel-agent-skills/](vendor/vercel-agent-skills/).
 
 ## Style

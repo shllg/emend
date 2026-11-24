@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { type SetStateAction, useEffect, useMemo, useState } from "react";
 import { useViewedChanges } from "../api/mutations.ts";

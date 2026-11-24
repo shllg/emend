@@ -1,4 +1,4 @@
-import type { Target } from "@emend/contract";
+import type { Target } from "@recense/contract";
 import { createContext, useContext, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { DiffNavigation } from "./diff-navigation.ts";
 import { hasDraft, hasDraftText, isDraftSaving, subscribeDrafts } from "./drafts.ts";

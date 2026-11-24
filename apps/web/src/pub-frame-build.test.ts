@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { expect, test } from "vitest";
 import { checkPubStylesheet, pickPubStylesheet } from "../build/pub-frame.ts";
 
@@ -36,7 +36,7 @@ test.each([
 
 test("accepts inline data fonts, minified media comparisons and the exact byte limit", () => {
   const css =
-    '@layer emend{@font-face{font-family:Test;src:url("data:font/woff2;base64,AA==")}' +
+    '@layer recense{@font-face{font-family:Test;src:url("data:font/woff2;base64,AA==")}' +
     "@media (width<=767px){body{max-width:none}}}";
   expect(() => checkPubStylesheet(css)).not.toThrow();
   expect(() => checkPubStylesheet("é".repeat(LIMITS.pubStylesheetBytes / 2))).not.toThrow();

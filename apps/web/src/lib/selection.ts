@@ -1,4 +1,4 @@
-import { LIMITS, type RenderedBlock, type TopicTarget } from "@emend/contract";
+import { LIMITS, type RenderedBlock, type TopicTarget } from "@recense/contract";
 import { makeSpan } from "../../../../packages/core/src/place/span.ts";
 import { normalizeText } from "../../../../packages/core/src/render/normalize.ts";
 

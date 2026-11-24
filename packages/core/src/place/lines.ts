@@ -1,4 +1,4 @@
-import type { LinesTarget, Placement, SourceLinesTarget } from "@emend/contract";
+import type { LinesTarget, Placement, SourceLinesTarget } from "@recense/contract";
 import { lineMap, splitLines } from "./linemap.ts";
 import { firstTwoMatches } from "./search.ts";
 

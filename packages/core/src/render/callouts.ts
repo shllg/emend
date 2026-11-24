@@ -8,7 +8,7 @@ const hasContent = (node: HtmlNode) =>
 function hasDiagram(quote: HtmlElement): boolean {
   const pending: HtmlNode[] = [quote];
   for (let node = pending.pop(); node; node = pending.pop()) {
-    if (node.type === "element" && node.tagName === "pre" && renderData(node).emendDiagram !== undefined) return true;
+    if (node.type === "element" && node.tagName === "pre" && renderData(node).recenseDiagram !== undefined) return true;
     if (
       node.type === "element" &&
       node.tagName === "code" &&
@@ -50,22 +50,22 @@ export function markCallouts() {
 
       if (breakAfter && next?.type === "element") {
         const classes = Array.isArray(next.properties.className) ? next.properties.className : [];
-        next.properties.className = [...classes, "emend-callout-marker-break"];
+        next.properties.className = [...classes, "recense-callout-marker-break"];
       }
       const span: HtmlElement = {
         type: "element",
         tagName: "span",
-        properties: { className: ["emend-callout-marker"] },
+        properties: { className: ["recense-callout-marker"] },
         children: [{ type: "text", value: marker }],
       };
       const value = first.value.slice(marker.length);
       paragraph.children.splice(0, 1, span, ...(value ? [{ ...first, value }] : []));
       if (paragraph.children.slice(1).every((child) => isWhitespace(child) || isBreak(child))) {
         const classes = Array.isArray(paragraph.properties.className) ? paragraph.properties.className : [];
-        paragraph.properties.className = [...classes, "emend-callout-marker-line"];
+        paragraph.properties.className = [...classes, "recense-callout-marker-line"];
       }
       const classes = Array.isArray(quote.properties.className) ? quote.properties.className : [];
-      quote.properties.className = [...classes, "emend-callout", `emend-callout-${type}`];
+      quote.properties.className = [...classes, "recense-callout", `recense-callout-${type}`];
     }
   };
 }

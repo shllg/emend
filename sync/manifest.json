@@ -3,7 +3,7 @@
   "surfaces": [
     {
       "name": "review-wording",
-      "self": ["plugin/skills/emend-review/**"],
+      "self": ["plugin/skills/recense-review/**"],
       "counterpart": ["skills/hunk-review/SKILL.md"]
     },
     {
@@ -13,17 +13,17 @@
     },
     {
       "name": "modes-outcomes",
-      "self": ["packages/contract/src/send.ts", "packages/contract/src/thread.ts", "plugin/skills/emend-feedback/**"],
+      "self": ["packages/contract/src/send.ts", "packages/contract/src/thread.ts", "plugin/skills/recense-feedback/**"],
       "counterpart": ["extension/review-plan/go.ts", "skills/hunk-handle-notes/SKILL.md"]
     },
     {
       "name": "wait-result",
       "self": [
         "packages/contract/src/wait.ts",
-        "apps/emend/src/cli/commands/wait.ts",
-        "apps/emend/src/cli/commands/feedback.ts",
-        "apps/emend/src/cli/save-feedback.ts",
-        "apps/emend/src/cli/direct/**"
+        "apps/recense/src/cli/commands/wait.ts",
+        "apps/recense/src/cli/commands/feedback.ts",
+        "apps/recense/src/cli/save-feedback.ts",
+        "apps/recense/src/cli/direct/**"
       ],
       "counterpart": ["bin/hunk-plan"]
     }

@@ -8,7 +8,7 @@ import {
   type PublishLinks,
   type TopicMeta,
   type WriteupInput,
-} from "@emend/contract";
+} from "@recense/contract";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";

@@ -1,4 +1,4 @@
-import { PairingCreated } from "@emend/contract";
+import { PairingCreated } from "@recense/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { Clock } from "lucide-react";
@@ -156,7 +156,7 @@ export function PairDevicePage() {
           <>
             {pairing.loopback && (
               <Banner tone="warning" inline>
-                This hub accepts connections from this computer only. To pair a phone, start emend with --tailscale.
+                This hub accepts connections from this computer only. To pair a phone, start recense with --tailscale.
               </Banner>
             )}
             {pairing.expired ? (

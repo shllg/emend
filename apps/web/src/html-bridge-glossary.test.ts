@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { LIMITS, normalizeGlossaryForm } from "@emend/contract";
+import { LIMITS, normalizeGlossaryForm } from "@recense/contract";
 import { type Element, type Node, type ShadowRoot, Window } from "happy-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { HtmlRoot } from "../../../packages/core/src/render/blocks.ts";
@@ -18,7 +18,7 @@ import {
 } from "../../../packages/core/src/render/doc-terms.ts";
 import { DOC_TERM_MATCH_STEP_BUDGET, markTerms } from "../../../packages/core/src/render/terms.ts";
 
-const bridgeSource = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+const bridgeSource = readFileSync(new URL("../../recense/src/server/content/bridge.ts", import.meta.url), "utf8");
 const windows: Window[] = [];
 afterEach(async () => {
   await Promise.all(windows.splice(0).map((window) => window.happyDOM.close()));
@@ -86,7 +86,7 @@ function bridge(html: string, prepare?: (window: Window) => void) {
   const message = (data: unknown, source: unknown = parent) =>
     window.dispatchEvent(new window.MessageEvent("message", { data, source: source as Window }));
   const marks = () => [...window.document.querySelectorAll("span[aria-haspopup]")];
-  const host = () => window.document.querySelector("emend-term-card");
+  const host = () => window.document.querySelector("recense-term-card");
   const dialog = () => shadows[0]?.querySelector(".card") ?? null;
   const open = () => (host()?.getAttribute("style") ?? "").includes("display: block");
   const fire = (target: Node | Element, type: string, init: Record<string, unknown> = {}) => {
@@ -147,7 +147,7 @@ test("a glossary whose forms share a long prefix cannot stall the doc: ready is 
   });
   const b = bridge(page("a ".repeat(4489), entries(...items)));
   expect(b.marks()).toEqual([]);
-  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 // The 450-form shape: 50 entries with 9 forms, each 48 one-letter words and a 3-digit index.
@@ -163,7 +163,7 @@ test("hostile: 200 paragraphs of 440 characters, also with U+3000 between the wo
   for (const gap of [" ", "　"]) {
     const b = bridge(manyParagraphs(`a${gap}`.repeat(220), 200, entries(...hostileItems("a"))));
     expect(b.marks()).toEqual([]);
-    expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+    expect(b.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
   }
 });
 
@@ -178,7 +178,7 @@ test("hostile: acronym forms against lowercase text refuse every position, and p
 test("a doc far beyond the step budget stops marking and still posts ready", () => {
   const b = bridge(manyParagraphs("a ".repeat(2500), 400, entries(...hostileItems("a"))));
   expect(b.marks()).toEqual([]);
-  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 test("coverage: 50 terms with 3 aliases each are all marked in a 60,000-character doc", () => {
@@ -219,11 +219,11 @@ test("a doc whose filler spends the whole step budget leaves a later real term u
     `<body><main>${`<p>${"a ".repeat(220)}</p>`.repeat(filler)}<p>A zebra here.</p>${entries(...items)}</main></body>`;
   const spent = bridge(doc(400));
   expect(spent.marks()).toEqual([]);
-  expect(spent.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(spent.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
   // With less filler the same real term is marked.
   const less = bridge(doc(100));
   expect(markTexts(less)).toEqual(["zebra"]);
-  expect(less.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(less.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 // The bridge's matcher, taken from BRIDGE_SOURCE between its two marker comments and run beside core's, so
@@ -412,7 +412,7 @@ test("the bridge marks nothing in a text node with a run of more than 30 combini
   const hostile = bridge(page(`x${"̖́".repeat(50_000)}`));
   expect(markTexts(hostile)).toEqual(["budget"]);
   expect(hostile.window.document.querySelector("#t")?.querySelector("span[aria-haspopup]")).toBeNull();
-  expect(hostile.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(hostile.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
   const within = bridge(page(markRun(30)));
   expect(within.window.document.querySelector("#t")?.querySelector("span[aria-haspopup]")?.textContent).toBe("budget");
   const beyond = bridge(page(markRun(31)));
@@ -435,14 +435,14 @@ test("the bridge skips a glossary entry whose term or definition has a run of mo
   // With 31 marks the term and the definition are invalid, the entry of the alias stays without it.
   const skipped = bridge(page(text, glossary(markRun(31))));
   expect(markTexts(skipped)).toEqual(["budget"]);
-  expect(skipped.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(skipped.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 test("a 20,000-character dt of alternating combining marks makes its entry invalid, without stalling", () => {
   const term = `x${"̖́".repeat(10_000)}`;
   const b = bridge(page("A budget and a hub.", entries(entry(term, "Defined."), entry("Budget", "Money."))));
   expect(markTexts(b)).toEqual(["budget"]);
-  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 test("a doc without a glossary does not change at all", () => {
@@ -462,7 +462,7 @@ test("more than 1,024 headings before the Glossary heading leave the doc without
   const b = bridge(`<body><p id="t">A budget.</p>${headings}${entries(entry("Budget", "Money."))}</body>`);
   expect(b.marks()).toEqual([]);
   expect(b.host()).toBeNull();
-  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 test("a pretty-printed Glossary heading with an indented svg icon and much whitespace still counts", () => {
@@ -481,7 +481,7 @@ test("a div-grouped list is cut at 10,000 items", () => {
   expect(markTexts(within)).toEqual(["late"]);
   const beyond = bridge(page("A late word.", group(10010)));
   expect(beyond.marks()).toEqual([]);
-  expect(beyond.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(beyond.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 test("a line break inside a term reads as one space, as in core", () => {
@@ -632,17 +632,17 @@ test("marks carry button semantics, and the text of the doc is unchanged", () =>
   expect(mark.getAttribute("style")).toContain("cursor: help");
   expect(mark.getAttribute("style")).toContain("dotted");
   expect(b.window.document.body.textContent).toBe(reference);
-  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("emend:ready");
+  expect(b.post.mock.calls.map(([data]) => data.type)).toContain("recense:ready");
 });
 
 test("a doc's own attributes never pick a term index", () => {
   const b = bridge(
     page(
-      `<span role="button" aria-haspopup="dialog" data-emend-term="0" class="emend-term" tabindex="0">Fake</span> budget`,
+      `<span role="button" aria-haspopup="dialog" data-recense-term="0" class="recense-term" tabindex="0">Fake</span> budget`,
       entries(entry("Budget", "Money.")),
     ),
   );
-  const fake = required(b.window.document.querySelector("span.emend-term"));
+  const fake = required(b.window.document.querySelector("span.recense-term"));
   b.click(fake);
   expect(b.open()).toBe(false);
   b.click(required(b.marks().find((mark) => mark !== fake)));
@@ -812,11 +812,11 @@ test("the card host is not a part tag, has no light children and sends no frame 
   const before = b.post.mock.calls.length;
   b.click(required(b.marks()[0]));
   const host = required(b.host());
-  expect(host.localName).toBe("emend-term-card");
+  expect(host.localName).toBe("recense-term-card");
   expect(host.childNodes).toHaveLength(0);
   expect(host.shadowRoot).toBeNull();
   expect(b.shadows).toHaveLength(1);
-  expect(b.post.mock.calls.slice(before).map(([data]) => data.type)).not.toContain("emend:glossary");
+  expect(b.post.mock.calls.slice(before).map(([data]) => data.type)).not.toContain("recense:glossary");
   expect(JSON.stringify(b.post.mock.calls)).not.toContain("Money.");
   const dialog = required(b.dialog());
   expect(dialog.getAttribute("role")).toBe("dialog");
@@ -857,7 +857,7 @@ test.each(hostile)("hostile glossary text stays text in the card: $name", ({ ter
     expect([...element.childNodes].every((node) => node.nodeType === 3)).toBe(true);
     expect(element.getAttributeNames().filter((name) => name.startsWith("on"))).toEqual([]);
   }
-  expect(b.window.document.querySelector("emend-term-card")?.childNodes).toHaveLength(0);
+  expect(b.window.document.querySelector("recense-term-card")?.childNodes).toHaveLength(0);
 });
 
 test("a hostile term cannot escape the term pattern", () => {
@@ -974,14 +974,14 @@ test("issue links and comment anchors keep working in a doc with marks", () => {
     page("A budget, see #12 and the hub.", entries(entry("Budget", "Money."), entry("Hub", "Machine."))),
   );
   const text = required(b.window.document.querySelector("#t")).textContent;
-  b.message({ type: "emend:repo", url: "https://github.com/o/r" });
+  b.message({ type: "recense:repo", url: "https://github.com/o/r" });
   const link = required(b.window.document.querySelector("#t a"));
   expect(link.textContent).toBe("#12");
   b.post.mockClear();
   const issue = new b.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
   link.dispatchEvent(issue);
   expect(issue.defaultPrevented).toBe(true);
-  expect(b.post.mock.calls).toEqual([[{ type: "emend:issue", number: 12 }, "*"]]);
+  expect(b.post.mock.calls).toEqual([[{ type: "recense:issue", number: 12 }, "*"]]);
   expect(b.open()).toBe(false);
   // A selection across marks and text becomes one anchor with the plain quote.
   const selection = required(b.window.getSelection());
@@ -992,7 +992,7 @@ test("issue links and comment anchors keep working in a doc with marks", () => {
   b.post.mockClear();
   b.window.document.dispatchEvent(new b.window.Event("mouseup", { bubbles: true }));
   expect(b.post.mock.calls).toHaveLength(1);
-  expect(b.post.mock.calls[0]?.[0]).toMatchObject({ type: "emend:anchor", quote: text, prefix: "" });
+  expect(b.post.mock.calls[0]?.[0]).toMatchObject({ type: "recense:anchor", quote: text, prefix: "" });
   // The same selection, with the event coming from the card, is ignored.
   b.key(required(b.marks()[0]), "Enter");
   b.post.mockClear();
@@ -1003,9 +1003,9 @@ test("issue links and comment anchors keep working in a doc with marks", () => {
 test("highlights anchor across marked text", () => {
   const b = bridge(page("A budget and a hub.", entries(entry("Budget", "Money."), entry("Hub", "Machine."))));
   b.message({
-    type: "emend:highlight",
+    type: "recense:highlight",
     anchors: [{ threadId: "t1", quote: "budget and a hub", prefix: "A ", suffix: "." }],
   });
-  b.message({ type: "emend:scroll", threadId: "t1" });
+  b.message({ type: "recense:scroll", threadId: "t1" });
   expect(b.scrolled).toHaveLength(1);
 });

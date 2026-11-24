@@ -1,4 +1,4 @@
-import { Outcome, ReviewState, ThreadState } from "@emend/contract";
+import { Outcome, ReviewState, ThreadState } from "@recense/contract";
 import { AgentStatus, type AgentStatusKey } from "../status/AgentStatus.tsx";
 import { ChangedMarker } from "../status/ChangedMarker.tsx";
 import { OriginBadge } from "../status/OriginBadge.tsx";

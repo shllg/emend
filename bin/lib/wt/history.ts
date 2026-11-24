@@ -422,7 +422,7 @@ export function land(
   requirePublic(() => checkPublicChange(top, main, tree, { root: repo.mainRoot, requireTerms: true }));
   const approved = approvedHead ?? matchHead;
   const approval = readApproval(repo, branch, approved);
-  if (!approval.ok) throw new WtError(1, `emend shows no approval of ${approved} on ${branch}: ${approval.reason}.`);
+  if (!approval.ok) throw new WtError(1, `recense shows no approval of ${approved} on ${branch}: ${approval.reason}.`);
   if (
     approved !== matchHead &&
     changeDigest(repo, "refs/heads/main", approved) !== changeDigest(repo, "refs/heads/main", matchHead)

@@ -1,4 +1,4 @@
-import { OTHER_TOPIC, type TopicMeta } from "@emend/contract";
+import { OTHER_TOPIC, type TopicMeta } from "@recense/contract";
 
 // The revision is already in review order; Other never consumes a rank.
 export function rankedTopics(topics: TopicMeta[]) {

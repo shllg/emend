@@ -370,7 +370,7 @@ const ATTRIBUTION: Rule = {
 
 function git(cwd: string, args: string[], options: { missing?: boolean; input?: string } = {}): Buffer {
   try {
-    const env: NodeJS.ProcessEnv = { ...process.env, EMEND_PRIVATE_TERMS: undefined, GIT_TERMINAL_PROMPT: "0" };
+    const env: NodeJS.ProcessEnv = { ...process.env, RECENSE_PRIVATE_TERMS: undefined, GIT_TERMINAL_PROMPT: "0" };
     if (["fetch", "ls-remote"].includes(args[0] ?? "")) delete env.GIT_NO_LAZY_FETCH;
     else env.GIT_NO_LAZY_FETCH = "1";
     // The exempt identity must come from the user's own global or system config.
@@ -464,18 +464,18 @@ export function loadPrivateTerms(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
       throw new PublicCheckError(1, "check:public: could not read private terms list");
   }
-  if (env.EMEND_PRIVATE_TERMS !== undefined) sources.push({ kind: "env", text: env.EMEND_PRIVATE_TERMS });
+  if (env.RECENSE_PRIVATE_TERMS !== undefined) sources.push({ kind: "env", text: env.RECENSE_PRIVATE_TERMS });
   let ignoredAllowed = false;
   for (const source of sources) {
     source.text.split(/\r?\n/).forEach((raw, index) => {
       if (/[\r\u2028\u2029\u0085\v\f]/u.test(raw))
-        throw new PublicCheckError(1, `check:public: invalid line separator in ${source.kind === "file" ? "private terms list" : "EMEND_PRIVATE_TERMS"} at line ${index + 1}`);
+        throw new PublicCheckError(1, `check:public: invalid line separator in ${source.kind === "file" ? "private terms list" : "RECENSE_PRIVATE_TERMS"} at line ${index + 1}`);
       // Comment syntax belongs to the raw list, before decoding escapes or stripping invisibles.
       const trimmed = raw.trim();
       if (!trimmed || trimmed.startsWith("#")) return;
       if (source.kind === "file" && /\s#/u.test(trimmed))
         throw new PublicCheckError(1, `check:public: inline comment in private terms list at line ${index + 1}`);
-      const location = `${source.kind === "file" ? "private terms list" : "EMEND_PRIVATE_TERMS"}:${index + 1}`;
+      const location = `${source.kind === "file" ? "private terms list" : "RECENSE_PRIVATE_TERMS"}:${index + 1}`;
       const value = normalizeText(raw, location).text.trim();
       if (!value) return;
       if (value.startsWith("!")) {
@@ -488,7 +488,7 @@ export function loadPrivateTerms(
       } else result.terms.push({ value, line: index + 1, source: source.kind });
     });
   }
-  if (ignoredAllowed) result.notes.push("check:public: allowed phrases in EMEND_PRIVATE_TERMS are ignored");
+  if (ignoredAllowed) result.notes.push("check:public: allowed phrases in RECENSE_PRIVATE_TERMS are ignored");
   if (!sources.some((source) => source.kind === "file")) {
     if (options.requireTerms)
       throw new PublicCheckError(1,

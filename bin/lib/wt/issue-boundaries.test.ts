@@ -71,7 +71,7 @@ async function boundary(
   const repo: Repo = {
     mainRoot: top,
     callerTop: top,
-    callerBranch: "emend-42-fix",
+    callerBranch: "recense-42-fix",
     commonDir: join(top, ".git"),
     worktreesDir: join(top, "worktrees"),
   };
@@ -88,7 +88,7 @@ async function boundary(
     label: READY_LABEL as unknown,
     prTitle: "Fix pane",
     prBody: "Closes #42",
-    prBranch: "emend-42-fix",
+    prBranch: "recense-42-fix",
     mergeView: {} as Record<string, unknown>,
     extraPrs: [] as Record<string, unknown>[],
     closing: null as Reply | null,
@@ -134,7 +134,7 @@ async function boundary(
         return {
           stdout:
             state.branches?.map((b) => `refs/heads/${b}`).join("\n") ??
-            (state.taken ? "refs/heads/emend-42-other\n" : ""),
+            (state.taken ? "refs/heads/recense-42-other\n" : ""),
         };
       if (args.includes("ls-remote"))
         return {
@@ -269,13 +269,13 @@ async function boundary(
   );
   syncBuiltinESMExports();
   // A real executable outside the fixture. The subprocess stub above answers every approval lookup.
-  const previousEmend = process.env.EMEND_BIN;
-  process.env.EMEND_BIN = process.execPath;
+  const previousRecense = process.env.RECENSE_BIN;
+  process.env.RECENSE_BIN = process.execPath;
   try {
     await fn({ repo, calls, state });
   } finally {
-    if (previousEmend === undefined) delete process.env.EMEND_BIN;
-    else process.env.EMEND_BIN = previousEmend;
+    if (previousRecense === undefined) delete process.env.RECENSE_BIN;
+    else process.env.RECENSE_BIN = previousRecense;
     stub.mock.restore();
     syncBuiltinESMExports();
     rmSync(top, { recursive: true, force: true });
@@ -400,7 +400,7 @@ for (const [name, headRefName] of [
   ["number", 42],
   ["object", {}],
   ["empty", ""],
-  ["invalid", "emend-42-.."],
+  ["invalid", "recense-42-.."],
 ] as const) {
   test(`pr merge refuses a ${name} headRefName before closing checks`, () =>
     boundary(({ repo, state, calls }) => {
@@ -428,9 +428,9 @@ for (const [name, headRefName] of [
 test("pr merge requires the caller's branch except with --pr from the main checkout", () =>
   boundary(({ repo, state, calls }) => {
     state.prBody = "Description";
-    state.mergeView = { headRefName: "emend-feature-other" };
+    state.mergeView = { headRefName: "recense-feature-other" };
     const merge = (pr?: string) => prMerge(repo, { pr, matchHead: "a".repeat(40), subject: "T", body: "Body" });
-    for (const top of [repo.mainRoot, join(repo.worktreesDir, "emend-42-fix")]) {
+    for (const top of [repo.mainRoot, join(repo.worktreesDir, "recense-42-fix")]) {
       repo.callerTop = top;
       for (const pr of [undefined, "7"]) {
         if (top === repo.mainRoot && pr !== undefined) continue;
@@ -458,7 +458,7 @@ test("pr merge requires the caller's branch except with --pr from the main check
     state.prBody = "Description";
     state.closing = { stdout: closingResponse() };
     assert.throws(merge.bind(null, "7"), /Run issue check inside/);
-    state.mergeView = { headRefName: "emend-feature-other" };
+    state.mergeView = { headRefName: "recense-feature-other" };
     assert.equal(merge("7"), `MERGED ${"c".repeat(40)}`);
   }));
 
@@ -471,23 +471,23 @@ for (const text of [
 ]) {
   test(`closing guard accepts ordinary prose: ${text}`, () =>
     boundary(({ repo }) => {
-      closingGuard(repo, "emend-feature-x", text);
-      closingGuard(repo, "emend-42-x", `${text}\n\nCloses #42`);
+      closingGuard(repo, "recense-feature-x", text);
+      closingGuard(repo, "recense-42-x", `${text}\n\nCloses #42`);
     }));
 }
 
 for (const text of ["Closes [the bug](https://github.com/o/r/issues/7)", "Closes <https://github.com/o/r/issues/7>"]) {
   test(`closing guard refuses a foreign issue link: ${text}`, () =>
     boundary(({ repo }) => {
-      assert.throws(() => closingGuard(repo, "emend-feature-x", text), /only issue branches/i);
-      assert.throws(() => closingGuard(repo, "emend-42-x", `Closes #42\n${text}`), /must not close/);
+      assert.throws(() => closingGuard(repo, "recense-feature-x", text), /only issue branches/i);
+      assert.throws(() => closingGuard(repo, "recense-42-x", `Closes #42\n${text}`), /must not close/);
     }));
 }
 
 test("closing positions honor keyword boundaries and stop at ordinary prose", () =>
   boundary(({ repo }) => {
     for (const keyword of ["CLOSE", "closes", "Closed", "FIX", "fixes", "Fixed", "RESOLVE", "resolves", "Resolved"]) {
-      for (const branch of ["feature", "emend-42-x"]) {
+      for (const branch of ["feature", "recense-42-x"]) {
         const prefix = branch === "feature" ? "" : "Closes #42\n";
         for (const token of ["#9", "GH-9", "other/repo#42", "github.com/o/r/issues/9"]) {
           closingGuard(repo, branch, `${prefix}${keyword} see ${token}`);
@@ -509,16 +509,16 @@ test("closing positions honor keyword boundaries and stop at ordinary prose", ()
       "Fixes see\r\n#9",
     ])
       closingGuard(repo, "feature", text);
-    closingGuard(repo, "emend-42-x", "Closes #42");
-    assert.throws(() => closingGuard(repo, "emend-42-x", "Fixes see #42"), /must close/);
+    closingGuard(repo, "recense-42-x", "Closes #42");
+    assert.throws(() => closingGuard(repo, "recense-42-x", "Fixes see #42"), /must close/);
   }));
 
 for (const command of ["create", "edit", "merge"] as const) {
-  for (const branch of ["emend-42-x", "feature"]) {
+  for (const branch of ["recense-42-x", "feature"]) {
     test(`GitHub closing references gate ${command} on ${branch}`, () =>
       boundary(({ repo, state, calls }) => {
         repo.callerBranch = state.prBranch = branch;
-        const issueBranch = branch === "emend-42-x";
+        const issueBranch = branch === "recense-42-x";
         state.prBody = issueBranch ? "Closes #42" : "Description";
         if (command === "merge" && issueBranch) prepareMergeIssue(repo);
         const invoke = () => {
@@ -706,7 +706,7 @@ test("queue, show and check preserve allowed Markdown, bare URLs and attachments
     const shown = await output(() => commands.issue?.({ repo, args: ["show", "42"] }));
     assert.equal(
       shown,
-      `# Fix the review pane\n${state.issue.url}\nThe issue body as its owner wrote it, in Markdown.\n\n${body.replaceAll("\r\n", "\n")}`,
+      `# Fix review pane\n${state.issue.url}\nThe issue body as its owner wrote it, in Markdown.\n\n${body.replaceAll("\r\n", "\n")}`,
     );
     const rows = JSON.parse(await output(() => commands.issues?.({ repo, args: ["--json"] })));
     assert.equal(rows[0].status, "pickable");
@@ -864,10 +864,10 @@ test("Markdown own references satisfy the requirement without hiding other refer
       "Closes **#42abc**",
       "Closes [#42abc](https://example.invalid)",
     ])
-      assert.throws(() => closingGuard(repo, "emend-42-fix", body), /must close/);
+      assert.throws(() => closingGuard(repo, "recense-42-fix", body), /must close/);
   }));
 
-for (const branch of ["emend-feature-042-task", "manual-change"]) {
+for (const branch of ["recense-feature-042-task", "manual-change"]) {
   test(`only issue branches may close issues: ${branch}`, () =>
     boundary(({ repo, state, calls }) => {
       repo.callerBranch = branch;
@@ -983,14 +983,14 @@ test("closing references resolve repositories case-insensitively for every keywo
         "https://www.github.com/owner/repo/issues/42/",
       ]) {
         for (const colon of ["", ":"])
-          closingGuard(repo, "emend-42-fix", `${keyword.toUpperCase()}${colon}\t${reference}`);
+          closingGuard(repo, "recense-42-fix", `${keyword.toUpperCase()}${colon}\t${reference}`);
       }
     }
     assert.throws(
-      () => closingGuard(repo, "emend-42-fix", "Closes #42\nFixes GH-42"),
+      () => closingGuard(repo, "recense-42-fix", "Closes #42\nFixes GH-42"),
       (e: unknown) => e instanceof WtError && e.message === unparsedClosingReference,
     );
-    assert.throws(() => closingGuard(repo, "emend-42-fix", "Closes GH-42"), /must close/);
+    assert.throws(() => closingGuard(repo, "recense-42-fix", "Closes GH-42"), /must close/);
     assert.throws(() => closingGuard(repo, "feature", "Closes other/repo#9"), /only issue branches/i);
   }));
 
@@ -1168,11 +1168,11 @@ for (const text of ["cloſes #7", "ﬁxes #7", "Closes ＃７", "ＦＩＸＥＳ
   test(`closing guard refuses normalized Unicode references: ${text}`, () =>
     boundary(({ repo }) => {
       assert.throws(
-        () => closingGuard(repo, "emend-feature-x", text),
+        () => closingGuard(repo, "recense-feature-x", text),
         (e: unknown) => e instanceof WtError && e.code === 2,
       );
       assert.throws(
-        () => closingGuard(repo, "emend-42-x", `Closes #42\n${text}`),
+        () => closingGuard(repo, "recense-42-x", `Closes #42\n${text}`),
         (e: unknown) => e instanceof WtError && e.code === 2,
       );
     }));
@@ -1180,10 +1180,10 @@ for (const text of ["cloſes #7", "ﬁxes #7", "Closes ＃７", "ＦＩＸＥＳ
 
 test("normalized closing positions distinguish prose from direct references", () =>
   boundary(({ repo }) => {
-    closingGuard(repo, "emend-42-x", "ｃｌｏｓｅｓ #42");
-    closingGuard(repo, "emend-42-x", "ｃｌｏｓｅｓ #42\nＦＩＸＥＳ see ＃７");
+    closingGuard(repo, "recense-42-x", "ｃｌｏｓｅｓ #42");
+    closingGuard(repo, "recense-42-x", "ｃｌｏｓｅｓ #42\nＦＩＸＥＳ see ＃７");
     assert.throws(
-      () => closingGuard(repo, "emend-42-x", "ｃｌｏｓｅｓ #42\nＦＩＸＥＳ `＃７`"),
+      () => closingGuard(repo, "recense-42-x", "ｃｌｏｓｅｓ #42\nＦＩＸＥＳ `＃７`"),
       (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
     );
   }));
@@ -1196,7 +1196,7 @@ for (const command of ["create", "edit", "merge"] as const) {
       state.pr = command !== "create";
       state.extraPrs = [
         { number: 8, state: "OPEN", headRefName: state.prBranch, isCrossRepository: true },
-        { number: 9, state: "OPEN", headRefName: "emend-99-other", isCrossRepository: false },
+        { number: 9, state: "OPEN", headRefName: "recense-99-other", isCrossRepository: false },
         { number: 10, state: "CLOSED", headRefName: state.prBranch, isCrossRepository: false },
       ];
       state.closing = { stdout: closingResponse([ownClosingIssue]) };
@@ -1282,15 +1282,15 @@ for (const text of [
 ]) {
   test(`closing guard accepts incidental references in prose: ${text}`, () =>
     boundary(({ repo }) => {
-      closingGuard(repo, "emend-feature-x", text);
-      closingGuard(repo, "emend-42-x", `${text}\n\nCloses #42`);
+      closingGuard(repo, "recense-feature-x", text);
+      closingGuard(repo, "recense-42-x", `${text}\n\nCloses #42`);
     }));
 }
 
 test("closing guard stops after the next ordinary token on the following line", () =>
   boundary(({ repo }) => {
     writeFileSync(join(repo.mainRoot, ".wt/worktree.json"), JSON.stringify({ issue: 9 }));
-    closingGuard(repo, "emend-9-x", "Closes #9\nsee step #2 of the plan");
+    closingGuard(repo, "recense-9-x", "Closes #9\nsee step #2 of the plan");
   }));
 
 for (const [text, message] of [
@@ -1305,7 +1305,7 @@ for (const [text, message] of [
     boundary(({ repo }) => {
       writeFileSync(join(repo.mainRoot, ".wt/worktree.json"), JSON.stringify({ issue: 9 }));
       assert.throws(
-        () => closingGuard(repo, "emend-9-x", `Closes #9\n${text}`),
+        () => closingGuard(repo, "recense-9-x", `Closes #9\n${text}`),
         (e: unknown) => e instanceof WtError && e.code === 2 && e.message === message,
       );
     }));
@@ -1315,7 +1315,7 @@ test("closing positions cannot hide references behind more than 80 characters of
   boundary(({ repo }) => {
     for (const text of [`Fixes \`${" ".repeat(81)}#7\``, `Closes #42${" ".repeat(81)}and #7`]) {
       assert.throws(
-        () => closingGuard(repo, "emend-42-x", `Closes #42\n${text}`),
+        () => closingGuard(repo, "recense-42-x", `Closes #42\n${text}`),
         (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
       );
     }
@@ -1329,9 +1329,9 @@ for (const text of [
 ]) {
   test(`prose before references is accepted across PR commands: ${text}`, () =>
     boundary(({ repo, state }) => {
-      for (const branch of ["emend-feature-x", "emend-42-x"]) {
+      for (const branch of ["recense-feature-x", "recense-42-x"]) {
         repo.callerBranch = state.prBranch = branch;
-        const issueBranch = branch === "emend-42-x";
+        const issueBranch = branch === "recense-42-x";
         if (issueBranch) prepareMergeIssue(repo);
         const body = `${issueBranch ? "Closes #42\n" : ""}${text}`;
         state.prTitle = text;
@@ -1356,7 +1356,7 @@ for (const destination of [
   test(`consumed closing links inspect the entire destination: ${JSON.stringify(destination)}`, () =>
     boundary(({ repo }) => {
       assert.throws(
-        () => closingGuard(repo, "emend-42-x", `Closes [#42](${destination})`),
+        () => closingGuard(repo, "recense-42-x", `Closes [#42](${destination})`),
         (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
       );
     }));
@@ -1371,8 +1371,8 @@ for (const text of [
 ]) {
   test(`indirect closing links fail closed: ${text}`, () =>
     boundary(({ repo }) => {
-      for (const branch of ["emend-feature-x", "emend-42-x"]) {
-        const body = `${branch === "emend-42-x" ? "Closes #42\n" : ""}${text}`;
+      for (const branch of ["recense-feature-x", "recense-42-x"]) {
+        const body = `${branch === "recense-42-x" ? "Closes #42\n" : ""}${text}`;
         assert.throws(
           () => closingGuard(repo, branch, body),
           (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
@@ -1385,11 +1385,11 @@ for (const entity of ["&#35;", "&#00035;", "&#x23;", "&#X00023;"]) {
   test(`closing references decode number-sign entity ${entity}`, () =>
     boundary(({ repo }) => {
       assert.throws(
-        () => closingGuard(repo, "emend-feature-x", `Fixes ${entity}13`),
+        () => closingGuard(repo, "recense-feature-x", `Fixes ${entity}13`),
         (e: unknown) => e instanceof WtError && e.code === 2 && e.message === "Only issue branches may close issues.",
       );
       writeFileSync(join(repo.mainRoot, ".wt/worktree.json"), JSON.stringify({ issue: 13 }));
-      closingGuard(repo, "emend-13-x", `Closes ${entity}13`);
+      closingGuard(repo, "recense-13-x", `Closes ${entity}13`);
     }));
 }
 
@@ -1397,9 +1397,9 @@ test("closing reference chains check the last operand without a length bound", (
   boundary(({ repo }) => {
     writeFileSync(join(repo.mainRoot, ".wt/worktree.json"), JSON.stringify({ issue: 12 }));
     const own = Array(30).fill("#12").join(", ");
-    closingGuard(repo, "emend-12-x", `Fixes ${own}`);
+    closingGuard(repo, "recense-12-x", `Fixes ${own}`);
     assert.throws(
-      () => closingGuard(repo, "emend-12-x", `Fixes ${own}, #13`),
+      () => closingGuard(repo, "recense-12-x", `Fixes ${own}, #13`),
       (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
     );
   }));
@@ -1407,7 +1407,7 @@ test("closing reference chains check the last operand without a length bound", (
 for (const [name, headRefName] of [
   ["missing", undefined],
   ["null", null],
-  ["invalid", "emend-42-.."],
+  ["invalid", "recense-42-.."],
 ] as const) {
   test(`pr edit --pr refuses a ${name} headRefName before mutation`, () =>
     boundary(({ repo, state, calls }) => {
@@ -1422,8 +1422,8 @@ for (const [name, headRefName] of [
 
 test("pr edit --pr permits another valid head only from the main checkout", () =>
   boundary(({ repo, state, calls }) => {
-    repo.callerTop = join(repo.worktreesDir, "emend-42-fix");
-    state.mergeView = { headRefName: "emend-feature-other" };
+    repo.callerTop = join(repo.worktreesDir, "recense-42-fix");
+    state.mergeView = { headRefName: "recense-feature-other" };
     assert.throws(() => prEdit(repo, { pr: "7", body: "Body" }), /head branch does not match the caller/);
     assertReadOnlyPrLookups(calls);
     repo.callerTop = repo.mainRoot;
@@ -1506,7 +1506,7 @@ for (const text of [
   test(`closing links inspect references throughout both fields: ${text}`, () =>
     boundary(({ repo }) => {
       assert.throws(
-        () => closingGuard(repo, "emend-42-x", text),
+        () => closingGuard(repo, "recense-42-x", text),
         (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
       );
     }));
@@ -1514,18 +1514,18 @@ for (const text of [
 
 test("own closing links and unrelated prose do not require an unrelated repository lookup", () =>
   boundary(({ repo, calls }) => {
-    closingGuard(repo, "emend-42-x", "Closes [#42](docs)\nSee other/repo#9 for context.");
+    closingGuard(repo, "recense-42-x", "Closes [#42](docs)\nSee other/repo#9 for context.");
     assert.ok(!calls.some((call) => call.command === "git" && call.args.includes("get-url")));
-    closingGuard(repo, "emend-42-x", 'Closes #42\nFixes <a href="https://github.com/owner/repo/issues/42">x</a>');
+    closingGuard(repo, "recense-42-x", 'Closes #42\nFixes <a href="https://github.com/owner/repo/issues/42">x</a>');
   }));
 
 test("closing scans handle many malformed openers and a long own-reference chain", () =>
   boundary(({ repo }) => {
-    closingGuard(repo, "emend-feature-x", `${"Fixes <text ".repeat(2000)}${" ".repeat(2000)}>`);
+    closingGuard(repo, "recense-feature-x", `${"Fixes <text ".repeat(2000)}${" ".repeat(2000)}>`);
     const chain = Array(2000).fill("#42").join(", ");
-    closingGuard(repo, "emend-42-x", `Closes ${chain}`);
+    closingGuard(repo, "recense-42-x", `Closes ${chain}`);
     assert.throws(
-      () => closingGuard(repo, "emend-42-x", `Closes ${chain}, #9`),
+      () => closingGuard(repo, "recense-42-x", `Closes ${chain}, #9`),
       (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
     );
   }));
@@ -1547,12 +1547,12 @@ test("64k fix-hyphen closing scan bounds repository-prefix probes", () =>
       return original.call(this, input);
     });
     try {
-      closingGuard(repo, "emend-feature-x", body);
+      closingGuard(repo, "recense-feature-x", body);
     } finally {
       probe.mock.restore();
     }
     assert.throws(
-      () => closingGuard(repo, "emend-feature-x", `${body}\nCloses #9`),
+      () => closingGuard(repo, "recense-feature-x", `${body}\nCloses #9`),
       (e: unknown) => e instanceof WtError && e.code === 2,
     );
   }));
@@ -1560,9 +1560,9 @@ test("64k fix-hyphen closing scan bounds repository-prefix probes", () =>
 test("indexed closing references preserve emphasis around qualified references", () =>
   boundary(({ repo }) => {
     for (const marks of ["_", "__", "___", "*", "**", "~~"]) {
-      closingGuard(repo, "emend-42-x", `Closes ${marks}owner/repo#42${marks}`);
+      closingGuard(repo, "recense-42-x", `Closes ${marks}owner/repo#42${marks}`);
       assert.throws(
-        () => closingGuard(repo, "emend-42-x", `Closes #42\nFixes ${marks}other/repo#42${marks}`),
+        () => closingGuard(repo, "recense-42-x", `Closes #42\nFixes ${marks}other/repo#42${marks}`),
         (e: unknown) => e instanceof WtError && e.code === 2,
       );
     }
@@ -1580,8 +1580,8 @@ for (const [failure, message] of [
   ["edited snapshot", ".wt/issue.md differs from the snapshot."],
   ["changed body", "Live issue body differs from the snapshot."],
   ["lost approval", "Issue #42 is untrusted: ready was not added by the repository owner."],
-  ["another claim", "Issue #42 is taken: local branch emend-42-other."],
-  ["main checkout", "Run issue check inside an emend-<n>-<slug> issue worktree."],
+  ["another claim", "Issue #42 is taken: local branch recense-42-other."],
+  ["main checkout", "Run issue check inside a recense-<n>-<slug> issue worktree."],
 ] as const) {
   test(`issue PR merge runs issue check: ${failure}`, () =>
     boundary(({ repo, state, calls }) => {
@@ -1623,15 +1623,15 @@ for (const metadata of [undefined, {}, { issue: null }, { task: "042" }]) {
       }
       for (const text of ["Closes #42", "Fixes &#35;42", "Closes [the bug][ref]", "Closes #42, #9"]) {
         assert.throws(
-          () => closingGuard(repo, "emend-42-x", text),
+          () => closingGuard(repo, "recense-42-x", text),
           (e: unknown) => e instanceof WtError && e.code === 2,
         );
       }
     }));
 }
 
-for (const branch of ["emend-42-issue", "emend-042-task", "emend-0-zero", "emend-100-task"]) {
-  test(`setup refuses numeric emend branch without issue: ${branch}`, () =>
+for (const branch of ["recense-42-issue", "recense-042-task", "recense-0-zero", "recense-100-task"]) {
+  test(`setup refuses numeric recense branch without issue: ${branch}`, () =>
     boundary(({ repo, calls }) => {
       assert.throws(
         () => setup(repo, { branch, busy: new Set() }),
@@ -1639,7 +1639,7 @@ for (const branch of ["emend-42-issue", "emend-042-task", "emend-0-zero", "emend
       );
       assert.equal(calls.length, 0);
     }));
-  test(`setup command refuses numeric emend branch without issue before checking ports: ${branch}`, () =>
+  test(`setup command refuses numeric recense branch without issue before checking ports: ${branch}`, () =>
     boundary(async ({ repo, calls }) => {
       await assert.rejects(
         async () => worktreeCommands.setup?.({ repo, args: [branch] }),
@@ -1652,7 +1652,7 @@ for (const branch of ["emend-42-issue", "emend-042-task", "emend-0-zero", "emend
 test("setup requires its branch number to match the supplied issue", () =>
   boundary(({ repo, calls }) => {
     assert.throws(
-      () => setup(repo, { branch: "emend-42-issue", issue: 9, busy: new Set() }),
+      () => setup(repo, { branch: "recense-42-issue", issue: 9, busy: new Set() }),
       (e: unknown) => e instanceof WtError && e.code === 2 && /match --issue/.test(e.message),
     );
     assert.equal(calls.length, 0);
@@ -1668,11 +1668,11 @@ for (const [name, text] of [
   test(`closing keyword scan enters consumed anchor attributes: ${name}`, () =>
     boundary(({ repo }) => {
       assert.throws(
-        () => closingGuard(repo, "emend-feature-x", text),
+        () => closingGuard(repo, "recense-feature-x", text),
         (e: unknown) => e instanceof WtError && e.code === 2 && e.message === "Only issue branches may close issues.",
       );
       assert.throws(
-        () => closingGuard(repo, "emend-42-x", `Closes #42\n${text}`),
+        () => closingGuard(repo, "recense-42-x", `Closes #42\n${text}`),
         (e: unknown) =>
           e instanceof WtError && e.code === 2 && e.message === "The PR text must not close an issue other than #42.",
       );
@@ -1686,7 +1686,7 @@ test("64k overlapping closing anchors fail closed within a linear inspection bud
     const body = `${prefix}${" ".repeat(65_536 - prefix.length - suffix.length)}${suffix}`;
     assert.equal(body.length, 65_536);
     assert.throws(
-      () => closingGuard(repo, "emend-feature-x", body),
+      () => closingGuard(repo, "recense-feature-x", body),
       (e: unknown) => e instanceof WtError && e.code === 2 && /overlapping closing links/.test(e.message),
     );
   }));
@@ -1694,9 +1694,9 @@ test("64k overlapping closing anchors fail closed within a linear inspection bud
 for (const mark of ["\u0315", "\u093e", "\u20dd", "\u{1d165}"]) {
   test(`closing guard bounds consecutive combining marks: ${mark.codePointAt(0)?.toString(16)}`, () =>
     boundary(({ repo }) => {
-      closingGuard(repo, "emend-feature-x", `a${mark.repeat(32)}b${mark.repeat(32)}`);
+      closingGuard(repo, "recense-feature-x", `a${mark.repeat(32)}b${mark.repeat(32)}`);
       assert.throws(
-        () => closingGuard(repo, "emend-feature-x", `a${mark.repeat(33)}`),
+        () => closingGuard(repo, "recense-feature-x", `a${mark.repeat(33)}`),
         (e: unknown) => e instanceof WtError && e.code === 2 && /consecutive combining marks/.test(e.message),
       );
     }));
@@ -1714,14 +1714,14 @@ test("64k combining-mark attack is refused before Unicode normalization", () =>
     });
     try {
       assert.throws(
-        () => closingGuard(repo, "emend-feature-x", body),
+        () => closingGuard(repo, "recense-feature-x", body),
         (e: unknown) => e instanceof WtError && e.code === 2 && /consecutive combining marks/.test(e.message),
       );
       assert.equal(normalize.mock.callCount(), 1);
     } finally {
       normalize.mock.restore();
     }
-    closingGuard(repo, "emend-feature-x", "a\u0315".repeat(32_768));
+    closingGuard(repo, "recense-feature-x", "a\u0315".repeat(32_768));
   }));
 
 test("64k compatibility combining marks are refused before whole-text normalization", () =>
@@ -1739,18 +1739,18 @@ test("64k compatibility combining marks are refused before whole-text normalizat
     });
     try {
       assert.throws(
-        () => closingGuard(repo, "emend-feature-x", body),
+        () => closingGuard(repo, "recense-feature-x", body),
         (e: unknown) => e instanceof WtError && e.code === 2 && /consecutive combining marks/.test(e.message),
       );
       assert.deepEqual(normalized, ["\uff9e"], "cache each code point's compatibility classification");
     } finally {
       normalize.mock.restore();
     }
-    closingGuard(repo, "emend-feature-x", "a\uff9e".repeat(32_768));
+    closingGuard(repo, "recense-feature-x", "a\uff9e".repeat(32_768));
     for (const mark of ["\uff9e", "\uff9f"]) {
-      closingGuard(repo, "emend-feature-x", `a${mark.repeat(32)}`);
+      closingGuard(repo, "recense-feature-x", `a${mark.repeat(32)}`);
       assert.throws(
-        () => closingGuard(repo, "emend-feature-x", `a${mark.repeat(33)}`),
+        () => closingGuard(repo, "recense-feature-x", `a${mark.repeat(33)}`),
         (e: unknown) => e instanceof WtError && e.code === 2 && /consecutive combining marks/.test(e.message),
       );
     }
@@ -1785,7 +1785,7 @@ for (const metadata of [undefined, {}, { issue: null }, { issue: 9 }]) {
       });
       try {
         assert.throws(
-          () => closingGuard(repo, "emend-42-x", "Plain description"),
+          () => closingGuard(repo, "recense-42-x", "Plain description"),
           (e: unknown) => e instanceof WtError && e.code === 2 && /issue.*match.*branch/i.test(e.message),
         );
         assert.equal(normalize.mock.callCount(), 0);
@@ -1811,9 +1811,9 @@ for (const text of [
 ]) {
   test(`closing guard refuses obscured closing reference: ${text}`, () =>
     boundary(({ repo }) => {
-      for (const branch of ["emend-feature-x", "emend-42-x"]) {
+      for (const branch of ["recense-feature-x", "recense-42-x"]) {
         assert.throws(
-          () => closingGuard(repo, branch, `${branch === "emend-42-x" ? "Closes #42\n" : ""}${text}`),
+          () => closingGuard(repo, branch, `${branch === "recense-42-x" ? "Closes #42\n" : ""}${text}`),
           (e: unknown) => e instanceof WtError && e.code === 2,
         );
       }
@@ -1842,7 +1842,7 @@ test("setup --issue checks owner approval before creating a worktree", () =>
       timelineItems: { nodes: [issueEvent("outsider")], pageInfo: { hasPreviousPage: false } },
     });
     assert.throws(
-      () => setup(repo, { branch: "emend-42-x", issue: 42, busy: new Set() }),
+      () => setup(repo, { branch: "recense-42-x", issue: 42, busy: new Set() }),
       (e: unknown) =>
         e instanceof WtError && e.code === 2 && /ready was not added by the repository owner/.test(e.message),
     );
@@ -1877,14 +1877,14 @@ test("queue indexes branch claims once across many issues", () =>
   boundary(({ repo, state }) => {
     const count = 200;
     state.queue = Array.from({ length: count }, (_, i) => readyIssue(i + 1));
-    state.branches = Array.from({ length: count }, (_, i) => `emend-${i + 1000}-synthetic`);
+    state.branches = Array.from({ length: count }, (_, i) => `recense-${i + 1000}-synthetic`);
     const original = String.prototype.startsWith;
     let probes = 0;
     const probe = mock.method(
       String.prototype,
       "startsWith",
       function (this: string, prefix: string, position?: number) {
-        if (/^emend-[0-9]+-$/u.test(prefix)) {
+        if (/^recense-[0-9]+-$/u.test(prefix)) {
           probes++;
           assert.ok(probes <= count * 2, "claims must not be rescanned per issue");
         }
@@ -1926,7 +1926,7 @@ test("caller PR lookup excludes a different author even when its branch name mat
     assert.equal(prEdit(repo, { body: "Closes #42" }), "changed");
   }));
 
-for (const branch of ["emend-042-x", "emend-0-x"]) {
+for (const branch of ["recense-042-x", "recense-0-x"]) {
   test(`closing guard refuses unregistered numeric branch before reading text: ${branch}`, () =>
     boundary(({ repo }) => {
       assert.throws(
@@ -1946,15 +1946,15 @@ test("closing guard preserves emphasized own references and trailing word fragme
       "Closes #42\nprefix#5",
       "Closes #42\nfoo#5",
     ]) {
-      assert.doesNotThrow(() => closingGuard(repo, "emend-42-x", body), body);
+      assert.doesNotThrow(() => closingGuard(repo, "recense-42-x", body), body);
     }
   }));
 
 test("closing guard still refuses direct and explicitly joined ambiguous references", () =>
   boundary(({ repo }) => {
     for (const reference of ["# 5", "owner#5", "owner/repo#5"]) {
-      for (const branch of ["emend-feature-x", "emend-42-x"]) {
-        const prefix = branch === "emend-42-x" ? "Closes #42\n" : "";
+      for (const branch of ["recense-feature-x", "recense-42-x"]) {
+        const prefix = branch === "recense-42-x" ? "Closes #42\n" : "";
         assert.throws(
           () => closingGuard(repo, branch, `${prefix}Fixes ${reference}`),
           (e: unknown) => e instanceof WtError && e.code === 2,
@@ -1963,7 +1963,7 @@ test("closing guard still refuses direct and explicitly joined ambiguous referen
       }
       for (const separator of [", ", "; ", " & ", " and ", " or ", " and\n"]) {
         assert.throws(
-          () => closingGuard(repo, "emend-42-x", `Closes #42${separator}${reference}`),
+          () => closingGuard(repo, "recense-42-x", `Closes #42${separator}${reference}`),
           (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
           `${separator}${reference}`,
         );
@@ -1971,7 +1971,7 @@ test("closing guard still refuses direct and explicitly joined ambiguous referen
     }
     for (const reference of ["#5", "# 5", "owner/repo#5"]) {
       assert.throws(
-        () => closingGuard(repo, "emend-42-x", `Closes #42\n${reference}`),
+        () => closingGuard(repo, "recense-42-x", `Closes #42\n${reference}`),
         (e: unknown) => e instanceof WtError && e.code === 2 && e.message === unparsedClosingReference,
         reference,
       );
@@ -2076,7 +2076,7 @@ test("pr number rejects an unsupported state before lookup", () =>
 for (const tail of [', "#6"', ", \\#6", ' and "#6"', ", \u200b#6", ", - #6", ", \u{e0100}#6"]) {
   test(`closing chains skip obscuring characters before every reference: ${tail}`, () =>
     boundary(({ repo }) => {
-      assert.throws(() => closingGuard(repo, "emend-42-x", `Closes #42${tail}`), {
+      assert.throws(() => closingGuard(repo, "recense-42-x", `Closes #42${tail}`), {
         code: 2,
         message: unparsedClosingReference,
       });
@@ -2086,12 +2086,12 @@ for (const tail of [', "#6"', ", \\#6", ' and "#6"', ", \u200b#6", ", - #6", ", 
 for (const source of ["local", "remote", "registry", "PR"]) {
   test(`oversized ${source} claims do not abort queue, show, pick, check or merge`, () =>
     boundary(async ({ repo, state }) => {
-      const branch = "emend-99999999999999999999-x";
+      const branch = "recense-99999999999999999999-x";
       if (source === "local") state.branches = [branch];
       if (source === "remote") state.remoteBranches = [branch];
       if (source === "PR") state.claimPrs = [{ number: 8, headRefName: branch }];
       if (source === "registry") {
-        mkdirSync(join(repo.commonDir, "emend-wt"), { recursive: true });
+        mkdirSync(join(repo.commonDir, "recense-wt"), { recursive: true });
         writeFileSync(
           registryPath(repo),
           JSON.stringify({
@@ -2256,7 +2256,7 @@ for (const attack of [
   ]) {
     test(`plain closing instruction survives decoding and NFKC: ${location}: ${attack}`, () =>
       boundary(({ repo, state, calls }) => {
-        repo.callerBranch = state.prBranch = "emend-12-x";
+        repo.callerBranch = state.prBranch = "recense-12-x";
         state.issue = readyIssue(12);
         state.prBody = "Closes #12";
         state.closing = { stdout: closingResponse([{ number: 12, repository: { nameWithOwner: "owner/repo" } }]) };

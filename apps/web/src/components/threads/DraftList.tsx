@@ -1,4 +1,4 @@
-import type { TopicMeta } from "@emend/contract";
+import type { TopicMeta } from "@recense/contract";
 import { MessageSquare, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { clearDraft, listDrafts, loadDraft, type SavedDraft, subscribeDrafts } from "../../lib/drafts.ts";

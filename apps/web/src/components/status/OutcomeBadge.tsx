@@ -1,4 +1,4 @@
-import type { Outcome } from "@emend/contract";
+import type { Outcome } from "@recense/contract";
 import { Ban, Check, MessageSquare, Pause } from "lucide-react";
 import { Icon } from "../ui/Icon.tsx";
 

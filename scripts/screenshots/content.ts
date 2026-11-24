@@ -8,7 +8,7 @@ import { assertInsideRoot } from "./safety.ts";
 export const INSTANCE_ID = "5f0c1d2e-8a4b-4c3d-9e6f-1a2b3c4d5e6f";
 export const MAIN_ISSUE = 212;
 export const MAIN_TITLE = "Pin a review to the top of the inbox";
-export const REMOTE_URL = "https://github.com/example/emend.git";
+export const REMOTE_URL = "https://github.com/example/recense.git";
 
 export const IDENTITY = { name: "Ada Example", email: "ada@example.com" };
 
@@ -25,7 +25,7 @@ export interface RepoPlan {
 // One base commit on main; each branch adds commits from the overlays named here.
 export const BASE: Step = { fixture: "main/base", message: "chore: start from the current inbox" };
 export const MAIN_BRANCH: RepoPlan = {
-  branch: "emend-212-pin-review",
+  branch: "recense-212-pin-review",
   steps: [
     { fixture: "main/c1", message: "feat(db): add pinned_at to reviews" },
     { fixture: "main/c2", message: "feat(api): pin and unpin reviews" },
@@ -35,11 +35,11 @@ export const MAIN_BRANCH: RepoPlan = {
 };
 export const MAIN_FIX: Step = { fixture: "main/c5", message: "fix(api): clear the pin when a review closes" };
 export const DRAFTS_BRANCH: RepoPlan = {
-  branch: "emend-205-keep-drafts",
+  branch: "recense-205-keep-drafts",
   steps: [{ fixture: "b205", message: "feat(ui): keep a draft comment when a new revision arrives" }],
 };
 export const BLOB_BRANCH: RepoPlan = {
-  branch: "emend-209-split-blob-store",
+  branch: "recense-209-split-blob-store",
   steps: [{ fixture: "b209", message: "refactor(core): split the blob store into read and write paths" }],
 };
 

@@ -1,4 +1,4 @@
-import { RepoUrl } from "@emend/contract";
+import { RepoUrl } from "@recense/contract";
 import type { Transformer } from "unified";
 import type { HtmlElement, HtmlNode, HtmlRoot } from "./blocks.ts";
 
@@ -11,7 +11,7 @@ function link(href: string, number: string, text: string): HtmlElement {
   return {
     type: "element",
     tagName: "a",
-    properties: { href, dataEmendIssue: number },
+    properties: { href, dataRecenseIssue: number },
     children: [{ type: "text", value: text }],
   };
 }
@@ -33,7 +33,7 @@ function split(value: string, repoUrl: string): HtmlNode[] | null {
  * Runs after sanitize and before hardenLinks, so the new anchors get the same rel and target as every
  * other link. The base comes from the render's file data, never from a closure: the processor is shared.
  * A link wraps the same text, so block text and ids do not change. Each anchor also carries
- * `data-emend-issue="<number>"`; sanitize ran before and drops author `data-*`, so only these server-made
+ * `data-recense-issue="<number>"`; sanitize ran before and drops author `data-*`, so only these server-made
  * anchors have it, and the app reads it to attach a stored title and state.
  */
 export function linkIssueRefs(): Transformer<HtmlRoot> {

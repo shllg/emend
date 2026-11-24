@@ -14,12 +14,12 @@ export const integrations: readonly Integration[] = [
   {
     id: "status-line",
     name: "Status line",
-    summary: "Shows this branch's review in Claude Code's status line, such as “emend r3 · your turn”.",
+    summary: "Shows this branch's review in Claude Code's status line, such as “recense r3 · your turn”.",
     agents: ["Claude Code"],
     docsHeading: "Show the review in Claude Code's status line",
-    prompt: `Add emend to my Claude Code status line. In my ~/.claude/settings.json, add a statusLine setting of type command that runs emend status --line.
+    prompt: `Add recense to my Claude Code status line. In my ~/.claude/settings.json, add a statusLine setting of type command that runs recense status --line.
 
-Keep any existing status line by printing both: the existing command's output, a separator, then emend's line. Show me the change before saving it.`,
+Keep any existing status line by printing both: the existing command's output, a separator, then recense's line. Show me the change before saving it.`,
   },
 ];
 

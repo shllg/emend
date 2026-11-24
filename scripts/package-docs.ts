@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const names = ["README.md", "LICENSE"];
 
 function matchingCopy(root: string, name: string): boolean {
-  const target = join(root, "apps/emend", name);
+  const target = join(root, "apps/recense", name);
   return (
     Boolean(lstatSync(target, { throwIfNoEntry: false })?.isFile()) &&
     readFileSync(target).equals(readFileSync(join(root, name)))
@@ -14,7 +14,7 @@ function matchingCopy(root: string, name: string): boolean {
 
 export function cleanPackageDocs(root: string): void {
   for (const name of names) {
-    if (matchingCopy(root, name)) rmSync(join(root, "apps/emend", name));
+    if (matchingCopy(root, name)) rmSync(join(root, "apps/recense", name));
   }
 }
 
@@ -22,10 +22,10 @@ export function preparePackageDocs(root: string): void {
   const copied: string[] = [];
   try {
     for (const name of names) {
-      const target = join(root, "apps/emend", name);
+      const target = join(root, "apps/recense", name);
       if (lstatSync(target, { throwIfNoEntry: false })) {
         if (!matchingCopy(root, name)) {
-          throw new Error(`package-docs: apps/emend/${name} differs from the root ${name}; remove it`);
+          throw new Error(`package-docs: apps/recense/${name} differs from the root ${name}; remove it`);
         }
         rmSync(target);
       }
@@ -34,7 +34,7 @@ export function preparePackageDocs(root: string): void {
     }
   } catch (error) {
     for (const name of copied) {
-      if (matchingCopy(root, name)) rmSync(join(root, "apps/emend", name));
+      if (matchingCopy(root, name)) rmSync(join(root, "apps/recense", name));
     }
     throw error;
   }
@@ -43,7 +43,7 @@ export function preparePackageDocs(root: string): void {
 export function requirePnpmPacking(userAgent: string | undefined): void {
   if (!userAgent?.startsWith("pnpm/")) {
     throw new Error(
-      "package-docs: pack @shllg/emend with pnpm (pnpm pack or pnpm publish); npm would publish its private workspace devDependencies.",
+      "package-docs: pack @shllg/recense with pnpm (pnpm pack or pnpm publish); npm would publish its private workspace devDependencies.",
     );
   }
 }

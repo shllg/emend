@@ -1,4 +1,6 @@
-export const SHELL_CACHE_PREFIX = "emend-shell-";
+export const SHELL_CACHE_PREFIX = "recense-shell-";
+// The cache name before the rename; activation clears it so an old shell does not linger.
+const LEGACY_SHELL_CACHE_PREFIX = "emend-shell-";
 export type ShellRoute = "navigation" | "asset";
 
 /** Intercept only known app routes and exact build-listed shell files. */
@@ -39,7 +41,9 @@ export async function shellResponse(
 export async function activateShell(storage: CacheStorage, name: string): Promise<void> {
   await Promise.all(
     (await storage.keys())
-      .filter((key) => key.startsWith(SHELL_CACHE_PREFIX) && key !== name)
+      .filter(
+        (key) => (key.startsWith(SHELL_CACHE_PREFIX) && key !== name) || key.startsWith(LEGACY_SHELL_CACHE_PREFIX),
+      )
       .map((key) => storage.delete(key)),
   );
 }

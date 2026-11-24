@@ -1,5 +1,5 @@
 // @vitest-environment node
-import type { ChartSpec } from "@emend/contract";
+import type { ChartSpec } from "@recense/contract";
 import { expect, test } from "vitest";
 import {
   chartWidth,

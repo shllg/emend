@@ -1,4 +1,4 @@
-import type { NeedsYouKind, RenderedBlock, RevisionView, Target, TopicMeta } from "@emend/contract";
+import type { NeedsYouKind, RenderedBlock, RevisionView, Target, TopicMeta } from "@recense/contract";
 import { TextSelect } from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";

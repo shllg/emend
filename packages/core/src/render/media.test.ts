@@ -1,4 +1,4 @@
-import type { TopicMeta, WriteupInput } from "@emend/contract";
+import type { TopicMeta, WriteupInput } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { describe, expect, test } from "vitest";
 import { blockText, type HtmlElement, visitElements } from "./blocks.ts";
@@ -23,7 +23,7 @@ describe("writeup media", () => {
     const blocks = await render("![Before](media/a.png)");
     expect(blocks).toHaveLength(1);
     expect(blocks[0]?.html).toBe(
-      `<p class="emend-media-row"><span class="emend-media"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async"><span class="emend-media-caption">Before</span></span></p>`,
+      `<p class="recense-media-row"><span class="recense-media"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async"><span class="recense-media-caption">Before</span></span></p>`,
     );
     expect(blocks[0]?.text).toBe("Before");
     expect(blocks[0]?.kind).toBe("paragraph");
@@ -31,7 +31,7 @@ describe("writeup media", () => {
 
   test("uses the file name when the alt text is empty", async () => {
     const blocks = await render("![](media/a.png)");
-    expect(blocks[0]?.html).toContain('<span class="emend-media-caption">a.png</span>');
+    expect(blocks[0]?.html).toContain('<span class="recense-media-caption">a.png</span>');
     expect(blocks[0]?.text).toBe("a.png");
   });
 
@@ -55,7 +55,7 @@ describe("writeup media", () => {
   ])("does not resolve %s", async (_name, src) => {
     const out = await html(`<img src="${src}" alt="x">\n\n![x](<${src}>)`);
     expect(out).not.toMatch(/src=/);
-    expect(out).not.toContain("emend-media");
+    expect(out).not.toContain("recense-media");
     expect(out).not.toContain("/api/v1/media/");
   });
 
@@ -71,12 +71,12 @@ describe("writeup media", () => {
 
   test("keeps author classes prefixed so they cannot forge the generated ones", async () => {
     const out = await html(
-      '<img src="media/a.png" class="emend-media" alt="x">\n\n<span class="emend-media emend-media-row">raw</span>\n\n<p class="emend-media-row">text</p>',
+      '<img src="media/a.png" class="recense-media" alt="x">\n\n<span class="recense-media recense-media-row">raw</span>\n\n<p class="recense-media-row">text</p>',
     );
-    expect(out).toContain('class="user-content-emend-media"');
-    expect(out).toContain('<span class="user-content-emend-media user-content-emend-media-row">raw</span>');
-    expect(out).toContain('<p class="user-content-emend-media-row">text</p>');
-    expect(out.match(/class="emend-media"/g)).toHaveLength(1);
+    expect(out).toContain('class="user-content-recense-media"');
+    expect(out).toContain('<span class="user-content-recense-media user-content-recense-media-row">raw</span>');
+    expect(out).toContain('<p class="user-content-recense-media-row">text</p>');
+    expect(out.match(/class="recense-media"/g)).toHaveLength(1);
   });
 
   test("keeps hostile neighbours inert next to a media image", async () => {
@@ -101,7 +101,7 @@ describe("writeup media", () => {
   ])("drops the absolute image source %s even with media declared", async (src) => {
     const out = await html(`see ![Remote](${src})\n\n<img src="${src}" alt="raw">`);
     expect(out).not.toContain("src=");
-    expect(out).not.toContain("emend-media");
+    expect(out).not.toContain("recense-media");
   });
 
   test("still resolves a declared relative path next to dropped absolute sources", async () => {
@@ -112,13 +112,13 @@ describe("writeup media", () => {
 
   test("marks a paragraph of only images as a row, but not one with text", async () => {
     const two = await html("![Before](media/a.png) ![After](media/b.png)");
-    expect(two).toContain('<p class="emend-media-row emend-media-pair">');
-    expect(two.match(/<span class="emend-media">/g)).toHaveLength(2);
+    expect(two).toContain('<p class="recense-media-row recense-media-pair">');
+    expect(two.match(/<span class="recense-media">/g)).toHaveLength(2);
     const mixed = await html("See ![Before](media/a.png) here");
-    expect(mixed).not.toContain("emend-media-row");
-    expect(mixed).toContain('<span class="emend-media">');
+    expect(mixed).not.toContain("recense-media-row");
+    expect(mixed).toContain('<span class="recense-media">');
     const unresolved = await html("![Before](media/c.png)");
-    expect(unresolved).not.toContain("emend-media-row");
+    expect(unresolved).not.toContain("recense-media-row");
   });
 
   test("changes the block id when the image hash changes and keeps it otherwise", async () => {
@@ -148,7 +148,7 @@ describe("renderWriteup media", () => {
     const byKey = Object.fromEntries(rendered.sections.map((s) => [s.key, s.blocks.map((b) => b.html).join("")]));
     expect(byKey.overview).toContain(`/api/v1/media/${shaA}`);
     expect(byKey.glossary).toContain(`/api/v1/media/${shaB}`);
-    expect(byKey["t-ui-why"]).toContain("emend-media-row");
+    expect(byKey["t-ui-why"]).toContain("recense-media-row");
     expect(byKey.tldr).not.toContain("<img");
   });
 
@@ -175,16 +175,16 @@ describe("writeup media sizes", () => {
 
   test("emits the server's size after the other attributes", async () => {
     expect(await withSizes("![Before](media/a.png)")).toBe(
-      `<p class="emend-media-row"><span class="emend-media emend-media-sized"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="emend-media-caption">Before</span></span></p>`,
+      `<p class="recense-media-row"><span class="recense-media recense-media-sized"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="recense-media-caption">Before</span></span></p>`,
     );
   });
 
   test("marks only wrappers of images with a valid server size", async () => {
     const sized = await withSizes("![Before](media/a.png)");
-    expect(sized).toContain('class="emend-media emend-media-sized"');
+    expect(sized).toContain('class="recense-media recense-media-sized"');
     const unread = await withSizes("![Other](media/b.png)");
-    expect(unread).toContain('class="emend-media"');
-    expect(unread).not.toContain("emend-media-sized");
+    expect(unread).toContain('class="recense-media"');
+    expect(unread).not.toContain("recense-media-sized");
     const invalid = await renderMarkdownWithBudget(
       "![Before](media/a.png)",
       "overview",
@@ -196,21 +196,21 @@ describe("writeup media sizes", () => {
       undefined,
       new Map([[shaA, { width: 0, height: 10 }]]),
     ).then((blocks) => blocks.map((block) => block.html).join("\n"));
-    expect(invalid).toContain('class="emend-media"');
-    expect(invalid).not.toContain("emend-media-sized");
+    expect(invalid).toContain('class="recense-media"');
+    expect(invalid).not.toContain("recense-media-sized");
   });
 
   test("an author cannot forge the sized marker", async () => {
     const out = await withSizes(
-      '<span class="emend-media emend-media-sized"><img src="media/a.png" width="9" height="9"></span>\n\n<img class="emend-media-sized" src="media/b.png" width="9" height="9">\n\n<span class="emend-media-sized">raw</span>',
+      '<span class="recense-media recense-media-sized"><img src="media/a.png" width="9" height="9"></span>\n\n<img class="recense-media-sized" src="media/b.png" width="9" height="9">\n\n<span class="recense-media-sized">raw</span>',
     );
-    expect(out).toContain("user-content-emend-media-sized");
-    expect(out.match(/class="emend-media-sized"/g)).toBeNull();
+    expect(out).toContain("user-content-recense-media-sized");
+    expect(out.match(/class="recense-media-sized"/g)).toBeNull();
     // The only unprefixed marker is on the wrapper the server made for the image it has a size for.
-    expect(out.match(/(?<![-\w])emend-media-sized/g)?.length ?? 0).toBe(
-      out.match(/class="emend-media emend-media-sized"/g)?.length ?? 0,
+    expect(out.match(/(?<![-\w])recense-media-sized/g)?.length ?? 0).toBe(
+      out.match(/class="recense-media recense-media-sized"/g)?.length ?? 0,
     );
-    expect(out).not.toMatch(/<span class="emend-media-sized"/);
+    expect(out).not.toMatch(/<span class="recense-media-sized"/);
   });
 
   test("emits no size for an image the server could not read", async () => {
@@ -275,7 +275,7 @@ describe("writeup media sizes", () => {
       for (const style of out.matchAll(/ style="([^"]*)"/g))
         expect(style[1]).toMatch(/^(--shiki-[a-z]+:#?[\w(),. %-]+;?)+$/i);
     }
-    const sized = rendered.sections.filter((s) => s.blocks.some((b) => b.html.includes("emend-media")));
+    const sized = rendered.sections.filter((s) => s.blocks.some((b) => b.html.includes("recense-media")));
     expect(sized.map((s) => s.key)).toEqual(expect.arrayContaining(["overview", "glossary"]));
     for (const section of sized)
       expect(section.blocks.map((b) => b.html).join("")).toContain('width="640" height="480"');
@@ -299,7 +299,7 @@ describe("Markdown doc images", () => {
   test("uses doc-relative image paths, captions, rows and server sizes", async () => {
     const blocks = await doc('![Before](shots/a.png)\n\n<img src="shots/a.png" alt="After" onerror="bad()" width="9">');
     expect(blocks[0]?.html).toBe(
-      `<p class="emend-media-row"><span class="emend-media emend-media-sized"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="emend-media-caption">Before</span></span></p>`,
+      `<p class="recense-media-row"><span class="recense-media recense-media-sized"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async" width="640" height="480"><span class="recense-media-caption">Before</span></span></p>`,
     );
     expect(blocks[1]?.html).toContain('width="640" height="480"');
     expect(blocks[1]?.html).not.toMatch(/onerror|bad\(\)|width="9"/);
@@ -341,16 +341,16 @@ test.each([
   ["<br> \nThe seed bed fits.", "The seed bed fits."],
 ])("pairs screenshots and preserves the effect after %j", async (suffix, effect) => {
   const [block] = await render(pairMarkdown + suffix);
-  expect(block?.html).toContain('class="emend-media-row emend-media-pair"');
-  expect(block?.html).not.toMatch(/emend-media-pair-diff|emend-media-diff/);
-  if (effect) expect(block?.html).toContain(`<span class="emend-media-effect">${effect}`);
-  else expect(block?.html).not.toContain("emend-media-effect");
+  expect(block?.html).toContain('class="recense-media-row recense-media-pair"');
+  expect(block?.html).not.toMatch(/recense-media-pair-diff|recense-media-diff/);
+  if (effect) expect(block?.html).toContain(`<span class="recense-media-effect">${effect}`);
+  else expect(block?.html).not.toContain("recense-media-effect");
   expect(blockText(block?.html ?? "")).toBe(block?.text);
 });
 
 test("two-image pair markup stays unchanged", async () => {
   expect(await html(`${pairMarkdown}\nThe seed bed fits.`)).toBe(
-    `<p class="emend-media-row emend-media-pair"><span class="emend-media"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${shaB}" alt="After" loading="lazy" decoding="async"><span class="emend-media-caption">After</span></span>\n<span class="emend-media-effect">The seed bed fits.</span></p>`,
+    `<p class="recense-media-row recense-media-pair"><span class="recense-media"><img src="/api/v1/media/${shaA}" alt="Before" loading="lazy" decoding="async"><span class="recense-media-caption">Before</span></span> <span class="recense-media"><img src="/api/v1/media/${shaB}" alt="After" loading="lazy" decoding="async"><span class="recense-media-caption">After</span></span>\n<span class="recense-media-effect">The seed bed fits.</span></p>`,
   );
 });
 
@@ -366,8 +366,8 @@ test.each([
 ])("pairs three screenshots and preserves the effect after %j", async (suffix, effect) => {
   const [block] = await render(diffPairMarkdown + suffix);
   const out = block?.html ?? "";
-  expect(out).toContain('<p class="emend-media-row emend-media-pair emend-media-pair-diff">');
-  expect(out).toContain(`<span class="emend-media emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}"`);
+  expect(out).toContain('<p class="recense-media-row recense-media-pair recense-media-pair-diff">');
+  expect(out).toContain(`<span class="recense-media recense-media-diff"><img src="/api/v1/media/${"c".repeat(64)}"`);
   const paragraph = fromHtml(out, { fragment: true }).children[0];
   if (paragraph?.type !== "element") throw new Error("Missing screenshot paragraph");
   expect(
@@ -375,20 +375,20 @@ test.each([
       .filter((node) => node.type === "element" && node.tagName === "span")
       .map((node) => node.type === "element" && node.properties.className),
   ).toEqual([
-    ["emend-media"],
-    ["emend-media"],
-    ["emend-media", "emend-media-diff"],
-    ...(effect ? [["emend-media-effect"]] : []),
+    ["recense-media"],
+    ["recense-media"],
+    ["recense-media", "recense-media-diff"],
+    ...(effect ? [["recense-media-effect"]] : []),
   ]);
-  if (effect) expect(out).toContain(`<span class="emend-media-effect">${effect}`);
-  else expect(out).not.toContain("emend-media-effect");
+  if (effect) expect(out).toContain(`<span class="recense-media-effect">${effect}`);
+  else expect(out).not.toContain("recense-media-effect");
   expect(blockText(out)).toBe(block?.text);
 });
 
 test("matches trimmed Before/After/Diff alts with extra words case-insensitively", async () => {
   expect(
     await html("![ before change ](media/a.png) ![ AFTER change ](media/b.png) ![ dIfF of the header ](media/x.png)"),
-  ).toContain('class="emend-media-row emend-media-pair emend-media-pair-diff"');
+  ).toContain('class="recense-media-row recense-media-pair recense-media-pair-diff"');
 });
 
 test("a diff image keeps its server-provided sized marker", async () => {
@@ -404,7 +404,7 @@ test("a diff image keeps its server-provided sized marker", async () => {
     new Map([["c".repeat(64), { width: 640, height: 480 }]]),
   );
   expect(block?.html).toContain(
-    `<span class="emend-media emend-media-sized emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff" loading="lazy" decoding="async" width="640" height="480">`,
+    `<span class="recense-media recense-media-sized recense-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff" loading="lazy" decoding="async" width="640" height="480">`,
   );
 });
 
@@ -429,14 +429,14 @@ test.each([
   [`${pairMarkdown} ![Diffusion](media/x.png)`, true],
 ])("keeps non-pair behavior for %s", async (md, row) => {
   const out = await html(md);
-  expect(out).not.toContain("emend-media-pair");
-  expect(out).not.toContain("emend-media-diff");
-  expect(out).not.toContain("emend-media-effect");
-  expect(out.includes("emend-media-row")).toBe(row);
+  expect(out).not.toContain("recense-media-pair");
+  expect(out).not.toContain("recense-media-diff");
+  expect(out).not.toContain("recense-media-effect");
+  expect(out.includes("recense-media-row")).toBe(row);
 });
 
 test("matches trimmed Before/After alts case-insensitively", async () => {
-  expect(await html("![ before change ](media/a.png) ![ AFTER change ](media/b.png)")).toContain("emend-media-pair");
+  expect(await html("![ before change ](media/a.png) ![ AFTER change ](media/b.png)")).toContain("recense-media-pair");
 });
 
 test.each([
@@ -472,15 +472,15 @@ test.each([pairMarkdown, diffPairMarkdown])(
   "effect markup stays sanitized and author classes cannot forge %s",
   async (md) => {
     const out = await html(
-      `${md}\nEffect: <script>bad()</script><img src=x onerror=bad()> <svg onload=bad()></svg> [bad](javascript:bad()) <strong>safe</strong>\n\n<p class="emend-media-pair">Plain</p>\n\n<span class="emend-media-effect">Plain</span>\n\n<p class="emend-media-pair-diff">Plain</p>\n\n<span class="emend-media-diff">Plain</span>`,
+      `${md}\nEffect: <script>bad()</script><img src=x onerror=bad()> <svg onload=bad()></svg> [bad](javascript:bad()) <strong>safe</strong>\n\n<p class="recense-media-pair">Plain</p>\n\n<span class="recense-media-effect">Plain</span>\n\n<p class="recense-media-pair-diff">Plain</p>\n\n<span class="recense-media-diff">Plain</span>`,
     );
-    expect(out).toContain('<span class="emend-media-effect">Effect: ');
-    expect(out).toContain('class="user-content-emend-media-pair"');
-    expect(out).toContain('class="user-content-emend-media-effect"');
-    expect(out).toContain('<p class="user-content-emend-media-pair-diff">Plain</p>');
-    expect(out).toContain('<span class="user-content-emend-media-diff">Plain</span>');
-    expect(out.match(/(?<![-\w])emend-media-pair-diff/g) ?? []).toHaveLength(md === diffPairMarkdown ? 1 : 0);
-    expect(out.match(/(?<![-\w])emend-media-diff/g) ?? []).toHaveLength(md === diffPairMarkdown ? 1 : 0);
+    expect(out).toContain('<span class="recense-media-effect">Effect: ');
+    expect(out).toContain('class="user-content-recense-media-pair"');
+    expect(out).toContain('class="user-content-recense-media-effect"');
+    expect(out).toContain('<p class="user-content-recense-media-pair-diff">Plain</p>');
+    expect(out).toContain('<span class="user-content-recense-media-diff">Plain</span>');
+    expect(out.match(/(?<![-\w])recense-media-pair-diff/g) ?? []).toHaveLength(md === diffPairMarkdown ? 1 : 0);
+    expect(out.match(/(?<![-\w])recense-media-diff/g) ?? []).toHaveLength(md === diffPairMarkdown ? 1 : 0);
     expect(out).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
     expect(out).toContain("<strong>safe</strong>");
   },
@@ -493,7 +493,7 @@ test.each([
   ["array", diffPairMarkdown, 3],
 ] as const)("hostile effects stay inert in a %s glossary with %s", async (kind, md, count) => {
   const source = 'graph TD; A-->B\nclick A "javascript:bad()"';
-  const markdown = `A synthetic comparison.\n\n${md}\nEffect: <script>bad()</script><img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()><circle/></svg> <strong>safe</strong>\n\n<p class="emend-media-pair">A forged pair.</p>\n\n<p class="emend-media-pair-diff">A forged diff pair.</p>\n\n<span class="emend-media-diff">A forged diff.</span>\n\n\`\`\`mermaid\n${source}\n\`\`\``;
+  const markdown = `A synthetic comparison.\n\n${md}\nEffect: <script>bad()</script><img src=x onerror=bad()> [bad](javascript:bad()) <svg onload=bad()><circle/></svg> <strong>safe</strong>\n\n<p class="recense-media-pair">A forged pair.</p>\n\n<p class="recense-media-pair-diff">A forged diff pair.</p>\n\n<span class="recense-media-diff">A forged diff.</span>\n\n\`\`\`mermaid\n${source}\n\`\`\``;
   const writeup = await renderWriteup(
     {
       overview: "",
@@ -510,7 +510,7 @@ test.each([
   for (const block of blocks) {
     expect(block.html).not.toMatch(/<script|<svg|onerror|onload|javascript:/i);
     visitElements(fromHtml(block.html, { fragment: true }), (element) => {
-      if (Array.isArray(element.properties.className) && element.properties.className.includes("emend-media-pair"))
+      if (Array.isArray(element.properties.className) && element.properties.className.includes("recense-media-pair"))
         pairs.push(element);
     });
   }
@@ -518,20 +518,22 @@ test.each([
   expect(pairs).toHaveLength(1);
   expect(pairs[0]?.tagName).toBe("p");
   expect(
-    pairs[0]?.children.filter((node) => node.type === "element" && node.properties.className?.includes("emend-media")),
+    pairs[0]?.children.filter(
+      (node) => node.type === "element" && node.properties.className?.includes("recense-media"),
+    ),
   ).toHaveLength(count);
-  expect(pairs[0]?.properties.className?.includes("emend-media-pair-diff")).toBe(count === 3);
+  expect(pairs[0]?.properties.className?.includes("recense-media-pair-diff")).toBe(count === 3);
   expect(
     pairs[0]?.children.filter(
-      (node) => node.type === "element" && node.properties.className?.includes("emend-media-diff"),
+      (node) => node.type === "element" && node.properties.className?.includes("recense-media-diff"),
     ),
   ).toHaveLength(count === 3 ? 1 : 0);
   expect(
     pairs[0]?.children.some(
-      (node) => node.type === "element" && node.properties.className?.includes("emend-media-effect"),
+      (node) => node.type === "element" && node.properties.className?.includes("recense-media-effect"),
     ),
   ).toBe(true);
-  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-emend-media-pair"');
-  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-emend-media-pair-diff"');
-  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-emend-media-diff"');
+  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-recense-media-pair"');
+  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-recense-media-pair-diff"');
+  expect(blocks.map((block) => block.html).join("")).toContain('class="user-content-recense-media-diff"');
 });

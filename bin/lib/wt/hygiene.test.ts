@@ -124,7 +124,7 @@ test("the merge skill checks the approved review for late feedback before restar
   assert.match(exitOne, /A later run restarts at step 1/);
   assert.match(
     exitOne,
-    /Otherwise the owner typed the command\. Follow step 6 to ask for approval in emend and stop\./,
+    /Otherwise the owner typed the command\. Follow step 6 to ask for approval in recense and stop\./,
   );
   assert.doesNotMatch(exitOne, /before the settle window/);
   assert.match(lookup, /exit 2 or 69[^\n]*notify blocked[^\n]*stop/i);
@@ -147,14 +147,14 @@ test("the merge skill asks the owner in main and takes pending feedback only in 
     mainCheckout,
     /"Merge PR #[^\n]*later Go\?"\n\s*- `Merge`[^\n]*step 4[^\n]*`--pr <n>` in step 7\.\n\s*- `Stop` — stop here\./,
   );
-  assert.doesNotMatch(mainCheckout, /Take pending feedback|emend feedback/);
+  assert.doesNotMatch(mainCheckout, /Take pending feedback|recense feedback/);
 
   const procedure = skill.slice(skill.indexOf("### Take pending feedback"), skill.indexOf("## 4. Behind main"));
   assert.match(procedure, /Run this procedure only in the PR's worktree/);
   assert.match(procedure, /A main-checkout run never takes or saves feedback/);
   const tracked = procedure.indexOf("git ls-files -- .wt");
   const saved = procedure.indexOf("List saved results");
-  const fetch = procedure.indexOf('emend feedback <review-id> --save "<folder>"');
+  const fetch = procedure.indexOf('recense feedback <review-id> --save "<folder>"');
   assert.ok(tracked >= 0 && tracked < saved && saved < fetch);
   assert.match(procedure.slice(tracked, saved), /Read the hand-off[\s\S]*notify blocked[^\n]*stop/);
   const savedResults = procedure.slice(saved, fetch);
@@ -186,7 +186,7 @@ test("local landing takes feedback for the approved review after verification an
   const tracked = land.indexOf("3. Run `git ls-files -- .wt` in the worktree");
   const check = land.indexOf("check the folder and its entries");
   const saved = land.indexOf("List saved results");
-  const fetch = land.indexOf('emend feedback <review-id> --save "<top>/.wt/review"');
+  const fetch = land.indexOf('recense feedback <review-id> --save "<top>/.wt/review"');
   const command = land.indexOf("<main>/bin/wt land");
   assert.ok(verify >= 0 && verify < tracked && tracked < check && check < saved && saved < fetch && fetch < command);
   assert.match(

@@ -3,8 +3,8 @@ type Card = { threadId: string | null; hovered: boolean; active: boolean; onActi
 const readers = new Set<Reader>();
 const cards = new Map<HTMLElement, Card>();
 let activeCardThreads = new Set<string>();
-const normalName = "emend-comment";
-const activeName = "emend-comment-active";
+const normalName = "recense-comment";
+const activeName = "recense-comment-active";
 
 export function supportsCommentHighlights() {
   return (

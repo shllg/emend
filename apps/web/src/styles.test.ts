@@ -3,7 +3,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { pubStylesheetSafe } from "@emend/contract";
+import { pubStylesheetSafe } from "@recense/contract";
 import { expect, test } from "vitest";
 import { BUILT_IN_FONTS } from "./lib/built-in-fonts.ts";
 import { readingMeasure } from "./lib/layout-store.ts";
@@ -204,12 +204,12 @@ test("every built-in font and its OFL licence ship with matching font-face sourc
   expect(sources.sort()).toEqual([...fontFiles, ...pubFontFiles].map((file) => join(webFonts, file)).sort());
 });
 
-test("pub defaults use tokens, stay inside one emend layer and define the documented classes", () => {
+test("pub defaults use tokens, stay inside one recense layer and define the documented classes", () => {
   const css = readFileSync(join(webSource, "styles/pub.css"), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .trim();
   expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
-  expect(css).toMatch(/^@layer emend\s*\{/);
+  expect(css).toMatch(/^@layer recense\s*\{/);
   expect(css).toMatch(/:root\[data-theme="dark"\]\s*\{\s*color-scheme:\s*dark;\s*\}/);
   // Only the last closing brace may end the outer layer; nested media rules remain inside it.
   let depth = 0;
@@ -225,7 +225,7 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
     expect(css).toMatch(new RegExp(`\\.${name}\\b`));
   expect(css).toContain("font: var(--type-prose)");
   expect(css).toContain("background: var(--bg-reading)");
-  const diagramBox = /pre,\s*\[data-emend-diagram\]\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
+  const diagramBox = /pre,\s*\[data-recense-diagram\]\s*\{([^}]+)\}/.exec(css)?.[1] ?? "";
   for (const property of [
     "margin:",
     "padding:",
@@ -256,20 +256,20 @@ test("pub defaults use tokens, stay inside one emend layer and define the docume
     "padding: calc(var(--space-6) + var(--space-1)) 56px calc(var(--space-16) + var(--space-2)); " +
     "padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);";
   expect(flat).toContain(
-    `:root[data-emend-layout="wide"] body { --reading-max: var(--reader-measure, 1024px); ${wide} }`,
+    `:root[data-recense-layout="wide"] body { --reading-max: var(--reader-measure, 1024px); ${wide} }`,
   );
   expect(flat).toContain(
-    `@media (min-width: 768px) { :root:not([data-emend-layout]) body { --reading-max: 1024px; ${wide} } }`,
+    `@media (min-width: 768px) { :root:not([data-recense-layout]) body { --reading-max: 1024px; ${wide} } }`,
   );
   const narrow = "grid-template-columns: minmax(0, 1fr);";
-  expect(flat).toContain(`:root[data-emend-layout="narrow"] dl.facts { ${narrow} }`);
-  expect(flat).toContain(`@media (max-width: 767px) { :root:not([data-emend-layout]) dl.facts { ${narrow} } }`);
+  expect(flat).toContain(`:root[data-recense-layout="narrow"] dl.facts { ${narrow} }`);
+  expect(flat).toContain(`@media (max-width: 767px) { :root:not([data-recense-layout]) dl.facts { ${narrow} } }`);
   for (const edge of ["nth-child", "nth-last-child"])
     expect(flat).toContain(`body :${edge}(1 of :not(script, style, meta, link, title, template)):not(`);
   const entry = readFileSync(join(webSource, "../pub-frame.css"), "utf8");
-  expect(entry.startsWith("@layer emend-file, emend;\n")).toBe(true);
+  expect(entry.startsWith("@layer recense-file, emend-file, recense;\n")).toBe(true);
   for (const name of ["pub-fonts", "colors", "typography", "spacing"])
-    expect(entry).toContain(`@import "./src/styles/${name}.css" layer(emend);`);
+    expect(entry).toContain(`@import "./src/styles/${name}.css" layer(recense);`);
 });
 
 test("pub preferences match reading measures and sizes through safe root attribute rules", () => {
@@ -279,14 +279,14 @@ test("pub preferences match reading measures and sizes through safe root attribu
   for (const [width, measure] of Object.entries(readingMeasure)) {
     if (width === "comfortable") {
       expect(flat).toContain(
-        `:root[data-emend-layout="wide"] body { --reading-max: var(--reader-measure, ${measure});`,
+        `:root[data-recense-layout="wide"] body { --reading-max: var(--reader-measure, ${measure});`,
       );
-    } else expect(flat).toContain(`:root[data-emend-width="${width}"] { --reader-measure: ${measure}; }`);
+    } else expect(flat).toContain(`:root[data-recense-width="${width}"] { --reader-measure: ${measure}; }`);
   }
   for (const prose of [15, 16, 17, 18])
-    expect(flat).toContain(`:root[data-emend-prose="${prose}"] { --reader-prose-size: ${prose}px; }`);
+    expect(flat).toContain(`:root[data-recense-prose="${prose}"] { --reader-prose-size: ${prose}px; }`);
   for (const code of [12, 13, 14, 15])
-    expect(flat).toContain(`:root[data-emend-code="${code}"] { --reader-code-size: ${code}px; }`);
+    expect(flat).toContain(`:root[data-recense-code="${code}"] { --reader-code-size: ${code}px; }`);
 });
 
 test("pub fonts reuse only the app's default faces without JetBrains Mono italic", () => {
@@ -352,31 +352,50 @@ test("mono text uses stylesheet rules or font-mono instead of arbitrary font uti
   );
 });
 
+// Rendered blocks stored before the rename carry `emend-*` classes, so every selector for a class the server
+// writes into blocks has a legacy twin: `:is(.recense-x, .emend-x)`. These tests read the current names.
+const withoutLegacyTwins = (css: string) => css.replace(/:is\((\.recense-[a-z-]+), \.emend-[a-z-]+\)/g, "$1");
+
 test("writeup images keep their own size, stay under half the screen and show a ring, using theme tokens only", () => {
-  const css = readFileSync(join(webSource, "styles/prose.css"), "utf8");
+  const css = withoutLegacyTwins(readFileSync(join(webSource, "styles/prose.css"), "utf8"));
   const rule = (selector: string) =>
     new RegExp(`${selector.replace(/[.>]/g, "\\$&")}\\s*\\{([^}]+)\\}`).exec(css)?.[1] ?? "";
-  expect(rule(".em-prose .emend-media")).toMatch(/display:\s*inline-block/);
-  expect(rule(".em-prose .emend-media")).toMatch(/max-width:\s*100%/);
-  expect(rule(".em-prose .emend-media")).toMatch(/--emend-media-fit:\s*min\(\s*calc\(var\(--emend-media-w\) \* 1px\)/);
-  expect(rule(".em-prose .emend-media img")).toMatch(/max-height:\s*50svh/);
-  expect(rule(".em-prose .emend-media img")).toMatch(/object-fit:\s*contain/);
-  expect(rule(".em-prose .emend-media img")).toMatch(/box-shadow:\s*0 0 0 1px var\(--border-1\)/);
-  expect(rule(".em-prose .emend-media img")).toMatch(/border-radius:\s*var\(--radius-md\)/);
-  expect(rule(".em-prose .emend-media img")).toMatch(/background:\s*var\(--bg-sunken\)/);
-  expect(rule(".em-prose p.emend-media-row")).toMatch(/flex-wrap:\s*wrap/);
-  expect(rule(".em-prose p.emend-media-row > .emend-media")).toMatch(
-    /flex:\s*1 1 min\(var\(--emend-media-fit\), 18rem\)/,
+  expect(rule(".em-prose .recense-media")).toMatch(/display:\s*inline-block/);
+  expect(rule(".em-prose .recense-media")).toMatch(/max-width:\s*100%/);
+  expect(rule(".em-prose .recense-media")).toMatch(
+    /--recense-media-fit:\s*min\(\s*calc\(var\(--recense-media-w\) \* 1px\)/,
   );
-  const media = css.slice(css.indexOf(".em-prose .emend-media {"), css.indexOf(".em-prose > :first-child"));
+  expect(rule(".em-prose .recense-media img")).toMatch(/max-height:\s*50svh/);
+  expect(rule(".em-prose .recense-media img")).toMatch(/object-fit:\s*contain/);
+  expect(rule(".em-prose .recense-media img")).toMatch(/box-shadow:\s*0 0 0 1px var\(--border-1\)/);
+  expect(rule(".em-prose .recense-media img")).toMatch(/border-radius:\s*var\(--radius-md\)/);
+  expect(rule(".em-prose .recense-media img")).toMatch(/background:\s*var\(--bg-sunken\)/);
+  expect(rule(".em-prose p.recense-media-row")).toMatch(/flex-wrap:\s*wrap/);
+  expect(rule(".em-prose p.recense-media-row > .recense-media")).toMatch(
+    /flex:\s*1 1 min\(var\(--recense-media-fit\), 18rem\)/,
+  );
+  const media = css.slice(css.indexOf(".em-prose .recense-media {"), css.indexOf(".em-prose > :first-child"));
   expect(media).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|oklch\(/i);
 });
 
 test("screenshot effect lines shrink and wrap unbroken tokens on phones", () => {
-  const css = readFileSync(join(webSource, "styles/prose.css"), "utf8");
-  const effect = /\.em-prose \.emend-media-effect\s*\{([^}]+)\}/.exec(css)?.[1];
+  const css = withoutLegacyTwins(readFileSync(join(webSource, "styles/prose.css"), "utf8"));
+  const effect = /\.em-prose \.recense-media-effect\s*\{([^}]+)\}/.exec(css)?.[1];
   expect(effect).toMatch(/\bmin-width:\s*0\s*;/);
   expect(effect).toMatch(/\boverflow-wrap:\s*anywhere\s*;/);
+});
+
+test("every selector for a class the server writes into blocks also matches the name before the rename", () => {
+  for (const file of ["styles/prose.css", "styles/threads.css"]) {
+    const css = readFileSync(join(webSource, file), "utf8");
+    // A current block class outside a twin would leave old stored blocks unstyled.
+    expect(css.replace(/:is\(\.recense-[a-z-]+, \.emend-[a-z-]+\)/g, ""), file).not.toMatch(
+      /\.recense-(?:media|callout|example|term)/,
+    );
+  }
+  const prose = readFileSync(join(webSource, "styles/prose.css"), "utf8");
+  expect(prose).toContain(":is(.recense-media, .emend-media)");
+  expect(prose).toContain(":is(.recense-callout, .emend-callout)");
 });
 
 test("reading components use semantic colours, with white reserved for the isolated HTML document page", () => {

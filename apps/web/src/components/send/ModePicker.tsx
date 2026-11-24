@@ -1,4 +1,4 @@
-import { GoMode, MODE_LABELS } from "@emend/contract";
+import { GoMode, MODE_LABELS } from "@recense/contract";
 import { RadioGroup } from "../ui/RadioGroup.tsx";
 import { Select } from "../ui/Select.tsx";
 

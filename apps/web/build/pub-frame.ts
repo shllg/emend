@@ -1,4 +1,4 @@
-import { pubStylesheetSafe } from "@emend/contract";
+import { pubStylesheetSafe } from "@recense/contract";
 
 type BuildFile = { type: "asset"; fileName: string; source: string | Uint8Array } | { type: "chunk"; fileName: string };
 

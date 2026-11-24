@@ -1,4 +1,4 @@
-/* emend colour tokens. Neutrals are near-achromatic (a hair cool, hue 260, chroma ≤ .004) so the ochre accent is the only warmth. Base scales first, then semantic aliases (light), then dark overrides. */
+/* recense colour tokens. Neutrals are near-achromatic (a hair cool, hue 260, chroma ≤ .004) so the ochre accent is the only warmth. Base scales first, then semantic aliases (light), then dark overrides. */
 :root {
   --n-0: oklch(0.995 0.001 260);
   --n-25: oklch(0.985 0.001 260);

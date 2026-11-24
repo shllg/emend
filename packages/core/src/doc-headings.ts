@@ -1,4 +1,4 @@
-import { type DocHeading, LIMITS } from "@emend/contract";
+import { type DocHeading, LIMITS } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, html } from "parse5";
 import { cleanDocTitle } from "./doc-title.ts";

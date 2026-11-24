@@ -1,4 +1,4 @@
-import type { FileView, RevisionView } from "@emend/contract";
+import type { FileView, RevisionView } from "@recense/contract";
 import type { DiffCounts } from "../components/diff/presentation.ts";
 import { diffGroups } from "./diff-groups.ts";
 

@@ -5,7 +5,7 @@ export interface SavedDraft {
   body: string;
 }
 
-const PREFIX = "emend:draft:";
+const PREFIX = "recense:draft:";
 
 export function draftKey(reviewId: string, revision: number, slot: string): string {
   return `${PREFIX}${reviewId}:${revision}:${slot}`;

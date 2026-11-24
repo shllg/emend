@@ -1,4 +1,4 @@
-import type { TopicMeta, WriteupInput } from "@emend/contract";
+import type { TopicMeta, WriteupInput } from "@recense/contract";
 
 export const SAMPLE_HTML_PATH = "sample.html";
 export const SAMPLE_SVG =
@@ -148,7 +148,7 @@ export const SAMPLE_WRITEUP: WriteupInput = {
 };
 
 export const SAMPLE_HTML = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="emend-look" content="emend"><title>Parcel handbook</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="recense-look" content="recense"><title>Parcel handbook</title></head>
 <body><main><article><header><h1>Parcel handbook</h1><p>A synthetic HTML publication.</p></header>
 <section><h2>Preparation</h2><p>Use a <strong>clear label</strong> and <em>check the size</em>. Read the <a href="https://example.com/handbook">handbook</a>.</p>
 <blockquote>Every parcel starts with a label.</blockquote><ul><li>Choose a box<ul><li>Check the fit</li></ul></li><li>Pack it</li></ul>

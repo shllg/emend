@@ -16,7 +16,7 @@ vi.mock("../../lib/event-stream.ts", async (importOriginal) => ({
 }));
 
 const reviewId = "11111111-1111-4111-8111-111111111111";
-const command = `/emend:emend-feedback ${reviewId}`;
+const command = `/recense:recense-feedback ${reviewId}`;
 const idle: SendAgent = {
   agentWaiting: false,
   pendingSend: true,
@@ -34,7 +34,7 @@ const lifecycle: ReviewLifecycle = {
   pinned: false,
   onDeleted: () => {},
 };
-const pickedUp = "No agent has picked this up yet. emend keeps it until one does.";
+const pickedUp = "No agent has picked this up yet. recense keeps it until one does.";
 let client: QueryClient;
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
 let invalidate: ReturnType<typeof vi.spyOn>;
@@ -118,11 +118,11 @@ test("the desktop status opens the resume command in a dialog and Close returns 
   expect(screen.queryByText(command)).toBeNull();
   expect(screen.getByRole("region", { name: "Send and approve" }).children).toHaveLength(1);
   const dialog = within(openResume());
-  expect(dialog.getByText("No agent is waiting. emend keeps this until an agent picks it up.")).toBeTruthy();
+  expect(dialog.getByText("No agent is waiting. recense keeps this until an agent picks it up.")).toBeTruthy();
   expect(dialog.getByText(command)).toBeTruthy();
   expect(dialog.getByRole("button", { name: "Copy" })).toBeTruthy();
-  expect(dialog.getByText(`emend feedback ${reviewId}`).tagName).toBe("CODE");
-  expect(dialog.getByText(/and handle the result with the emend-feedback skill\.$/)).toBeTruthy();
+  expect(dialog.getByText(`recense feedback ${reviewId}`).tagName).toBe("CODE");
+  expect(dialog.getByText(/and handle the result with the recense-feedback skill\.$/)).toBeTruthy();
   const close = dialog.getByRole("button", { name: "Close" });
   expect(document.activeElement).toBe(close);
   fireEvent.click(close);
@@ -172,7 +172,7 @@ test("an invalid release date uses the no-agent status and explanation", () => {
   mount({ agent: { ...idle, releasedAt: "invalid" } });
   expect(screen.getByText("No agent waiting ·")).toBeTruthy();
   expect(
-    within(openResume()).getByText("No agent is waiting. emend keeps this until an agent picks it up."),
+    within(openResume()).getByText("No agent is waiting. recense keeps this until an agent picks it up."),
   ).toBeTruthy();
 });
 
@@ -187,7 +187,7 @@ test("the first more-actions item opens the resume dialog after the menu closes"
   expect(screen.queryByRole("menu")).toBeNull();
   const dialog = within(screen.getByRole("alertdialog", { name: "How to resume" }));
   expect(dialog.getByText(command)).toBeTruthy();
-  expect(dialog.getByText("No agent is waiting. emend keeps this until an agent picks it up.")).toBeTruthy();
+  expect(dialog.getByText("No agent is waiting. recense keeps this until an agent picks it up.")).toBeTruthy();
   fireEvent.click(dialog.getByRole("button", { name: "Close" }));
   await settle();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "More review actions" }));
@@ -358,7 +358,7 @@ test("with no agent waiting, the window shows the fallback at once and asks the 
   const dialog = screen.getByRole("alertdialog", { name: "Sent" });
   expect(dialog.textContent).toContain(pickedUp);
   expect(dialog.textContent).toContain(command);
-  expect(dialog.textContent).toContain(`Run emend feedback ${reviewId} and handle the result`);
+  expect(dialog.textContent).toContain(`Run recense feedback ${reviewId} and handle the result`);
   // The Send's own success refetches once; the window adds one more, and no further one.
   expect(reviewRefetches()).toBe(2);
   expect(inboxRefetches()).toBe(2);
@@ -482,7 +482,7 @@ test("the command renders as text, never HTML", () => {
   mount({ reviewId: hostile, agent: idle });
   const dialog = openResume();
   expect(dialog.querySelector("img")).toBeNull();
-  expect(screen.getByText(`/emend:emend-feedback ${hostile}`)).toBeTruthy();
+  expect(screen.getByText(`/recense:recense-feedback ${hostile}`)).toBeTruthy();
 });
 
 const pickedAt = "2026-03-05T12:00:00.000Z";
@@ -733,7 +733,7 @@ test("on the phone, the window waits for the Send sheet's exit animation to end"
 });
 
 const lostText =
-  "emend cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below.";
+  "recense cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below.";
 
 test("a Send answered by the server opens the window and frees the button while the refetch never settles", async () => {
   mountProbe();
@@ -778,7 +778,7 @@ test.each(["hang", "fail"] as const)(
     const dialog = screen.getByRole("alertdialog");
     expect(within(dialog).getByText(command)).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: "Copy" })).toBeTruthy();
-    expect(within(dialog).getByText(/and handle the result with the emend-feedback skill\.$/)).toBeTruthy();
+    expect(within(dialog).getByText(/and handle the result with the recense-feedback skill\.$/)).toBeTruthy();
   },
 );
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AgentNoteView, validateAgentNotes } from "./agent-note.ts";
-import { DocTitle, DocView, isRenderedHtmlDoc, isRenderedMarkdownDoc, validateDocView } from "./doc.ts";
+import { DocTitle, DocView, HtmlLookValue, isRenderedHtmlDoc, isRenderedMarkdownDoc, validateDocView } from "./doc.ts";
 import { indexImportBundle } from "./import-index.ts";
 import { LIMITS } from "./limits.ts";
 import { MEDIA_EXTENSIONS, PublishRequest, Sha256 } from "./publish.ts";
@@ -63,7 +63,7 @@ const ImportRows = z.object({
         renderedBlob: Sha256.nullable(),
         title: DocTitle.nullable().optional(),
         view: DocView.optional(),
-        look: z.enum(["emend", "custom"]).nullable().optional(),
+        look: HtmlLookValue.nullable().optional(),
         colorScheme: z.enum(["light"]).nullable().optional(),
         flag: FileFlag.nullable(),
         parentDocId: id.nullable(),

@@ -1,4 +1,4 @@
-import { BlockId } from "@emend/contract";
+import { BlockId } from "@recense/contract";
 import { describe, expect, test } from "vitest";
 import { blockText } from "./blocks.ts";
 import { changedBlockIds } from "./changed.ts";

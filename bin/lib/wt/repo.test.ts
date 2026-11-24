@@ -35,7 +35,7 @@ import {
   fakeCalls,
   gitIn,
   installFake,
-  installFakeEmend,
+  installFakeRecense,
   makeFixture,
   makeTestEnv,
   runLauncher,
@@ -483,7 +483,7 @@ for (const supported of [true, false])
       const repo = { mainRoot, commonDir: join(mainRoot, ".git") } as Repo;
       const old = "a".repeat(40),
         target = "b".repeat(40);
-      if (env) installFakeEmend(env, old, [approvedReview("emend-fixture", old)]);
+      if (env) installFakeRecense(env, old, [approvedReview("recense-fixture", old)]);
       const spawnSync = childProcess.spawnSync;
       const token = ["gh", "p_", "Ab01".repeat(9)].join("");
       const calls: { command: string; env: NodeJS.ProcessEnv; args: string[] }[] = [];
@@ -491,7 +491,8 @@ for (const supported of [true, false])
         childProcess,
         "spawnSync",
         (cmd: string, args: string[], options: { env: NodeJS.ProcessEnv; encoding?: string }) => {
-          if (env && cmd === join(env.fakeBin, "emend")) return spawnSync(cmd, args, { ...options, encoding: "utf8" });
+          if (env && cmd === join(env.fakeBin, "recense"))
+            return spawnSync(cmd, args, { ...options, encoding: "utf8" });
           const command = args.find((arg) =>
             [
               "config",
@@ -530,7 +531,7 @@ for (const supported of [true, false])
             status = 128;
             stderr = token;
           } else if (command === "symbolic-ref")
-            stdout = args.includes("--short") ? "emend-fixture" : "refs/heads/emend-fixture";
+            stdout = args.includes("--short") ? "recense-fixture" : "refs/heads/recense-fixture";
           else if (command === "config") status = 1;
           else if (command === "rev-parse") {
             const ref = args.at(-1) ?? "";
@@ -546,7 +547,7 @@ for (const supported of [true, false])
           else if (command === "worktree")
             stdout = failure === "fetch-local" ? "" : `worktree ${repo.mainRoot}\nbranch refs/heads/main\n`;
           else if (command === "remote") stdout = "synthetic-origin";
-          else if (command === "ls-remote") stdout = `${target}\trefs/heads/emend-fixture\n`;
+          else if (command === "ls-remote") stdout = `${target}\trefs/heads/recense-fixture\n`;
           else if (command === "cat-file") stdout = `${target} commit\n`;
           else if (command === "reflog") stdout = old;
           const encode = (text: string) => (options.encoding === "utf8" ? text : Buffer.from(text));

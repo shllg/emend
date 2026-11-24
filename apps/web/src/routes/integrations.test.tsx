@@ -1,4 +1,4 @@
-import { KeysSetting, type SettingsView, SHORTCUT_DEFAULTS } from "@emend/contract";
+import { KeysSetting, type SettingsView, SHORTCUT_DEFAULTS } from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -77,7 +77,7 @@ test("Integrations shows the status line's details and copies its exact prompt",
   const statusLine = within(screen.getByRole("region", { name: "Status line" }));
   expect(statusLine.getByText(integration.summary)).toBeTruthy();
   expect(statusLine.getByText("Works with Claude Code.")).toBeTruthy();
-  expect(statusLine.getByText(/Add emend to my Claude Code status line\./).textContent).toBe(integration.prompt);
+  expect(statusLine.getByText(/Add recense to my Claude Code status line\./).textContent).toBe(integration.prompt);
   fireEvent.click(statusLine.getByRole("button", { name: "Copy" }));
   expect(writeText).toHaveBeenCalledExactlyOnceWith(integration.prompt);
   expect(await statusLine.findByRole("button", { name: "Copied" })).toBeTruthy();

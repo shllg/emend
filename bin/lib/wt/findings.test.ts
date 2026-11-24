@@ -63,7 +63,7 @@ function input(overrides: Partial<FindingInput> = {}): FindingInput {
     kind: "bug",
     severity: "medium",
     size: "small",
-    source: { kind: "review", branch: "emend-fixture", round: "1" },
+    source: { kind: "review", branch: "recense-fixture", round: "1" },
     ...overrides,
   };
 }
@@ -87,7 +87,7 @@ function fails(code: number) {
 }
 
 function target() {
-  return { branch: "emend-fix-selection", worktree: fx.main };
+  return { branch: "recense-fix-selection", worktree: fx.main };
 }
 
 test("add prints its id and stores a private, open version 1 record", async () => {
@@ -160,7 +160,7 @@ test("input validation rejects missing, malformed and wrongly typed fields witho
     { ...input(), severity: "urgent" },
     { ...input(), size: "tiny" },
     { ...input(), source: { kind: "review", branch: "main", round: "1" } },
-    { ...input(), source: { kind: "review", branch: "emend-fixture", round: "1", pass: "1" } },
+    { ...input(), source: { kind: "review", branch: "recense-fixture", round: "1", pass: "1" } },
     { ...input(), source: { kind: "groom", pass: "Invalid" } },
     { ...input(), source: { kind: "groom", pass: "1", extra: true } },
   ])
@@ -329,7 +329,7 @@ test("simultaneous child-process adds leave one record and return 0 and 3", asyn
 
 test("a linked worktree uses its own HEAD and the shared finding store", () => {
   const worktree = join(env.root, "linked");
-  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "emend-linked", worktree);
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-linked", worktree);
   const commit = commitFile(worktree, "linked.md", "linked content\n");
   const linkedRepo = resolveRepo(worktree);
   const result = addFinding(linkedRepo, input({ path: "linked.md" }));
@@ -992,7 +992,7 @@ test("groom skips generated paths, fixtures, image and font extensions, symlinks
   const skipped = [
     "pnpm-lock.yaml",
     "nested/pnpm-lock.yaml",
-    "apps/emend/drizzle/0001.sql",
+    "apps/recense/drizzle/0001.sql",
     "docs/images/a.md",
     "docs/vendor/a.md",
     "fixtures/a.ts",
@@ -1223,7 +1223,7 @@ test("groom CLI refuses malformed counts, options and actions without changing v
 test("groom reads main HEAD from a worktree and ignores staged changes in main", async () => {
   const blob = headBlob();
   const worktree = join(env.root, "worktree");
-  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "emend-groom", worktree);
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-groom", worktree);
   commitFile(worktree, "README.md", "worktree content\n");
   writeFileSync(join(fx.main, "README.md"), "staged content\n");
   gitIn(fx.main, "add", "README.md");

@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 
 /** Cut a definition to the contract's length; a cut ends in an ellipsis and never splits a surrogate pair. */
 export function limitDefinition(text: string): string {

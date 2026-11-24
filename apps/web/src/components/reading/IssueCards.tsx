@@ -1,9 +1,10 @@
-import { type IssueRef, type IssueState, RepoUrl } from "@emend/contract";
+import { type IssueRef, type IssueState, RepoUrl } from "@recense/contract";
 import type { RefObject } from "react";
 import { createPortal } from "react-dom";
 import { type HoverTarget, useHoverCard } from "../../lib/use-hover-card.ts";
 
-const ISSUE = "a[data-emend-issue]";
+// Blocks stored before the rename carry `data-emend-issue`; it keeps working.
+const ISSUE = "a:is([data-recense-issue], [data-emend-issue])";
 const STATE_WORDS: Record<IssueState, string> = { open: "Open", closed: "Closed", merged: "Merged" };
 
 const issueUrl = (repoUrl: string, number: number) => String(new URL(`${repoUrl}/issues/${number}`));
@@ -18,7 +19,7 @@ function issueAt(
   if (!(target instanceof Element)) return;
   const element = target.closest<HTMLElement>(ISSUE);
   const block = element?.closest<HTMLElement>("[data-block-id]");
-  const value = element?.dataset.emendIssue;
+  const value = element?.dataset.recenseIssue ?? element?.dataset.emendIssue;
   if (
     !element ||
     !root.contains(element) ||

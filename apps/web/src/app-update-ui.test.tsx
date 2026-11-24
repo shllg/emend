@@ -99,9 +99,9 @@ test.each([
         },
         removeItem: () => {},
       });
-      saveDraft("emend.draft.synthetic-review.memory", "only in memory");
+      saveDraft("recense.draft.synthetic-review.memory", "only in memory");
     },
-    () => clearDraft("emend.draft.synthetic-review.memory"),
+    () => clearDraft("recense.draft.synthetic-review.memory"),
   ],
 ])("Update asks first when a reload could lose %s", async (text, begin, end) => {
   begin();
@@ -162,7 +162,7 @@ test("the dialog checks again on confirm and stays open when the work at risk ch
     fireEvent.click(await appRegion().findByRole("button", { name: "Update now" }));
     const dialog = await screen.findByRole("alertdialog", { name: "Update now?" });
     expect(dialog.textContent).toContain("a Send in progress.");
-    act(() => beginDraftSave("emend.draft.synthetic-review.saving"));
+    act(() => beginDraftSave("recense.draft.synthetic-review.saving"));
     fireEvent.click(within(dialog).getByRole("button", { name: "Update anyway" }));
     expect(fake.current.installUpdate).not.toHaveBeenCalled();
     const again = await screen.findByRole("alertdialog", { name: "Update now?" });
@@ -171,7 +171,7 @@ test("the dialog checks again on confirm and stays open when the work at risk ch
     expect(fake.current.installUpdate).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("alertdialog")).toBeNull();
   } finally {
-    finishDraftSave("emend.draft.synthetic-review.saving");
+    finishDraftSave("recense.draft.synthetic-review.saving");
     finishReviewSend("synthetic-review");
   }
 });
@@ -181,7 +181,7 @@ test("the reload bar shows on every layout, is a status region, and takes no foc
     vi.stubGlobal("matchMedia", () => ({ matches, addEventListener() {}, removeEventListener() {} }));
     const view = mount();
     await screen.findByRole("heading", { name: "Devices" });
-    const text = "emend was updated in another window. Reload to keep working.";
+    const text = "recense was updated in another window. Reload to keep working.";
     expect(screen.queryByText(text)).toBeNull();
     const before = document.activeElement;
     act(() => fake.current.set({ state: "reload-needed" }));
@@ -204,7 +204,7 @@ test("the reload bar asks first when work is in flight", async () => {
     mount();
     await screen.findByRole("heading", { name: "Devices" });
     act(() => fake.current.set({ state: "reload-needed" }));
-    const bar = (await screen.findByText(/^emend was updated/)).closest("[role=status]") as HTMLElement;
+    const bar = (await screen.findByText(/^recense was updated/)).closest("[role=status]") as HTMLElement;
     fireEvent.click(within(bar).getByRole("button", { name: "Reload" }));
     expect(await screen.findAllByRole("alertdialog")).toHaveLength(1);
     expect(fake.current.reloadNow).not.toHaveBeenCalled();
@@ -224,7 +224,7 @@ test.each([
 ] as const)("the App section reports %s", async (state, extra, line) => {
   mount();
   await screen.findByRole("heading", { name: "App" });
-  expect(screen.getByText("emend 0.0.0-test")).toBeTruthy();
+  expect(screen.getByText("recense 0.0.0-test")).toBeTruthy();
   act(() => fake.current.set({ state, ...extra }));
   const status = await screen.findByText(line);
   expect(status.getAttribute("aria-live")).toBe("polite");

@@ -12,8 +12,8 @@
       "!!.pnpm-store",
       "!!scripts",
       "!!pnpm-lock.yaml",
-      "!!apps/emend/drizzle",
-      "!!apps/emend/src/db/migrations.gen.ts"
+      "!!apps/recense/drizzle",
+      "!!apps/recense/src/db/migrations.gen.ts"
     ]
   },
   "formatter": {

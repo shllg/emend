@@ -1,4 +1,4 @@
-import { normalizeGlossaryForm } from "@emend/contract";
+import { normalizeGlossaryForm } from "@recense/contract";
 
 // The matcher of a doc (Markdown through docGlossary, HTML through the bridge's port). The writeup keeps the
 // regex matcher in terms.ts, which stays the reference: for every input the marks are the same.

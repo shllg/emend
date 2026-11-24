@@ -1,11 +1,11 @@
 ---
 name: e-merge-local
-description: Land the current branch on local main as one signed commit after an emend review against main, then clean up. Use for the local path when /e-work chose "Land locally after an emend review", or when the owner types /e-merge-local.
+description: Land the current branch on local main as one signed commit after a recense review against main, then clean up. Use for the local path when /e-work chose "Land locally after a recense review", or when the owner types /e-merge-local.
 ---
 
 # /e-merge-local
 
-The branch never goes to GitHub. After the owner approves the review in emend, the branch lands on
+The branch never goes to GitHub. After the owner approves the review in recense, the branch lands on
 local `main` as one signed commit. The owner pushes `main` later.
 
 ## Rules every e-* skill follows
@@ -25,7 +25,7 @@ local `main` as one signed commit. The owner pushes `main` later.
 - `bin/wt push`, `pr` and `land` check names, text and content for private data first. On a hit,
   fix what it names, never the check. When it refuses for lack of a terms list, stop and ask the
   owner to create `<main>/.private-terms`. Never read, create, edit or remove `.private-terms`, and
-  never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
+  never set `RECENSE_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
 
@@ -42,7 +42,7 @@ local `main` as one signed commit. The owner pushes `main` later.
 
 1. Make the review folder `<top>/.wt/review` with `mkdir -p -m 700 <top>/.wt/review`, written out
    literally. It is per worktree and gitignored, and only this worktree's session writes it.
-2. Start `emend-review` in a fresh subagent and tell it "publish only". Give it the target `main`,
+2. Start `recense-review` in a fresh subagent and tell it "publish only". Give it the target `main`,
    with `head` set to the full commit hash from step 1 and `base` the merge-base with `main`. Tell it
    to use `<top>/.wt/review` as the review folder, in place of a new temporary one. It returns the
    review id, the revision, the URL, the literal review folder, the directory it published from and
@@ -54,17 +54,17 @@ local `main` as one signed commit. The owner pushes `main` later.
 
 ## 3. Wait
 
-Wait as the `emend-review` skill, "Wait for the reviewer", and the `emend-feedback` skill say. Do not
+Wait as the `recense-review` skill, "Wait for the reviewer", and the `recense-feedback` skill say. Do not
 restate them here.
 
-- `go`: handle it with `emend-feedback`. Commit the fixes, run `pnpm verify`,
+- `go`: handle it with `recense-feedback`. Commit the fixes, run `pnpm verify`,
   publish the next revision with `head` at the new commit, run
   `<main>/bin/wt notify review-ready`, and wait again.
 - `approve`: run `<main>/bin/wt approval` in the worktree.
   - Exit 0: keep the approved head and the review id from the output for step 4.
   - Exit 1: report the reason and republish the current head for a new approval.
   - Exit 2 or 69: run `<main>/bin/wt notify blocked`, report the message and stop.
-- `closed` or a non-zero exit: report as `emend-feedback` says and stop.
+- `closed` or a non-zero exit: report as `recense-feedback` says and stop.
 
 ## 4. Land
 
@@ -89,21 +89,21 @@ restate them here.
    The command must succeed and print nothing.
    Otherwise run `<main>/bin/wt notify blocked`, report the failure and stop.
    Write the subject to `<top>/.wt/land-subject.txt` with the Write tool.
-   emend keeps an approval while a later owner answer waits and sets it aside only when that answer is taken.
-   Before landing, check the folder and its entries as `emend-feedback` says under "Read the hand-off".
+   recense keeps an approval while a later owner answer waits and sets it aside only when that answer is taken.
+   Before landing, check the folder and its entries as `recense-feedback` says under "Read the hand-off".
    List saved results as it says and handle any unhandled `go` as in step 3 before landing.
-   Run `emend feedback <review-id> --save "<top>/.wt/review"` with the review id from step 3's `bin/wt approval` output.
+   Run `recense feedback <review-id> --save "<top>/.wt/review"` with the review id from step 3's `bin/wt approval` output.
    If a check fails or the command exits non-zero, report the failure and stop.
-   Check the entries again and read the newly saved file as `emend-feedback` says.
+   Check the entries again and read the newly saved file as `recense-feedback` says.
    On `pending`, delete that file and land.
    On `go`, return to step 3 to handle it and wait again.
-   On `closed`, report and record it as `emend-feedback` says and stop.
-   On a new `approve`, record it as `emend-feedback` says and land.
+   On `closed`, report and record it as `recense-feedback` says and stop.
+   On a new `approve`, record it as `recense-feedback` says and land.
    For the approved head, run
    `<main>/bin/wt land --match-head <approved head> --subject-file <top>/.wt/land-subject.txt --body-file <top>/.wt/land-body.md`.
    When step 4.1 carried approval over, run
    `<main>/bin/wt land --match-head <new head> --approved-head <approved head> --subject-file <top>/.wt/land-subject.txt --body-file <top>/.wt/land-body.md`.
-   bin/wt checks HEAD, the emend approval and, for the rebased head, both change digests. It makes one
+   bin/wt checks HEAD, the recense approval and, for the rebased head, both change digests. It makes one
    signed commit on `main` with the branch's tree, prints `backup:` lines, and prints `landed <sha>`
    last. It never pushes. `land` signs through git's configured signer with piped stdio, so a signer that
    needs a tty pinentry fails. If it refuses, or says "git did not make the commit", report the

@@ -2,7 +2,7 @@
 
 Rules for changing what the reviewer sees in `apps/web`. Each names a value, a token, a behaviour
 or a state that must exist. Breaking a rule is a defect; anything beyond them is taste. Check at
-desktop 1600×1000 and phone 390×844, in Light and Dark (`localStorage["emend.theme"]` = `light` or
+desktop 1600×1000 and phone 390×844, in Light and Dark (`localStorage["recense.theme"]` = `light` or
 `dark`, then reload). Values live in `apps/web/src/styles/`; where this guide and the code differ,
 the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` comes first.
 
@@ -26,9 +26,9 @@ the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` com
 7. **Nothing essential hides behind hover.** Focus reveals it too; touch screens always show it.
 8. **Choices stay in the browser**: pane mode, widths, text sizes, diff layout, wrap, agent notes,
    resolved threads, file order, topic details and inbox collapse in `localStorage` key
-   `emend.layout.v1` (`lib/layout-store.ts`), with the Tabs move marked in
-   `emend.layout.tabs-default`; the theme in `emend.theme`, an own theme's text in
-   `emend.theme.custom`. **One URL, one view**: `?tab=` and the other parameters work on any
+   `recense.layout.v1` (`lib/layout-store.ts`), with the Tabs move marked in
+   `recense.layout.tabs-default`; the theme in `recense.theme`, an own theme's text in
+   `recense.theme.custom`. **One URL, one view**: `?tab=` and the other parameters work on any
    screen.
 9. **Fixed behaviours**, each a defect when missing:
    - A new revision shows the banner "Revision N is ready." with **Show**; the page never
@@ -69,7 +69,7 @@ the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` com
 - Reading column (`.em-reading-column`): the measure from View → Reading width, Comfortable 1024 px
   (default), Wide 1248 px or Narrow 68ch. From 768 px a 56 px left gutter holds the block comment
   button and change bars, right padding 32–56 px; below 768 px, 40 px each side. HTML docs in
-  emend's look follow the same measure and text sizes.
+  recense's look follow the same measure and text sizes.
 - No sideways page scroll: `scrollWidth <= innerWidth`. Code, tables, diffs and long paths scroll
   or truncate inside their own box.
 - Density: a theme picks compact, regular or roomy; `<html data-density>` sets `--density` to
@@ -244,12 +244,12 @@ Agent content (detail in `.claude/rules/content-isolation.md` and `doc-navigatio
 - Writeup, Markdown docs and comment bodies arrive as sanitized HTML; only `BlockView.tsx` puts
   them on the page. HTML docs show only in their sandboxed frame; Mermaid draws in its own
   frames.
-- App CSS never reaches into a frame. An HTML pub gets emend's look by default; only
-  `<meta name="emend-look" content="custom">` opts out. A doc in emend's look gets
+- App CSS never reaches into a frame. An HTML pub gets recense's look by default; only
+  `<meta name="recense-look" content="custom">` opts out. A doc in recense's look gets
   `styles/pub.css` (built into `pub-frame.css` from the same tokens) and follows the Light, Dark
-  or System pick and an own theme through `emend:theme`; a doc without dark styles stays light.
-  Changing the pub style, a frame attribute or the bridge needs `emend-security-reviewer`.
-- Diff text renders through `@pierre/diffs` with the `emend` syntax theme on `--syn-*`
+  or System pick and an own theme through `recense:theme`; a doc without dark styles stays light.
+  Changing the pub style, a frame attribute or the bridge needs `recense-security-reviewer`.
+- Diff text renders through `@pierre/diffs` with the `recense` syntax theme on `--syn-*`
   (`components/diff/theme.ts`); style around it, never put HTML into it.
 
 ## 6. Keyboard and focus

@@ -1,4 +1,4 @@
-import { type KeyBinding, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@emend/contract";
+import { type KeyBinding, SHORTCUT_DEFAULTS, type ShortcutCommand } from "@recense/contract";
 
 export const shortcutCommands = Object.keys(SHORTCUT_DEFAULTS) as ShortcutCommand[];
 export const jumpCommands: ShortcutCommand[] = [

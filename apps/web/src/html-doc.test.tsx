@@ -1,7 +1,7 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { FilePath, type HtmlDocChanges, LIMITS, type ThreadView } from "@emend/contract";
+import { FilePath, type HtmlDocChanges, LIMITS, type ThreadView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -80,14 +80,14 @@ test.each(["https://github.com/o/r", undefined, null, "javascript:alert(1)"])(
   (repoUrl) => {
     const view = mountRepo(repoUrl);
     expect(view.post).not.toHaveBeenCalled();
-    view.message({ type: "emend:ready" });
-    const messages = () => view.post.mock.calls.filter(([data]) => data.type === "emend:repo");
+    view.message({ type: "recense:ready" });
+    const messages = () => view.post.mock.calls.filter(([data]) => data.type === "recense:repo");
     if (repoUrl === "https://github.com/o/r") {
-      expect(messages()).toEqual([[{ type: "emend:repo", url: repoUrl }, "*"]]);
-      expect(ParentToFrame.parse(messages()[0]?.[0])).toEqual({ type: "emend:repo", url: repoUrl });
+      expect(messages()).toEqual([[{ type: "recense:repo", url: repoUrl }, "*"]]);
+      expect(ParentToFrame.parse(messages()[0]?.[0])).toEqual({ type: "recense:repo", url: repoUrl });
       const types = view.post.mock.calls.map(([data]) => data.type);
-      expect(types.indexOf("emend:repo")).toBeLessThan(types.indexOf("emend:highlight"));
-      expect(types.indexOf("emend:repo")).toBeLessThan(types.indexOf("emend:changed"));
+      expect(types.indexOf("recense:repo")).toBeLessThan(types.indexOf("recense:highlight"));
+      expect(types.indexOf("recense:repo")).toBeLessThan(types.indexOf("recense:changed"));
       view.update([thread]);
       expect(messages()).toHaveLength(1);
       fireEvent.load(view.frame);
@@ -97,9 +97,9 @@ test.each(["https://github.com/o/r", undefined, null, "javascript:alert(1)"])(
       Object.defineProperty(next, "contentWindow", { value: { postMessage: post } });
       fireEvent.load(next);
       expect(post).not.toHaveBeenCalled();
-      view.message({ type: "emend:ready" }, next.contentWindow);
-      expect(post.mock.calls.filter(([data]) => data.type === "emend:repo")).toEqual([
-        [{ type: "emend:repo", url: repoUrl }, "*"],
+      view.message({ type: "recense:ready" }, next.contentWindow);
+      expect(post.mock.calls.filter(([data]) => data.type === "recense:repo")).toEqual([
+        [{ type: "recense:repo", url: repoUrl }, "*"],
       ]);
     } else {
       expect(messages()).toEqual([]);
@@ -112,8 +112,8 @@ test.each([1, 12, 9999999])(
   (number) => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const view = mountRepo("https://github.com/o/r");
-    view.message({ type: "emend:ready" });
-    view.message({ type: "emend:issue", number });
+    view.message({ type: "recense:ready" });
+    view.message({ type: "recense:issue", number });
     expect(open).toHaveBeenCalledExactlyOnceWith(
       `https://github.com/o/r/issues/${number}`,
       "_blank",
@@ -129,35 +129,35 @@ test.each([
 ])("an issue cannot open a tab with $name", ({ repoUrl }) => {
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   const view = mountRepo(repoUrl);
-  view.message({ type: "emend:ready" });
-  view.message({ type: "emend:issue", number: 12 });
+  view.message({ type: "recense:ready" });
+  view.message({ type: "recense:issue", number: 12 });
   expect(open).not.toHaveBeenCalled();
 });
 
 test("issue messages require the current ready frame and stop after navigation away", () => {
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   const view = mountRepo("https://github.com/o/r");
-  view.message({ type: "emend:issue", number: 12 });
+  view.message({ type: "recense:issue", number: 12 });
   expect(open).not.toHaveBeenCalled();
-  view.message({ type: "emend:ready" });
-  view.message({ type: "emend:issue", number: 12 }, window);
+  view.message({ type: "recense:ready" });
+  view.message({ type: "recense:issue", number: 12 }, window);
   expect(open).not.toHaveBeenCalled();
   fireEvent.load(view.frame);
-  view.message({ type: "emend:issue", number: 12 });
+  view.message({ type: "recense:issue", number: 12 });
   expect(open).not.toHaveBeenCalled();
 });
 
 test.each([
-  { type: "emend:issue", number: 0 },
-  { type: "emend:issue", number: 10000000 },
-  { type: "emend:issue", number: 1.5 },
-  { type: "emend:issue", number: "12" },
-  { type: "emend:issue", number: 12, extra: true },
-  { type: "emend:issue", number: 12, url: "https://example.test/other/repo/issues/12" },
+  { type: "recense:issue", number: 0 },
+  { type: "recense:issue", number: 10000000 },
+  { type: "recense:issue", number: 1.5 },
+  { type: "recense:issue", number: "12" },
+  { type: "recense:issue", number: 12, extra: true },
+  { type: "recense:issue", number: 12, url: "https://example.test/other/repo/issues/12" },
 ])("invalid issue message %j cannot open a tab", (data) => {
   const open = vi.spyOn(window, "open").mockReturnValue(null);
   const view = mountRepo("https://github.com/o/r");
-  view.message({ type: "emend:ready" });
+  view.message({ type: "recense:ready" });
   view.message(data);
   expect(FrameToParent.safeParse(data).success).toBe(false);
   expect(open).not.toHaveBeenCalled();
@@ -184,23 +184,23 @@ test.each([false, true])("HTML changes are posted only when supplied and after r
   Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
   fireEvent.load(frame);
   expect(post).not.toHaveBeenCalled();
-  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
-  const messages = () => post.mock.calls.filter(([data]) => data.type === "emend:changed");
-  expect(messages()).toEqual(supplied ? [[{ type: "emend:changed", ...changes }, "*"]] : []);
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "recense:ready" } }));
+  const messages = () => post.mock.calls.filter(([data]) => data.type === "recense:changed");
+  expect(messages()).toEqual(supplied ? [[{ type: "recense:changed", ...changes }, "*"]] : []);
   if (!supplied) return;
-  expect(ParentToFrame.parse(messages()[0]?.[0])).toEqual({ type: "emend:changed", ...changes });
+  expect(ParentToFrame.parse(messages()[0]?.[0])).toEqual({ type: "recense:changed", ...changes });
   view.rerender(content({ parts: 3, marks: [{ index: 1, revision: 2 }] }));
   expect(messages()).toHaveLength(1);
   view.rerender(content({ parts: 3, marks: [] }));
   expect(messages()).toHaveLength(2);
-  expect(messages().at(-1)).toEqual([{ type: "emend:changed", parts: 3, marks: [] }, "*"]);
+  expect(messages().at(-1)).toEqual([{ type: "recense:changed", parts: 3, marks: [] }, "*"]);
   fireEvent.load(frame);
   view.rerender(content(changes));
   expect(messages()).toHaveLength(2);
 });
 
 test.each(
-  (["emend", "custom", undefined] as const).flatMap((look) =>
+  (["recense", "custom", undefined] as const).flatMap((look) =>
     (["light", undefined] as const).map((colorScheme) => ({ look, colorScheme })),
   ),
 )("$look look, $colorScheme colour scheme uses the matching loading background", ({ look, colorScheme }) => {
@@ -219,20 +219,20 @@ test.each(
     </QueryClientProvider>,
   );
   const frame = frameByTitle();
-  expect(frame.classList.contains("bg-reading")).toBe(look === "emend" && colorScheme !== "light");
-  expect(frame.classList.contains("bg-[#fff]")).toBe(look !== "emend" || colorScheme === "light");
+  expect(frame.classList.contains("bg-reading")).toBe(look === "recense" && colorScheme !== "light");
+  expect(frame.classList.contains("bg-[#fff]")).toBe(look !== "recense" || colorScheme === "light");
   expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
 });
 
 test.each(
   [true, false].flatMap((initialWide) =>
-    (["emend", "custom", undefined] as const).map((look) => ({ initialWide, look })),
+    (["recense", "custom", undefined] as const).map((look) => ({ initialWide, look })),
   ),
 )("$look layout precedes restore on every ready and follows app width (wide=$initialWide)", ({ initialWide, look }) => {
   layoutStore.update({ readingWidth: "narrow", proseSize: 17, codePx: 15 });
   const layoutMessage = (wide: boolean) => {
     const { readingWidth: width, proseSize: prose, codePx: code } = layoutStore.getSnapshot();
-    return look === "emend" ? { type: "emend:layout", wide, width, prose, code } : { type: "emend:layout", wide };
+    return look === "recense" ? { type: "recense:layout", wide, width, prose, code } : { type: "recense:layout", wide };
   };
   let width = initialWide ? 820 : 700;
   const listeners = new Map<string, Set<() => void>>();
@@ -283,13 +283,13 @@ test.each(
   Object.defineProperty(frame, "contentWindow", { value: { postMessage: post } });
   fireEvent.load(frame);
   expect(post).not.toHaveBeenCalled();
-  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "recense:ready" } }));
   expect(post.mock.calls).toEqual([
     [layoutMessage(initialWide), "*"],
-    ...(look === "emend" ? [[{ type: "emend:theme", mode: "light", scales: {}, tokens: {} }, "*"]] : []),
-    [{ type: "emend:highlight", anchors: [] }, "*"],
-    [{ type: "emend:docs", paths: [path] }, "*"],
-    [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
+    ...(look === "recense" ? [[{ type: "recense:theme", mode: "light", scales: {}, tokens: {} }, "*"]] : []),
+    [{ type: "recense:highlight", anchors: [] }, "*"],
+    [{ type: "recense:docs", paths: [path] }, "*"],
+    [{ type: "recense:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
   ]);
   post.mockClear();
   resize(!initialWide);
@@ -307,13 +307,13 @@ test.each(
   fireEvent.load(next);
   resize(!initialWide);
   expect(nextPost).not.toHaveBeenCalled();
-  fireEvent(window, new MessageEvent("message", { source: next.contentWindow, data: { type: "emend:ready" } }));
+  fireEvent(window, new MessageEvent("message", { source: next.contentWindow, data: { type: "recense:ready" } }));
   expect(nextPost.mock.calls).toEqual([
     [layoutMessage(!initialWide), "*"],
-    ...(look === "emend" ? [[{ type: "emend:theme", mode: "light", scales: {}, tokens: {} }, "*"]] : []),
-    [{ type: "emend:highlight", anchors: [] }, "*"],
-    [{ type: "emend:docs", paths: [path] }, "*"],
-    [{ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
+    ...(look === "recense" ? [[{ type: "recense:theme", mode: "light", scales: {}, tokens: {} }, "*"]] : []),
+    [{ type: "recense:highlight", anchors: [] }, "*"],
+    [{ type: "recense:docs", paths: [path] }, "*"],
+    [{ type: "recense:goto", heading: 0, label: "Part", fraction: 0.5 }, "*"],
   ]);
   nextPost.mockClear();
   view.unmount();
@@ -334,7 +334,7 @@ function FrameContent({
   docNavigation?: DocNavigation;
   navigation?: { threadId: string; intent: unknown };
   images?: readonly string[];
-  look?: "emend" | "custom";
+  look?: "recense" | "custom";
   colorScheme?: "light";
 }) {
   const [open, setOpen] = useState(values.length > 0);
@@ -360,7 +360,7 @@ function mount(
   threads: ThreadView[] = [],
   navigation?: { threadId: string; intent: unknown },
   images?: readonly string[],
-  look?: "emend" | "custom",
+  look?: "recense" | "custom",
   colorScheme?: "light",
 ) {
   const ui = (values: ThreadView[], docNavigation?: DocNavigation) => (
@@ -388,7 +388,7 @@ function mount(
     post,
     message,
     update: (values: ThreadView[]) => view.rerender(ui(values)),
-    fragment: (fragment: string) => view.rerender(ui(threads, { type: "emend:navigate", path, fragment })),
+    fragment: (fragment: string) => view.rerender(ui(threads, { type: "recense:navigate", path, fragment })),
   };
 }
 
@@ -414,24 +414,24 @@ test.each([
   { pick: "light", osDark: true, mode: "light" },
   { pick: "system", osDark: false, mode: "light" },
   { pick: "system", osDark: true, mode: "dark" },
-] as const)("HTML emend look follows $pick with OS dark=$osDark without reloading", ({ pick, osDark, mode }) => {
+] as const)("HTML recense look follows $pick with OS dark=$osDark without reloading", ({ pick, osDark, mode }) => {
   const changeOS = systemTheme(osDark);
   setThemePick(pick);
-  const view = mount([], undefined, undefined, "emend");
+  const view = mount([], undefined, undefined, "recense");
   const src = `${doc.contentUrl}?theme=${mode}`;
   expect(view.frame.getAttribute("src")).toBe(src);
   expect(view.post).not.toHaveBeenCalled();
   fireEvent.load(view.frame);
-  view.message({ type: "emend:ready" });
+  view.message({ type: "recense:ready" });
   expect(view.post.mock.calls.slice(0, 2)).toEqual([
-    [{ type: "emend:layout", wide: false, width: "comfortable", prose: 16, code: 13 }, "*"],
-    [{ type: "emend:theme", mode, scales: {}, tokens: {} }, "*"],
+    [{ type: "recense:layout", wide: false, width: "comfortable", prose: 16, code: 13 }, "*"],
+    [{ type: "recense:theme", mode, scales: {}, tokens: {} }, "*"],
   ]);
   view.post.mockClear();
   const nextMode = mode === "dark" ? "light" : "dark";
   if (pick === "system") changeOS(!osDark);
   else act(() => setThemePick(nextMode));
-  expect(view.post.mock.calls).toEqual([[{ type: "emend:theme", mode: nextMode, scales: {}, tokens: {} }, "*"]]);
+  expect(view.post.mock.calls).toEqual([[{ type: "recense:theme", mode: nextMode, scales: {}, tokens: {} }, "*"]]);
   expect(frameByTitle()).toBe(view.frame);
   expect(view.frame.getAttribute("src")).toBe(src);
   view.post.mockClear();
@@ -444,25 +444,28 @@ test.each([
   expect(view.post).not.toHaveBeenCalled();
 });
 
-test.each(["emend", "custom", undefined] as const)("%s URLs use the current mode on navigation and Reload", (look) => {
-  setThemePick("dark");
-  const view = mount([], undefined, undefined, look);
-  const query = (mode: string) => (look === "emend" ? `?theme=${mode}` : "");
-  expect(view.frame.getAttribute("src")).toBe(`${doc.contentUrl}${query("dark")}`);
-  fireEvent.load(view.frame);
-  view.message({ type: "emend:ready" });
-  act(() => setThemePick("light"));
-  fireEvent.load(view.frame);
-  fireEvent.click(screen.getByText(`Reload ${path}`));
-  const reloaded = frameByTitle();
-  expect(reloaded.getAttribute("src")).toBe(`${doc.contentUrl}${query("light")}`);
-  act(() => setThemePick("dark"));
-  expect(frameByTitle()).toBe(reloaded);
-  view.fragment("part #é");
-  expect(frameByTitle().getAttribute("src")).toBe(`${doc.contentUrl}${query("dark")}#part%20%23%C3%A9`);
-});
+test.each(["recense", "custom", undefined] as const)(
+  "%s URLs use the current mode on navigation and Reload",
+  (look) => {
+    setThemePick("dark");
+    const view = mount([], undefined, undefined, look);
+    const query = (mode: string) => (look === "recense" ? `?theme=${mode}` : "");
+    expect(view.frame.getAttribute("src")).toBe(`${doc.contentUrl}${query("dark")}`);
+    fireEvent.load(view.frame);
+    view.message({ type: "recense:ready" });
+    act(() => setThemePick("light"));
+    fireEvent.load(view.frame);
+    fireEvent.click(screen.getByText(`Reload ${path}`));
+    const reloaded = frameByTitle();
+    expect(reloaded.getAttribute("src")).toBe(`${doc.contentUrl}${query("light")}`);
+    act(() => setThemePick("dark"));
+    expect(frameByTitle()).toBe(reloaded);
+    view.fragment("part #é");
+    expect(frameByTitle().getAttribute("src")).toBe(`${doc.contentUrl}${query("dark")}#part%20%23%C3%A9`);
+  },
+);
 
-test("resetting an emend doc to the top uses the current mode", () => {
+test("resetting a recense doc to the top uses the current mode", () => {
   setThemePick("dark");
   const reading = {
     key: "theme-top",
@@ -479,7 +482,7 @@ test("resetting an emend doc to the top uses the current mode", () => {
         path={path}
         contentUrl={doc.contentUrl}
         threads={[]}
-        look="emend"
+        look="recense"
         reading={{ ...reading, target }}
       />
     </QueryClientProvider>
@@ -487,7 +490,7 @@ test("resetting an emend doc to the top uses the current mode", () => {
   const view = render(ui());
   const frame = frameByTitle();
   Object.defineProperty(frame, "contentWindow", { value: { postMessage: vi.fn() } });
-  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+  fireEvent(window, new MessageEvent("message", { source: frame.contentWindow, data: { type: "recense:ready" } }));
   act(() => setThemePick("light"));
   expect(frameByTitle()).toBe(frame);
   view.rerender(ui("top"));
@@ -498,11 +501,11 @@ test("resetting an emend doc to the top uses the current mode", () => {
 test.each(["custom", undefined] as const)("%s look never receives colours or theme messages", (look) => {
   const changeOS = systemTheme(false);
   const view = mount([], undefined, undefined, look);
-  view.message({ type: "emend:ready" });
+  view.message({ type: "recense:ready" });
   expect(view.post.mock.calls.map(([message]) => message.type)).toEqual([
-    "emend:layout",
-    "emend:highlight",
-    "emend:docs",
+    "recense:layout",
+    "recense:highlight",
+    "recense:docs",
   ]);
   view.post.mockClear();
   for (const pick of ["dark", "light", "system"] as const) act(() => setThemePick(pick));
@@ -530,11 +533,11 @@ test("an open HTML frame receives filtered custom colours and live colour update
     tokens: { ...customTheme.tokens, unknown: "#aabbcc" },
   };
   selectCustomTheme(entry);
-  const view = mount([], undefined, undefined, "emend");
+  const view = mount([], undefined, undefined, "recense");
   const src = view.frame.src;
-  view.message({ type: "emend:ready" });
+  view.message({ type: "recense:ready" });
   expect(view.post.mock.calls[1]).toEqual([
-    { type: "emend:theme", mode: "dark", scales: customTheme.scales, tokens: customTheme.tokens },
+    { type: "recense:theme", mode: "dark", scales: customTheme.scales, tokens: customTheme.tokens },
     "*",
   ]);
   view.post.mockClear();
@@ -547,14 +550,14 @@ test("an open HTML frame receives filtered custom colours and live colour update
   try {
     await waitFor(() =>
       expect(view.post.mock.calls).toEqual([
-        [{ type: "emend:theme", mode: "dark", scales: updated.scales, tokens: updated.tokens }, "*"],
+        [{ type: "recense:theme", mode: "dark", scales: updated.scales, tokens: updated.tokens }, "*"],
       ]),
     );
     expect(frameByTitle()).toBe(view.frame);
     expect(view.frame.src).toBe(src);
     view.post.mockClear();
     act(() => setThemePick("dark"));
-    expect(view.post.mock.calls).toEqual([[{ type: "emend:theme", mode: "dark", scales: {}, tokens: {} }, "*"]]);
+    expect(view.post.mock.calls).toEqual([[{ type: "recense:theme", mode: "dark", scales: {}, tokens: {} }, "*"]]);
   } finally {
     stop();
   }
@@ -562,11 +565,11 @@ test("an open HTML frame receives filtered custom colours and live colour update
 
 test.each(["dark", "light"] as const)("light-only docs take colours only from a light base (%s)", (base) => {
   selectCustomTheme({ ...customTheme, name: `html-${base}`, base });
-  const view = mount([], undefined, undefined, "emend", "light");
-  view.message({ type: "emend:ready" });
+  const view = mount([], undefined, undefined, "recense", "light");
+  view.message({ type: "recense:ready" });
   expect(view.post.mock.calls[1]).toEqual([
     {
-      type: "emend:theme",
+      type: "recense:theme",
       mode: "light",
       scales: base === "light" ? customTheme.scales : {},
       tokens: base === "light" ? customTheme.tokens : {},
@@ -577,14 +580,14 @@ test.each(["dark", "light"] as const)("light-only docs take colours only from a 
   view.post.mockClear();
   act(() => setThemePick("dark"));
   if (base === "light")
-    expect(view.post.mock.calls).toEqual([[{ type: "emend:theme", mode: "light", scales: {}, tokens: {} }, "*"]]);
+    expect(view.post.mock.calls).toEqual([[{ type: "recense:theme", mode: "light", scales: {}, tokens: {} }, "*"]]);
   else expect(view.post).not.toHaveBeenCalled();
   view.fragment("part");
   expect(frameByTitle().getAttribute("src")).toBe(`${doc.contentUrl}#part`);
 });
 
 test("theme messages reuse strict contract colours and mode", () => {
-  const valid = { type: "emend:theme", mode: "dark", scales: customTheme.scales, tokens: customTheme.tokens };
+  const valid = { type: "recense:theme", mode: "dark", scales: customTheme.scales, tokens: customTheme.tokens };
   expect(ParentToFrame.parse(valid)).toEqual(valid);
   expect(ParentToFrame.parse({ ...valid, mode: "light", scales: {}, tokens: {} })).toEqual({
     ...valid,
@@ -613,7 +616,7 @@ const preferenceChanges: Partial<LayoutPreferences>[] = [
   ...([12, 13, 14, 15] as const).map((codePx) => ({ codePx })),
 ];
 
-test.each(preferenceChanges)("emend layout applies %j live and sends stored values on a fresh mount", (patch) => {
+test.each(preferenceChanges)("recense layout applies %j live and sends stored values on a fresh mount", (patch) => {
   layoutStore.update({
     readingWidth: patch.readingWidth === "comfortable" ? "wide" : "comfortable",
     proseSize: patch.proseSize === 16 ? 15 : 16,
@@ -621,13 +624,13 @@ test.each(preferenceChanges)("emend layout applies %j live and sends stored valu
   });
   const layoutMessage = () => {
     const { readingWidth: width, proseSize: prose, codePx: code } = layoutStore.getSnapshot();
-    return { type: "emend:layout", wide: window.matchMedia("(min-width: 768px)").matches, width, prose, code };
+    return { type: "recense:layout", wide: window.matchMedia("(min-width: 768px)").matches, width, prose, code };
   };
-  const view = mount([], undefined, undefined, "emend");
+  const view = mount([], undefined, undefined, "recense");
   const src = view.frame.src;
   fireEvent.load(view.frame);
   expect(view.post).not.toHaveBeenCalled();
-  view.message({ type: "emend:ready" });
+  view.message({ type: "recense:ready" });
   expect(view.post.mock.calls[0]).toEqual([layoutMessage(), "*"]);
   view.post.mockClear();
   act(() => layoutStore.update(patch));
@@ -638,9 +641,9 @@ test.each(preferenceChanges)("emend layout applies %j live and sends stored valu
   act(() => layoutStore.update({ hideResolved: true }));
   expect(view.post).not.toHaveBeenCalled();
   view.unmount();
-  const fresh = mount([], undefined, undefined, "emend");
+  const fresh = mount([], undefined, undefined, "recense");
   fireEvent.load(fresh.frame);
-  fresh.message({ type: "emend:ready" });
+  fresh.message({ type: "recense:ready" });
   expect(fresh.post.mock.calls[0]).toEqual([layoutMessage(), "*"]);
 });
 
@@ -648,9 +651,9 @@ test.each(["custom", undefined] as const)("%s look ignores View width and size c
   const view = mount([], undefined, undefined, look);
   const src = view.frame.src;
   fireEvent.load(view.frame);
-  view.message({ type: "emend:ready" });
+  view.message({ type: "recense:ready" });
   expect(view.post.mock.calls[0]).toEqual([
-    { type: "emend:layout", wide: window.matchMedia("(min-width: 768px)").matches },
+    { type: "recense:layout", wide: window.matchMedia("(min-width: 768px)").matches },
     "*",
   ]);
   view.post.mockClear();
@@ -705,35 +708,36 @@ test("all production web frames use the exact sandbox without DOM string inserti
 });
 test("closed strict message schemas enforce every contract limit", () => {
   for (const data of [
-    { type: "emend:ready", extra: true },
+    { type: "recense:ready", extra: true },
     { type: "size", height: 400 },
-    { type: "emend:anchor", ...anchor, quote: "x".repeat(2001) },
-    { type: "emend:anchor", ...anchor, prefix: "x".repeat(33) },
-    { type: "emend:anchor", ...anchor, suffix: "x".repeat(33) },
-    { type: "emend:anchor", ...anchor, quote: "" },
-    { type: "emend:anchor", ...anchor, body: "extra" },
-    { type: "emend:navigate", path: "other.html", fragment: "x".repeat(1025) },
-    { type: "emend:navigate", path: "../other.html", fragment: "" },
-    { type: "emend:navigate", path: "/other.html", fragment: "" },
-    { type: "emend:navigate", path: "other.html", fragment: "", body: "extra" },
-    { type: "emend:navigate", path: "other.html" },
-    { type: "emend:navigate", path: "other.html", fragment: null },
-    { type: "emend:navigate", path: "other.html", fragment: "\ud800" },
+    { type: "recense:anchor", ...anchor, quote: "x".repeat(2001) },
+    { type: "recense:anchor", ...anchor, prefix: "x".repeat(33) },
+    { type: "recense:anchor", ...anchor, suffix: "x".repeat(33) },
+    { type: "recense:anchor", ...anchor, quote: "" },
+    { type: "recense:anchor", ...anchor, body: "extra" },
+    { type: "recense:navigate", path: "other.html", fragment: "x".repeat(1025) },
+    { type: "recense:navigate", path: "../other.html", fragment: "" },
+    { type: "recense:navigate", path: "/other.html", fragment: "" },
+    { type: "recense:navigate", path: "other.html", fragment: "", body: "extra" },
+    { type: "recense:navigate", path: "other.html" },
+    { type: "recense:navigate", path: "other.html", fragment: null },
+    { type: "recense:navigate", path: "other.html", fragment: "\ud800" },
   ])
     expect(FrameToParent.safeParse(data).success).toBe(false);
-  expect(FrameToParent.safeParse({ type: "emend:anchor", ...anchor, quote: "x".repeat(2000) }).success).toBe(true);
+  expect(FrameToParent.safeParse({ type: "recense:anchor", ...anchor, quote: "x".repeat(2000) }).success).toBe(true);
   expect(
-    ParentToFrame.safeParse({ type: "emend:highlight", anchors: [{ threadId: id, ...anchor, state: "open" }] }).success,
+    ParentToFrame.safeParse({ type: "recense:highlight", anchors: [{ threadId: id, ...anchor, state: "open" }] })
+      .success,
   ).toBe(false);
-  expect(ParentToFrame.safeParse({ type: "emend:scroll", threadId: id }).success).toBe(true);
+  expect(ParentToFrame.safeParse({ type: "recense:scroll", threadId: id }).success).toBe(true);
   for (const fragment of ["", "x".repeat(1024)])
-    expect(FrameToParent.safeParse({ type: "emend:navigate", path: "other.html", fragment }).success).toBe(true);
+    expect(FrameToParent.safeParse({ type: "recense:navigate", path: "other.html", fragment }).success).toBe(true);
 });
 
 test("layout messages accept exactly the legacy shape or all three valid preferences", () => {
-  const full = { type: "emend:layout", wide: true, width: "comfortable", prose: 16, code: 13 };
+  const full = { type: "recense:layout", wide: true, width: "comfortable", prose: 16, code: 13 };
   for (const wide of [true, false]) {
-    expect(ParentToFrame.parse({ type: "emend:layout", wide })).toEqual({ type: "emend:layout", wide });
+    expect(ParentToFrame.parse({ type: "recense:layout", wide })).toEqual({ type: "recense:layout", wide });
     for (const width of ["comfortable", "wide", "narrow"])
       for (const prose of [15, 16, 17, 18])
         for (const code of [12, 13, 14, 15]) {
@@ -742,7 +746,7 @@ test("layout messages accept exactly the legacy shape or all three valid prefere
         }
   }
   for (const wide of [undefined, null, "wide", "true", 0, 1, {}, []]) {
-    expect(ParentToFrame.safeParse({ type: "emend:layout", wide }).success).toBe(false);
+    expect(ParentToFrame.safeParse({ type: "recense:layout", wide }).success).toBe(false);
     expect(ParentToFrame.safeParse({ ...full, wide }).success).toBe(false);
   }
   for (const width of [undefined, null, "unknown", "1024px", 0, {}, []])
@@ -759,8 +763,8 @@ test("layout messages accept exactly the legacy shape or all three valid prefere
     { width: "wide", code: 14 },
     { prose: 17, code: 14 },
   ])
-    expect(ParentToFrame.safeParse({ type: "emend:layout", wide: true, ...partial }).success).toBe(false);
-  expect(ParentToFrame.safeParse({ type: "emend:layout", wide: true, extra: true }).success).toBe(false);
+    expect(ParentToFrame.safeParse({ type: "recense:layout", wide: true, ...partial }).success).toBe(false);
+  expect(ParentToFrame.safeParse({ type: "recense:layout", wide: true, extra: true }).success).toBe(false);
   expect(ParentToFrame.safeParse({ ...full, extra: true }).success).toBe(false);
 });
 
@@ -773,13 +777,13 @@ test("the drawer includes this doc's unplaced threads without offering a frame j
     comments: [{ id, author: "user", body: "Another doc's comment", sent: true, sentOn: 1 }],
   };
   const { message, post } = mount([unplaced, other]);
-  message({ type: "emend:ready" });
+  message({ type: "recense:ready" });
   expect(screen.getByText("Private synthetic comment")).toBeTruthy();
   expect(screen.getByText(/The block this comment was on is gone\./)).toBeTruthy();
   expect(screen.queryByText("Another doc's comment")).toBeNull();
   expect(screen.queryByRole("button", { name: "Show in doc" })).toBeNull();
   expect(screen.queryByText("No comments on this doc yet.")).toBeNull();
-  expect(post).toHaveBeenCalledWith({ type: "emend:highlight", anchors: [] }, "*");
+  expect(post).toHaveBeenCalledWith({ type: "recense:highlight", anchors: [] }, "*");
 });
 
 test("parent fragment changes and Reload establish fresh baselines; unexpected loads still lock the frame", () => {
@@ -792,14 +796,14 @@ test("parent fragment changes and Reload establish fresh baselines; unexpected l
     const post = vi.fn();
     Object.defineProperty(target, "contentWindow", { value: { postMessage: post } });
     fireEvent.load(target);
-    fireEvent(window, new MessageEvent("message", { source: target.contentWindow, data: { type: "emend:ready" } }));
-    expect(post).toHaveBeenCalledWith({ type: "emend:highlight", anchors: [] }, "*");
+    fireEvent(window, new MessageEvent("message", { source: target.contentWindow, data: { type: "recense:ready" } }));
+    expect(post).toHaveBeenCalledWith({ type: "recense:highlight", anchors: [] }, "*");
     expect(screen.queryByText("This doc navigated away.")).toBeNull();
     expect(target.getAttribute("src")).toBe(`${doc.contentUrl}#${fragment}`);
   }
   fireEvent(
     window,
-    new MessageEvent("message", { source: original.contentWindow, data: { type: "emend:anchor", ...anchor } }),
+    new MessageEvent("message", { source: original.contentWindow, data: { type: "recense:anchor", ...anchor } }),
   );
   expect(screen.queryByText("Comment on selection")).toBeNull();
   const target = frameByTitle() as HTMLIFrameElement;
@@ -818,29 +822,29 @@ test.each([false, true])("opening a doc fragment replaces an earlier thread scro
   const { frame, message, post, fragment } = mount([thread], { threadId: id, intent: "initial" });
   fireEvent.load(frame);
   if (ready) {
-    message({ type: "emend:ready" });
-    expect(post).toHaveBeenCalledWith({ type: "emend:scroll", threadId: id }, "*");
+    message({ type: "recense:ready" });
+    expect(post).toHaveBeenCalledWith({ type: "recense:scroll", threadId: id }, "*");
   }
   fragment("new-heading");
   const target = frameByTitle() as HTMLIFrameElement;
   const nextPost = vi.fn();
   Object.defineProperty(target, "contentWindow", { value: { postMessage: nextPost } });
   fireEvent.load(target);
-  fireEvent(window, new MessageEvent("message", { source: target.contentWindow, data: { type: "emend:ready" } }));
-  expect(nextPost).toHaveBeenCalledWith({ type: "emend:highlight", anchors: [{ threadId: id, ...anchor }] }, "*");
-  expect(nextPost.mock.calls.filter(([data]) => data.type === "emend:scroll")).toEqual([]);
+  fireEvent(window, new MessageEvent("message", { source: target.contentWindow, data: { type: "recense:ready" } }));
+  expect(nextPost).toHaveBeenCalledWith({ type: "recense:highlight", anchors: [{ threadId: id, ...anchor }] }, "*");
+  expect(nextPost.mock.calls.filter(([data]) => data.type === "recense:scroll")).toEqual([]);
   expect(target.getAttribute("src")).toBe(`${doc.contentUrl}#new-heading`);
 });
 test("only this frame proposes anchors; composer freezes the quote and only reviewer save creates a thread", async () => {
   const { frame, message } = mount();
-  message({ type: "emend:anchor", ...anchor }, window);
-  message({ type: "emend:anchor", ...anchor, quote: "x".repeat(2001) });
+  message({ type: "recense:anchor", ...anchor }, window);
+  message({ type: "recense:anchor", ...anchor, quote: "x".repeat(2001) });
   expect(screen.queryByText("Comment on selection")).toBeNull();
-  message({ type: "emend:anchor", ...anchor });
+  message({ type: "recense:anchor", ...anchor });
   expect(fetchMock).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText("Comment on selection"));
   expect(screen.getByText("seeds").tagName).toBe("MARK");
-  message({ type: "emend:anchor", ...anchor, quote: "replacement" });
+  message({ type: "recense:anchor", ...anchor, quote: "replacement" });
   expect(screen.queryByText("replacement")).toBeNull();
   fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Please explain" } });
   expect(localStorage.getItem(draftKey(id, thread.target))).toBe("Please explain");
@@ -870,26 +874,26 @@ test("ready and changed threads post only placed anchors for this doc; Show in d
   };
   const { message, post, update } = mount([other, thread, unplaced]);
   expect(post).not.toHaveBeenCalled();
-  message({ type: "emend:ready" });
-  expect(post).toHaveBeenCalledWith({ type: "emend:highlight", anchors: [{ threadId: id, ...anchor }] }, "*");
+  message({ type: "recense:ready" });
+  expect(post).toHaveBeenCalledWith({ type: "recense:highlight", anchors: [{ threadId: id, ...anchor }] }, "*");
   expect(JSON.stringify(post.mock.calls)).not.toContain("Private synthetic comment");
   expect(JSON.stringify(post.mock.calls)).not.toContain("state");
   fireEvent.click(screen.getByText("Show in doc"));
   expect(outerScroll).not.toHaveBeenCalled();
-  expect(post).toHaveBeenLastCalledWith({ type: "emend:scroll", threadId: id }, "*");
+  expect(post).toHaveBeenLastCalledWith({ type: "recense:scroll", threadId: id }, "*");
   update([]);
-  expect(post).toHaveBeenLastCalledWith({ type: "emend:highlight", anchors: [] }, "*");
-  expect(post.mock.calls.filter(([data]) => data.type === "emend:highlight")).toHaveLength(2);
+  expect(post).toHaveBeenLastCalledWith({ type: "recense:highlight", anchors: [] }, "*");
+  expect(post.mock.calls.filter(([data]) => data.type === "recense:highlight")).toHaveLength(2);
 });
 test("a second load permanently stops messages and anchors until explicit Reload mounts a fresh frame", () => {
   const { frame, message, post, container, update } = mount([thread]);
   fireEvent.load(frame);
-  message({ type: "emend:ready" });
+  message({ type: "recense:ready" });
   fireEvent.load(frame);
   post.mockClear();
   expect(screen.getByText("This doc navigated away.")).toBeTruthy();
-  message({ type: "emend:anchor", ...anchor });
-  message({ type: "emend:ready" });
+  message({ type: "recense:anchor", ...anchor });
+  message({ type: "recense:ready" });
   fireEvent.click(screen.getByText("Show in doc"));
   update([]);
   expect(post).not.toHaveBeenCalled();
@@ -899,7 +903,7 @@ test("a second load permanently stops messages and anchors until explicit Reload
   expect(next).not.toBe(frame);
   expect(next?.getAttribute("src")).toBe(doc.contentUrl);
   expect(screen.queryByText("This doc navigated away.")).toBeNull();
-  message({ type: "emend:anchor", ...anchor });
+  message({ type: "recense:anchor", ...anchor });
   expect(screen.queryByText("Comment on selection")).toBeNull();
 });
 test("HTML cards use placement order", () => {
@@ -916,12 +920,12 @@ test("HTML cards use placement order", () => {
 });
 
 test("R1.3 only position messages accept the introduction; goto still requires a heading", () => {
-  expect(FrameToParent.safeParse({ type: "emend:position", heading: null, fraction: 0 }).success).toBe(true);
-  expect(ParentToFrame.safeParse({ type: "emend:goto", heading: null, fraction: 0, label: "" }).success).toBe(false);
+  expect(FrameToParent.safeParse({ type: "recense:position", heading: null, fraction: 0 }).success).toBe(true);
+  expect(ParentToFrame.safeParse({ type: "recense:goto", heading: null, fraction: 0, label: "" }).success).toBe(false);
 });
 
 test("R5.1 goto distinguishes a pick without fraction from a restore including zero", () => {
-  const pick = { type: "emend:goto", heading: 0, label: "First" };
+  const pick = { type: "recense:goto", heading: 0, label: "First" };
   expect(ParentToFrame.parse(pick)).toEqual(pick);
   for (const fraction of [0, 0.5, 1]) expect(ParentToFrame.parse({ ...pick, fraction })).toEqual({ ...pick, fraction });
   for (const fraction of [null, -1, 2, NaN, Infinity, "0"])
@@ -931,7 +935,7 @@ test("R5.1 goto distinguishes a pick without fraction from a restore including z
 
 const pubImages = ["images/a #é.png", "images/b%2F.png", "images/c.png"];
 const imageMessage = {
-  type: "emend:image",
+  type: "recense:image",
   images: pubImages.map((path, index) => ({ path, caption: index === 2 ? "" : `Caption ${index + 1}` })),
   index: 0,
 };
@@ -941,12 +945,12 @@ function lightboxImage() {
   return image;
 }
 
-test.each(["emend", "custom"] as const)(
+test.each(["recense", "custom"] as const)(
   "%s pub images open in order without comments and preserve the frame on close",
   async (look) => {
     const { frame, message, container, post } = mount([], undefined, pubImages, look);
     fireEvent.load(frame);
-    message({ type: "emend:ready" });
+    message({ type: "recense:ready" });
     frame.focus();
     const focus = vi.spyOn(frame, "focus");
     const src = frame.getAttribute("src");
@@ -976,7 +980,7 @@ test("image messages require the ready current frame and a clicked path in this 
   const { message } = mount([], undefined, pubImages);
   message(imageMessage);
   expect(screen.queryByRole("dialog")).toBeNull();
-  message({ type: "emend:ready" });
+  message({ type: "recense:ready" });
   message(imageMessage, window);
   expect(screen.queryByRole("dialog")).toBeNull();
   for (const path of ["other-doc/image.png", "style.css", "other.html"])
@@ -988,16 +992,16 @@ test("image messages require the ready current frame and a clicked path in this 
 
 test("legacy docs without an image allowlist open no gallery", () => {
   const { message } = mount();
-  message({ type: "emend:ready" });
+  message({ type: "recense:ready" });
   message(imageMessage);
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("unknown non-clicked entries are dropped and duplicate paths keep the clicked occurrence", () => {
   const { message } = mount([], undefined, pubImages);
-  message({ type: "emend:ready" });
+  message({ type: "recense:ready" });
   message({
-    type: "emend:image",
+    type: "recense:image",
     images: [
       { path: "other.png", caption: "Unknown" },
       { path: pubImages[0], caption: "First occurrence" },
@@ -1020,10 +1024,10 @@ test.each(["images/pending\u200b.png", "../outside.png", "/content/other/image.p
   "a non-FilePath entry %j is dropped without blocking listed images",
   (path) => {
     const { message } = mount([], undefined, pubImages);
-    message({ type: "emend:ready" });
+    message({ type: "recense:ready" });
     expect(FilePath.safeParse(path).success).toBe(false);
     const gallery = {
-      type: "emend:image",
+      type: "recense:image",
       images: [{ path, caption: "Unknown" }, imageMessage.images[0], imageMessage.images[2]],
       index: 0,
     };
@@ -1046,11 +1050,11 @@ test.each(["load", "ready", "generation"])(
   (change) => {
     const { frame, message, fragment, container } = mount([], undefined, pubImages);
     fireEvent.load(frame);
-    message({ type: "emend:ready" });
+    message({ type: "recense:ready" });
     message(imageMessage);
     expect(screen.getByRole("dialog")).toBeTruthy();
     if (change === "load") fireEvent.load(frame);
-    else if (change === "ready") message({ type: "emend:ready" });
+    else if (change === "ready") message({ type: "recense:ready" });
     else fragment("part");
     expect(screen.queryByRole("dialog")).toBeNull();
     message(imageMessage);
@@ -1106,7 +1110,7 @@ test.each([
   { name: "ill-formed", path: "image\ud800.png" },
 ])("an $name path rejects the whole gallery before allowlist filtering", ({ path }) => {
   const { message } = mount([], undefined, pubImages);
-  message({ type: "emend:ready" });
+  message({ type: "recense:ready" });
   const gallery = { ...imageMessage, images: [imageMessage.images[0], { path, caption: "Unknown" }] };
   expect(FrameToParent.safeParse(gallery).success).toBe(false);
   message(gallery);
@@ -1116,9 +1120,9 @@ test.each([
 test("image messages over the total character budget open nothing, even with allowed paths", () => {
   const path = "image.png";
   const { message } = mount([], undefined, [path]);
-  message({ type: "emend:ready" });
+  message({ type: "recense:ready" });
   const images = Array.from({ length: 500 }, () => ({ path, caption: "x".repeat(2000 - path.length) }));
-  const atLimit = { type: "emend:image", images, index: 0 };
+  const atLimit = { type: "recense:image", images, index: 0 };
   expect(FrameToParent.safeParse(atLimit).success).toBe(true);
   const overLimit = { ...atLimit, images: [{ path, caption: "x".repeat(2001 - path.length) }, ...images.slice(1)] };
   expect(FrameToParent.safeParse(overLimit).success).toBe(false);
@@ -1127,7 +1131,7 @@ test("image messages over the total character budget open nothing, even with all
 });
 
 const diagramsJob = {
-  type: "emend:diagrams",
+  type: "recense:diagrams",
   request: 1,
   diagrams: [
     { source: "\n    graph LR\n      A --> B\n    ", mode: "light", width: 100 },
@@ -1145,7 +1149,7 @@ function renderFrame() {
   return { frame, post, reply };
 }
 
-test.each(["emend", "custom", undefined] as const)(
+test.each(["recense", "custom", undefined] as const)(
   "%s diagrams render sequentially with matching theme colours only",
   (look) => {
     setThemePick("light");
@@ -1163,7 +1167,7 @@ test.each(["emend", "custom", undefined] as const)(
     const view = mount([], undefined, undefined, look);
     view.message(diagramsJob);
     expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
-    view.message({ type: "emend:ready" });
+    view.message({ type: "recense:ready" });
     view.message(diagramsJob, null);
     expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
     view.message(diagramsJob);
@@ -1189,7 +1193,7 @@ test.each(["emend", "custom", undefined] as const)(
         source: "graph LR\n  A --> B",
         theme: "light",
         reply: "svg",
-        ...(look === "emend" ? { colors } : {}),
+        ...(look === "recense" ? { colors } : {}),
       },
       "*",
     );
@@ -1204,7 +1208,7 @@ test.each(["emend", "custom", undefined] as const)(
     expect(view.post).not.toHaveBeenCalled();
     draw.reply();
     expect(view.post).toHaveBeenCalledExactlyOnceWith(
-      { ...svgAnswer, type: "emend:diagram", request: 1, index: 0 },
+      { ...svgAnswer, type: "recense:diagram", request: 1, index: 0 },
       "*",
     );
     expect(screen.getByTitle("HTML diagram renderer")).toBe(draw.frame);
@@ -1213,9 +1217,9 @@ test.each(["emend", "custom", undefined] as const)(
       { type: "render", source: "graph TD; C --> D", theme: "dark", reply: "svg" },
       "*",
     );
-    expect(read).toHaveBeenCalledTimes(look === "emend" ? 1 : 0);
+    expect(read).toHaveBeenCalledTimes(look === "recense" ? 1 : 0);
     draw.reply({ type: "svg", svg: null });
-    expect(view.post).toHaveBeenLastCalledWith({ type: "emend:diagram", request: 1, index: 1, svg: null }, "*");
+    expect(view.post).toHaveBeenLastCalledWith({ type: "recense:diagram", request: 1, index: 1, svg: null }, "*");
     expect(screen.queryByTitle("HTML diagram renderer")).toBeNull();
     expect(view.container.querySelector("svg:not([class])")).toBeNull();
   },
@@ -1225,14 +1229,17 @@ test("diagram timeout reports null and gives the next diagram a fresh frame", ()
   vi.useFakeTimers();
   try {
     const view = mount();
-    view.message({ type: "emend:ready" });
+    view.message({ type: "recense:ready" });
     view.message(diagramsJob);
     const first = renderFrame();
     act(() => vi.advanceTimersByTime(DIAGRAM_DRAW_TIMEOUT_MS - 1));
     fireEvent.load(first.frame);
     view.post.mockClear();
     act(() => vi.advanceTimersByTime(1));
-    expect(view.post).toHaveBeenCalledExactlyOnceWith({ type: "emend:diagram", request: 1, index: 0, svg: null }, "*");
+    expect(view.post).toHaveBeenCalledExactlyOnceWith(
+      { type: "recense:diagram", request: 1, index: 0, svg: null },
+      "*",
+    );
     const next = renderFrame();
     expect(next.frame).not.toBe(first.frame);
     first.reply();
@@ -1252,8 +1259,8 @@ test("diagram timeout reports null and gives the next diagram a fresh frame", ()
 
 test.each(["request", "mode", "theme"])("a new diagram %s restarts the whole job", (change) => {
   setThemePick("light");
-  const view = mount([], undefined, undefined, "emend");
-  view.message({ type: "emend:ready" });
+  const view = mount([], undefined, undefined, "recense");
+  view.message({ type: "recense:ready" });
   view.message(diagramsJob);
   const first = renderFrame();
   fireEvent.load(first.frame);
@@ -1273,7 +1280,7 @@ test.each(["request", "mode", "theme"])("a new diagram %s restarts the whole job
   );
   next.reply();
   expect(view.post).toHaveBeenLastCalledWith(
-    { ...svgAnswer, type: "emend:diagram", request: change === "request" ? 2 : 1, index: 0 },
+    { ...svgAnswer, type: "recense:diagram", request: change === "request" ? 2 : 1, index: 0 },
     "*",
   );
 });
@@ -1281,7 +1288,7 @@ test.each(["request", "mode", "theme"])("a new diagram %s restarts the whole job
 test.each(["away", "generation", "unmount"])("diagram jobs stop on content %s", (change) => {
   const view = mount();
   fireEvent.load(view.frame);
-  view.message({ type: "emend:ready" });
+  view.message({ type: "recense:ready" });
   view.message(diagramsJob);
   const draw = renderFrame();
   fireEvent.load(draw.frame);

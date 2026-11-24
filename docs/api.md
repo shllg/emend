@@ -1,8 +1,8 @@
 # API v1
 
-The versioned API lives under `/api/v1`. `@emend/contract` exports its zod schemas and inferred
+The versioned API lives under `/api/v1`. `@recense/contract` exports its zod schemas and inferred
 TypeScript types under the same names, with `CONTRACT_VERSION = 1`. It is a workspace package in
-this repository and is not published to npm: never install an `@emend/*` package from the registry. All API timestamps are
+this repository and is not published to npm: never install an `@recense/*` package from the registry. All API timestamps are
 ISO 8601 UTC strings (for example `2026-01-01T00:10:00.000Z`). Object schemas strip unknown
 keys at every level. Additive fields stay in v1; breaking changes require `/api/v2`.
 
@@ -16,19 +16,25 @@ here **before** writing the route. This includes `PublishRequest` (plan task 1.6
 
 - CLI and MCP requests carry `Authorization: Bearer <token>`. Admin and agent tokens have separate
   scopes. A reviewer credential is accepted only from the session cookie, never as a bearer token.
-- The CLI sends `X-Emend-Client: cli/<semver>`. The minimum supported client version is `0.1.0`;
-  older clients receive `426 client_outdated`. Other header values are `400 invalid_request`.
+- The CLI sends `X-Recense-Client: cli/<semver>` and, for hubs from before the rename, the same value
+  as `X-Emend-Client`. The server reads `X-Recense-Client` first, then `X-Emend-Client`. The minimum
+  supported client version is `0.1.0`; older clients receive `426 client_outdated`. Other header
+  values are `400 invalid_request`.
 - Before sending a bearer, the CLI authenticates the discovered server with public
-  `GET /api/v1/capabilities` and `X-Emend-Challenge` (`SERVER_CHALLENGE_HEADER`). `ServerChallenge`
+  `GET /api/v1/capabilities` and `X-Recense-Challenge` (`SERVER_CHALLENGE_HEADER`; the CLI also sends the
+  same value as `X-Emend-Challenge`, and the server reads either, the first name first). `ServerChallenge`
   is 32 fresh random bytes encoded as canonical unpadded base64url (43 characters). The server
-  answers `X-Emend-Proof` (`SERVER_PROOF_HEADER`, schema `ServerProof`) with HMAC-SHA256 over the
+  answers `X-Recense-Proof` (`SERVER_PROOF_HEADER`, schema `ServerProof`; the same value also goes out as
+  `X-Emend-Proof`, and the CLI accepts either) with HMAC-SHA256 over the
   challenge's ASCII text, using the decoded 32-byte key stored in private `server.json`, encoded
   as canonical unpadded base64url. The CLI compares the digest in constant time. A missing,
   malformed or wrong proof prevents credential transmission. No challenge means no proof;
   a malformed challenge returns `400 invalid_request`. Capabilities remains public, and its
   proof reveals nothing about the key. Neither header carries a bearer or the server key.
-- Browsers use `emend_session`, with `HttpOnly`, `SameSite=Strict`, `Path=/`,
-  `Max-Age=2592000` (30 days), and `Secure` on HTTPS. Sessions renew at most once daily.
+- Browsers use `recense_session`, with `HttpOnly`, `SameSite=Strict`, `Path=/`,
+  `Max-Age=2592000` (30 days), and `Secure` on HTTPS. Sessions renew at most once daily. A request
+  that carries only a valid `emend_session` (the name before the rename) is authenticated too; its
+  response sets `recense_session` with the same attributes and expires `emend_session`.
   With a configured public HTTPS origin, a GET or HEAD renews the cookie only on that origin's Host.
 - JSON bodies use `Content-Type: application/json`. Routes reject bodies over their JSON byte
   limit with `413 too_large` before parsing, then validate with the contract schemas:
@@ -111,7 +117,7 @@ a machine token reaches only reviews from its own instance.
 | GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head; `?key=<key>` keeps the review with that stored review key. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
-| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark`, `theme=light` or `theme=<name>` sets the look of files emend draws. |
+| GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark`, `theme=light` or `theme=<name>` sets the look of files recense draws. |
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
@@ -205,21 +211,21 @@ Remote writeup images are dropped too. A declared
 path never contains a colon. The renderer drops any query or fragment, strips a leading `./`, percent-decodes, and refuses a
 result with a `..` segment, a leading `/`, a scheme, a backslash, a control character or an
 invalid or encoded-slash escape. A match becomes
-`<span class="emend-media"><img src="/api/v1/media/<sha256>" alt loading="lazy" decoding="async" width height><span class="emend-media-caption">…</span></span>`;
+`<span class="recense-media"><img src="/api/v1/media/<sha256>" alt loading="lazy" decoding="async" width height><span class="recense-media-caption">…</span></span>`;
 the caption is the alt text, or the file name when the alt text is empty. `width` and `height` are
 the image's displayed pixel size, read by the server from the stored bytes at publish (JPEG EXIF
 orientation applied); they are absent when the server cannot read the size. The wrapper span also has
-the class `emend-media-sized` exactly when the server sent `width` and `height`. On a declared media image,
+the class `recense-media-sized` exactly when the server sent `width` and `height`. On a declared media image,
 author-written width and height are always dropped. A paragraph holding only
-such images also has the class `emend-media-row`.
-A paragraph with exactly two media spans gets `emend-media-row emend-media-pair` when their trimmed
+such images also has the class `recense-media-row`.
+A paragraph with exactly two media spans gets `recense-media-row recense-media-pair` when their trimmed
 alts match `^before\b` and `^after\b`, case-insensitively, in that order.
 A paragraph with exactly three media spans whose trimmed alts match `^before\b`, `^after\b` and
-`^diff\b`, case-insensitively, in that order, is a pair too. It also gets `emend-media-pair-diff`,
-and its third span also gets `emend-media-diff`.
+`^diff\b`, case-insensitively, in that order, is a pair too. It also gets `recense-media-pair-diff`,
+and its third span also gets `recense-media-diff`.
 Only whitespace may precede or separate the images.
 An optional effect follows the last image after a newline in leading text whitespace or a `br`.
-Its content, including inline elements, goes in one `span.emend-media-effect` through the paragraph's end.
+Its content, including inline elements, goes in one `span.recense-media-effect` through the paragraph's end.
 The span starts at the first non-whitespace content; preceding whitespace and breaks stay outside it.
 Other text before the images or on the last image's line prevents a pair.
 The effect wrapper changes neither text nor block ids. Author classes keep the `user-content-`
@@ -229,9 +235,9 @@ image assets with the same markup, resolved relative to the doc's folder. Remote
 Markdown docs get the same pair and effect markup because they share the renderer.
 
 Only a writeup topic's Example turns labelled Before/After lines into aligned rows.
-The paragraph gets `emend-example-rows`; each labelled line gets `emend-example-row`.
-Its label through the colon gets `emend-example-label`, and its value gets `emend-example-value`.
-Introductory lines get `emend-example-line`; unlabelled lines after a label continue its value.
+The paragraph gets `recense-example-rows`; each labelled line gets `recense-example-row`.
+Its label through the colon gets `recense-example-label`, and its value gets `recense-example-value`.
+Introductory lines get `recense-example-line`; unlabelled lines after a label continue its value.
 Whitespace after a label stays in its value. Only separators before labelled lines stay between rows.
 Paragraphs containing media spans keep their media markup. Text and block ids stay unchanged.
 
@@ -239,10 +245,10 @@ A top-level quote whose first child is a paragraph that starts with a GitHub ale
 becomes a callout in the writeup, Markdown docs and comment HTML. The marker is `[!NOTE]`,
 `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`, in any case, alone on its line, and
 non-whitespace text or an element other than a line break must follow it in the quote. The
-`blockquote` gets `emend-callout emend-callout-<type>`, and the marker's own text goes in
-`span.emend-callout-marker`. A line break that ends the marker line gets
-`emend-callout-marker-break`, and a first paragraph that holds only the marker gets
-`emend-callout-marker-line`. The app hides these and draws the type's label; the label is not
+`blockquote` gets `recense-callout recense-callout-<type>`, and the marker's own text goes in
+`span.recense-callout-marker`. A line break that ends the marker line gets
+`recense-callout-marker-break`, and a first paragraph that holds only the marker gets
+`recense-callout-marker-line`. The app hides these and draws the type's label; the label is not
 text. Glossary terms and example rows skip the marker. A quote inside another element, or one
 that holds a Mermaid diagram or chart block, stays a plain quote. Text and block ids stay unchanged.
 
@@ -307,13 +313,13 @@ An optional `diff=1` query parameter adds the code diff after the writeup in the
 Any other value or a repeat gets `400 invalid_request` before waiting for a slot, also on `HEAD`.
 It changes no headers, filename or ZIP decision. The choice is off by default.
 
-An optional `theme=dark`, `theme=light` or `theme=<name>` query parameter sets the look of the files emend
+An optional `theme=dark`, `theme=light` or `theme=<name>` query parameter sets the look of the files recense
 draws: the writeup, Markdown docs, docs shown as source, the comments file and the omitted-content
 note page. Without it, they follow the reader's colour scheme. A custom HTML page keeps its own
-look. An HTML page in emend's look downloads with emend's stylesheet and its default fonts.
+look. An HTML page in recense's look downloads with recense's stylesheet and its default fonts.
 `theme=dark|light` fixes its mode; a theme name fixes its base mode and adds its colours.
 A light-only page stays light and takes a theme's colours only from a light-base theme.
-Without `theme`, the page follows the reader's mode. For the files emend draws, a theme name uses
+Without `theme`, the page follows the reader's mode. For the files recense draws, a theme name uses
 that theme’s resolved colours, including syntax colours for code blocks and docs shown as source;
 fonts stay unchanged. Revisions published before #136 keep their stored GitHub code colours.
 An invalid value, a repeat, or a missing or refused theme gets `400 invalid_request` before waiting
@@ -327,9 +333,9 @@ is a pub when `writeupEmpty` is true and `base` is null. A pub's base file holds
 the first doc row in file order whose path equals `main`, else the first doc row. The order
 includes both rendered and source views of a path. Markdown uses its stored rendered
 blocks and builds in its listed images like writeup images. Source uses its stored highlighted
-tokens. Code reviews and Markdown and source pubs get the emend header with the review title,
+tokens. Code reviews and Markdown and source pubs get the recense header with the review title,
 project, branch and publish links. An HTML pub keeps
-the agent's HTML layout, with no emend header. Its listed assets are built in after filtering.
+the agent's HTML layout, with no recense header. Its listed assets are built in after filtering.
 Mermaid diagrams and charts show as labelled source text. Links to other docs become plain text.
 Absolute HTTP, HTTPS and mailto links keep working on `a` and `area` elements.
 Only SVG `image` and `feImage` hrefs follow the resource rules. Other elements, including SVG
@@ -341,7 +347,7 @@ The response is `200` with `Content-Type: text/html; charset=utf-8`,
 `Content-Disposition: attachment; filename="<name>"`, `X-Content-Type-Options: nosniff`,
 `Cache-Control: no-store` and `Cross-Origin-Resource-Policy: same-origin`.
 The filename is the lowercase title, with runs outside `[a-z0-9]` replaced by `-`, trimmed,
-cut to 60 characters and trimmed again. An empty name becomes `emend`. It ends in `-r<seq>.html`.
+cut to 60 characters and trimmed again. An empty name becomes `recense`. It ends in `-r<seq>.html`.
 `Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src data:; base-uri 'none'; form-action 'none'`
 replaces the app CSP for this route. Every file starts with a UTF-8 byte order mark.
 The file also has a CSP meta with the same policy without `sandbox`.
@@ -365,7 +371,7 @@ threads stay. Only sent reviewer comments and all agent replies are included. A 
 comment left is left out. Unsent comments never reach the file. Each thread shows its state (Open, Sent,
 Answered or Resolved), the quoted text or the diff lines it was made on, and its comments,
 labelled "Reviewer" or "Agent", with an agent's outcome and the time in UTC. Comment bodies
-are shown as emend renders them in the app and pass the same filtering as the rest of the file:
+are shown as recense renders them in the app and pass the same filtering as the rest of the file:
 scripts, styles, frames, event handlers and remote images are removed. An image in a comment
 that cannot be shown leaves its alt text. A body that cannot be rendered shows as plain text.
 A body with no text or image after filtering also shows as escaped plain text.
@@ -470,7 +476,7 @@ only the note in its body. When any size or processing limit omits content, one 
 The server yields between steps while building, including CSS, element walks, references and
 base64 chunks. The final HTML serialization runs in one step.
 
-The file holds no server address, emend link, sign-in link, token or machine name.
+The file holds no server address, recense link, sign-in link, token or machine name.
 HTML docs lose scripts, event handlers, frames, embeds, `<base>`, `<noscript>`, `<meta http-equiv>`
 and unlisted resource references. Forms are unwrapped, keeping their content.
 Listed image, audio, video and font assets and `text/vtt` captions may be built in.
@@ -650,9 +656,9 @@ none; `default`, `file`, `override` and `fileError` describe the inputs even aft
 
 `GET /api/v1/themes` requires a reviewer session with `read` scope. It reads the `themes` folder
 beside the global `config.json`, without a repository check, like the server's reads of `keys`
-and `approvedActiveHours`. The CLI commands `emend theme list`, `copy` and `check` refuse a folder
+and `approvedActiveHours`. The CLI commands `recense theme list`, `copy` and `check` refuse a folder
 whose path, real path or any symlink hop lies inside a repository holding the working directory,
-with the same home-rooted dotfiles exception as `emend config`.
+with the same home-rooted dotfiles exception as `recense config`.
 There is one running read and at most one queued read per folder and per theme;
 each caller gets a read that started after its request. Settled results are not cached.
 Each theme is `<configDir>/themes/<name>/theme.json`. The folder name is the theme name.
@@ -665,10 +671,10 @@ At most 50 themes are listed, sorted by name. Each `theme.json` is at most 32 Ki
 `opendir` with its default buffer size and caps processing at 1000 entries, counting skipped entries too, with one overflow
 probe. A folder with more than 1000 entries returns an empty list and `folderError: true`.
 
-`emend theme copy <source> <name>` copies `dark`, `light` or a valid custom theme.
+`recense theme copy <source> <name>` copies `dark`, `light` or a valid custom theme.
 It creates `themes/` if missing and a new `<name>/` folder, both with mode `0700`.
 An existing destination folder or file refuses with one stderr line naming the theme and nothing written.
-It writes `theme.json` with flag `wx` and mode `0600`, then prints `emend: wrote <escaped path of theme.json>`.
+It writes `theme.json` with flag `wx` and mode `0600`, then prints `recense: wrote <escaped path of theme.json>`.
 If writing fails, it removes the `theme.json` it created and then its own folder when empty, and reports the error.
 A failure creating the `themes` folder reports `cannot write theme <path>`, with the escaped path of `theme.json`.
 
@@ -689,7 +695,7 @@ and `tokens`. Other keys are refused. For example:
 `density` accepts `"compact"`, `"regular"` or `"roomy"`, with `"regular"` as the default.
 It scales app spacing (padding, gaps and row heights), never text size; on touch screens compact
 keeps regular spacing so tap targets never shrink. HTML doc contents inside sandboxed frames keep
-their own spacing. `emend theme copy` always writes the source density, or `"regular"` when absent.
+their own spacing. `recense theme copy` always writes the source density, or `"regular"` when absent.
 
 `scales` accepts every neutral, ochre, green, blue, violet, teal and red scale step, and the
 16 origin tints, in `THEME_SCALE_STEPS`. `tokens` accepts every semantic colour in `THEME_TOKENS`,
@@ -708,13 +714,13 @@ before the point, hue below 360 and alpha omitted when 1.
 
 `fonts` accepts optional `text` and `code` names matching
 `/^[\p{L}\p{N}](?:[\p{L}\p{N} _-]{0,62}[\p{L}\p{N}])?$/u`, and an optional `files` list. CSS is not accepted.
-The named family precedes emend's default stack. When the theme names files for that font, the
-faces from those files precede emend's default stack instead and the name is not used.
+The named family precedes recense's default stack. When the theme names files for that font, the
+faces from those files precede recense's default stack instead and the name is not used.
 `DEFAULT_THEME_FONTS` is
 `{ text: "Geist", code: "JetBrains Mono" }`.
 The other built-in families, Inter, Roboto, Atkinson Hyperlegible Next, Geist Mono, Roboto Mono
 and Fira Code, load from the app's own origin only when a theme names them.
-Built-in names use emend's copy even when that font is installed.
+Built-in names use recense's copy even when that font is installed.
 The built-in files cover Latin and most Latin Extended letters in upright text.
 Italic files cover basic Latin and Latin-1 only.
 Most Vietnamese letters with tone marks and other scripts fall back to a system font.
@@ -743,7 +749,7 @@ Optional `weight` is an integer from 1 to 1000 or two such integers `[min, max]`
 for a variable font. Its default is 400. Optional `style` is `"normal"` (the default) or `"italic"`.
 Unknown entry keys in `theme.json` refuse the theme. The API's `ThemeFontFile` schema strips
 unknown keys in responses so additive fields stay in v1.
-`emend theme copy` keeps the source's `files` list unchanged.
+`recense theme copy` keeps the source's `files` list unchanged.
 
 `GET /api/v1/themes/:name/fonts/:file` requires a reviewer session with `read` scope, like the
 list route. Without a valid credential it answers `401 unauthorized`; agent and admin bearers
@@ -761,16 +767,16 @@ using the lowercased extension), `X-Content-Type-Options: nosniff`, `Cache-Contr
 `Cross-Origin-Resource-Policy: same-origin`, `Content-Security-Policy: sandbox; default-src 'none'`
 and `Content-Length`. HEAD sends the same headers without the body.
 The app CSP stays unchanged: `font-src 'self'`. The browser registers the picked theme's files
-with `FontFace` under the aliases `_emend-theme-text` and `_emend-theme-code`, using
-`display: "swap"`; missing or refused files fall back to emend's fonts.
+with `FontFace` under the aliases `_recense-theme-text` and `_recense-theme-code`, using
+`display: "swap"`; missing or refused files fall back to recense's fonts.
 The Download continues to use system fonts.
 
-For a valid theme, `emend theme check <name>` checks each distinct font file. With no problems it
-prints `emend: <name> is valid` and exits 0. Otherwise it prints one escaped
-`emend: <name>: font file <file> <reason>; the theme uses emend's font instead.` line per file
+For a valid theme, `recense theme check <name>` checks each distinct font file. With no problems it
+prints `recense: <name> is valid` and exits 0. Otherwise it prints one escaped
+`recense: <name>: font file <file> <reason>; the theme uses recense's font instead.` line per file
 and exits 1, without the valid line. The reasons are `is missing`,
 `is not a regular file directly in the fonts folder`, `is larger than 4 MiB` and `cannot be read`.
-`emend theme list` continues to report document validity only.
+`recense theme list` continues to report document validity only.
 
 `ThemeList = { themes: ThemeEntry[], folderError: boolean }`. A missing folder gives an empty
 list. `folderError` is true when an existing folder cannot be listed or exceeds the folder cap.
@@ -884,7 +890,7 @@ still start and stop. The interval timer is unref'd and stops with the server.
 Open pages refresh within a few seconds. A page using a refused or removed theme keeps its last
 valid version and shows the reason in Settings. The choice stays per device. Each tab holds its
 own last valid version in memory. Other tabs' saved copies of a theme it already holds are
-ignored. A bare `ThemeValid` in `emend.theme.custom` seeds a tab at load or when it switches to a
+ignored. A bare `ThemeValid` in `recense.theme.custom` seeds a tab at load or when it switches to a
 name it does not hold, only if the saved name matches. The tab parses that text only when it needs
 a seed and the text or picked name changed since the last parse. Identical writes are skipped.
 Storage events notify listeners only when the state changed.
@@ -942,11 +948,11 @@ not move it. A new revision clears it when it reopens the review. A review appro
 version or copied in by attach has no approval time and is in Done.
 `snoozed` is true while a snooze is in effect; `snoozedUntil` is its wake time, null for a snooze
 that lasts until the next revision (and null when not snoozed). `releasedAt` is the last time an
-agent confirmed a `closed` answer, so emend ended a wait; it is null when that never happened. Timestamps are ISO 8601 UTC strings; sequences are positive integers.
+agent confirmed a `closed` answer, so recense ended a wait; it is null when that never happened. Timestamps are ISO 8601 UTC strings; sequences are positive integers.
 `unsentCount` counts user comments without a Send; `openThreads` counts all unresolved threads.
 `pendingSend` means a Send is neither confirmed delivered nor set aside (an unconfirmed lease
 is still pending). `pickedUpAt` is the time an agent's CLI last confirmed a delivery that carried a
-live Send (a `go` or an approval) made on the review's newest revision, so emend saw the feedback
+live Send (a `go` or an approval) made on the review's newest revision, so recense saw the feedback
 reach the agent's stdout; it never says the agent works on it. A Send is live while it is not set
 aside. Only a delivery with `confirmed_at` set counts, so a claimed but unconfirmed lease does not,
 and a delivery without a Send (the `closed` answer) never counts. A Send names the revision on
@@ -958,7 +964,7 @@ the same field, since it extends `InboxItem`. Clients show one state, by priorit
 Agent waiting (`agentWaiting`); Not picked up yet (`pendingSend`); Picked up (`pickedUpAt`); none.
 
 `kind` is `"publish"` when the newest revision has an empty writeup and no diff (no `base`), as
-`emend publish <path>` produces; otherwise `"review"`. It follows the newest revision, so a later
+`recense publish <path>` produces; otherwise `"review"`. It follows the newest revision, so a later
 revision can change it. Both views carry it.
 
 `agentWaiting` is true for a server-held wait (including its 35-second grace
@@ -1111,22 +1117,24 @@ Markdown docs are `{ path, kind: "markdown", title?, headings?, terms?: Glossary
 (`blocks` empty if unrendered). `terms` holds at most 50 entries `{ term, definition, blockId }` and
 is present only when the doc declares a glossary (see "Glossary in a Markdown doc"); `blockId` names
 the block that holds the entry in that doc.
-HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", colorScheme?: "light", images?: FilePath[] }`.
+HTML docs are `{ path, kind: "html", contentUrl, look?: "recense" |`look?: "recense" | "custom", colorScheme?: "light", images?: FilePath[] }`. Wherever a `look` is
+read as input (an import bundle, a publish response read by a CLI), the earlier value `"emend"` is
+accepted and read as `"recense"`.
 The optional `images` lists the doc's own raster image assets linked through `doc_assets`,
 sorted by path, with at most `LIMITS.filesPerRevision` entries. Only `image/png`, `image/jpeg`,
 `image/gif`, `image/webp` and `image/avif` qualify. SVG, ICO and BMP assets stay in the frame;
 they cannot open in the lightbox. HTML docs without qualifying assets get `images: []`.
-The optional `look` is recorded at publish time: `emend` adds emend's layered pub stylesheet, and `custom`
+The optional `look` is recorded at publish time: `recense` adds recense's layered pub stylesheet, and `custom`
 keeps the page's own look. A page gets `custom` only when its head carries
-`<meta name="emend-look" content="custom">`. Every other page gets `emend`, with or without its own
-styles. The mark `content="emend"` is still accepted and changes nothing. A revision keeps the look
+`<meta name="recense-look" content="custom">`. Every other page gets `recense`, with or without its own
+styles. The marks `<meta name="emend-look" ...>` and `content="emend"`, as written before the rename, still count; `content="recense"` is accepted and changes nothing. A revision keeps the look
 stored with it: a page with its own styles published before this rule stays `custom`. An absent
 `look` (a revision published before this field existed, or metadata that failed) shows as a custom
 page.
-The optional `colorScheme: "light"` is recorded at publish time too, only with `look: "emend"`. It
-marks a page whose own styles set colours but have no dark-mode rule. emend shows that page in light
-mode, also while emend is dark, so its text stays readable. Without the field the page follows
-emend's mode. A page sets colours when:
+The optional `colorScheme: "light"` is recorded at publish time too, only with `look: "recense"`. It
+marks a page whose own styles set colours but have no dark-mode rule. recense shows that page in light
+mode, also while recense is dark, so its text stays readable. Without the field the page follows
+recense's mode. A page sets colours when:
 
 - a `style` element or a `style` attribute declares `color`, `background`, `fill`, `stroke` or a
   property ending in `-color`, with a value other than `inherit`, `initial`, `unset`, `revert`,
@@ -1134,17 +1142,17 @@ emend's mode. A page sets colours when:
 - an HTML element carries `bgcolor`, `color`, `text`, `link`, `vlink` or `alink`;
 - an SVG element carries `fill`, `stroke`, `color`, `stop-color`, `flood-color` or `lighting-color`
   with a value other than those keywords;
-- it links a stylesheet, or a style element uses `@import`. emend does not read those files.
+- it links a stylesheet, or a style element uses `@import`. recense does not read those files.
 
 A dark-mode rule is `prefers-color-scheme` or `light-dark(` in a style element, `light-dark(` in a
 `style` attribute or an SVG colour attribute, or `prefers-color-scheme` in the `media` attribute of
 a style element or a stylesheet link. Both checks read CSS outside comments, strings and `url()`
 values, and cover declarative shadow roots, not inert templates.
-The leading copy `emend look` writes counts for neither check, nor as the page’s own styles,
-when recognised exactly as written: `<meta charset="utf-8"><style data-emend-look>` at the start
+The leading copy `recense look` writes counts for neither check, nor as the page’s own styles,
+when recognised exactly as written: `<meta charset="utf-8"><style data-recense-look>` at the start
 of the page, after a doctype and comments, optionally after `<html data-theme="light">`, ending
 at the first `</`, which must be exactly `</style>`. Any other `style` element counts as usual,
-including one carrying `data-emend-look`.
+including one carrying `data-recense-look`.
 
 The URL is
 `/content/<docKey>/<path>` with each path segment percent-encoded. The doc key is the revision's
@@ -1163,25 +1171,25 @@ Content-Type is the stored media type, with `; charset=utf-8` for `text/*`, `app
 and `image/svg+xml`; the doc is `text/html; charset=utf-8`.
 
 The bridge also inserts one style element first in the doc's head, in the cascade layer
-`emend-fallback`: `pre { overflow-x: auto; }`. Declared first and layered, it loses to every
+`recense-fallback`: `pre { overflow-x: auto; }`. Declared first and layered, it loses to every
 document-level rule of the doc's own CSS, so a code block the doc leaves unstyled scrolls inside its
 own box instead of widening the doc. A `::slotted(pre)` rule in a shadow root does not override it:
 the cascade ranks the outer document's rules above a shadow tree's.
 
-A doc whose `look` is `emend` also receives emend's pub stylesheet as one style element, placed
+A doc whose `look` is `recense` also receives recense's pub stylesheet as one style element, placed
 after any leading byte order mark, whitespace, comments and doctype, so the doc never falls into
-quirks mode. The route first removes the leading copy `emend look` writes (recognised as described
+quirks mode. The route first removes the leading copy `recense look` writes (recognised as described
 under the colour checks), so the frame shows the page the Download shows.
-The stylesheet is `pub-frame.css` from the web build: emend's tokens and element
-styles in the cascade layer `emend`, with its fonts as `data:` URLs. It contains no `</`, backslash,
+The stylesheet is `pub-frame.css` from the web build: recense's tokens and element
+styles in the cascade layer `recense`, with its fonts as `data:` URLs. It contains no `</`, backslash,
 `@import`, `image-set(` or `src(`. Every `url(` must use `data:`. The build and every server read
 check these rules and the `pubStylesheetBytes` limit. A missing or rejected sheet falls back to a
 minimal light and dark sheet with system colours.
-The stylesheet declares `@layer emend-file, emend;`, so page CSS in the layer `emend-file` never
-overrides emend's look.
+The stylesheet declares `@layer recense-file, recense;`, so page CSS in the layer `recense-file` never
+overrides recense's look.
 Every unlayered rule of the doc's own CSS wins over it. The doc's headers stay exactly as above.
 A doc whose `colorScheme` is `light` also gets the fixed start tag `<html data-theme="light">` right
-before that style element, regardless of the query. Other docs in emend's look accept an optional
+before that style element, regardless of the query. Other docs in recense's look accept an optional
 `theme=light` or `theme=dark` query, adding the matching fixed start tag (`<html data-theme="light">`
 or `<html data-theme="dark">`) there for the first paint. All other values, including an empty value,
 are ignored; custom and legacy looks ignore the query entirely. The raw query is never emitted.
@@ -1190,7 +1198,7 @@ adds attributes the root lacks, so the doc cannot change it. The sheet's dark co
 fallback's dark scheme apply with `data-theme="dark"`, or when the browser prefers dark and the
 root has no `data-theme="light"`. An explicit light or dark root uses that `color-scheme`.
 
-A doc in emend's look also gets code colours, the same as in a Markdown doc. The route colours an
+A doc in recense's look also gets code colours, the same as in a Markdown doc. The route colours an
 HTML-namespace `code` that is a direct child of an HTML-namespace `pre` without the `mermaid`
 class token. The `code`'s first class token that starts with `language-` must name a language the
 Markdown renderer colours. Both its tags must appear in the source, and the source between them
@@ -1200,9 +1208,9 @@ UTF-8 bytes per block and 65,536 in all, and lines over 400 characters stay plai
 1,048,576 UTF-8 bytes, or one that parses into more than 200,000 elements, stays plain. The route
 replaces only the bytes between that `code`'s start and end tags. It writes the same text, escaped,
 in `span` elements whose only attribute is the `style` Shiki gives that token in a Markdown doc.
-With emend's syntax theme the colours are the `--syn-*` variables, so they follow the mode and an
+With recense's syntax theme the colours are the `--syn-*` variables, so they follow the mode and an
 applied theme. Every other byte stays as stored, and so does the text that quotes and placement
-read. Any other block stays plain. Custom and legacy looks, Downloads and `emend look` keep code
+read. Any other block stays plain. Custom and legacy looks, Downloads and `recense look` keep code
 plain.
 
 The server never parses the doc on its request thread. A doc without a `<code` tag gets no
@@ -1223,7 +1231,7 @@ Cache-Control: no-store
 
 Successful doc responses have the same headers, with only `script-src` replaced by
 `script-src 'sha256-<base64 SHA-256 of the bridge script text>'`. The server computes that hash
-once from the bridge constant and injects exactly that text, byte for byte. Only emend's bridge
+once from the bridge constant and injects exactly that text, byte for byte. Only recense's bridge
 runs: a doc's own inline scripts, event handlers, `javascript:` URLs and script files never run.
 Script files may still be published and served, but never execute in the frame. Assets, including
 SVG opened as a document, and errors allow no scripts. The bridge's body text model equals the
@@ -1240,11 +1248,11 @@ X-Frame-Options. App-page headers are unchanged.
 The app displays HTML in an iframe with `sandbox="allow-scripts"` and `referrerPolicy="no-referrer"`.
 Relative asset URLs resolve within the doc key. Primary clicks without modifiers on links to
 another HTML or Markdown doc under this doc key send
-`{ type: "emend:navigate", path: FilePath, fragment: string }` to the parent. The path and fragment
+`{ type: "recense:navigate", path: FilePath, fragment: string }` to the parent. The path and fragment
 are decoded; the fragment excludes `#` and is at most 1024 characters. The parent accepts this
 strict message only from the current trusted frame and only for another doc in the same revision.
 It opens that doc as a new history entry. Every frame src is the doc's own content URL; for a doc in
-emend's look that is not light-only, it adds `?theme=` and the mode the app shows at that moment. For
+recense's look that is not light-only, it adds `?theme=` and the mode the app shows at that moment. For
 an HTML target with a fragment, the newly mounted frame's src then adds `#` and the percent-encoded
 fragment. Same-doc HTML `a` and `area` links and SVG
 `a` links (`href` or `xlink:href`), in the document or an open shadow root, are handled by the bridge
@@ -1262,39 +1270,39 @@ refresh to an outside URL; the frame then shows `This doc navigated away.` with 
 link opens the asset in the frame and triggers the same state.
 
 A parent-initiated src change or Reload mounts a fresh frame generation. A further unexpected
-load or a second `emend:ready` in that generation disables the frame's bridge and shows
+load or a second `recense:ready` in that generation disables the frame's bridge and shows
 `This doc navigated away.` with Reload. The second ready locks it immediately, before load;
 no further messages or commands are accepted until a parent-initiated reload or navigation. Directly
 navigating to another doc under the current doc's key still returns 404 and triggers that state.
 Other frame messages carry ready notifications, proposed quotes, quote highlights and thread
 scroll requests; saving a comment requires the reviewer's explicit action.
 
-After each `emend:ready`, the parent sends `emend:layout` first, before highlights, doc paths or
+After each `recense:ready`, the parent sends `recense:layout` first, before highlights, doc paths or
 position restore. The message schema accepts exactly two strict shapes, with no extra fields:
 
-- `{ type: "emend:layout", wide: boolean }`
-- `{ type: "emend:layout", wide: boolean, width: "comfortable" | "wide" | "narrow", prose: 15 | 16 | 17 | 18, code: 12 | 13 | 14 | 15 }`
+- `{ type: "recense:layout", wide: boolean }`
+- `{ type: "recense:layout", wide: boolean, width: "comfortable" | "wide" | "narrow", prose: 15 | 16 | 17 | 18, code: 12 | 13 | 14 | 15 }`
 
-The parent adds the View menu's width and sizes only for a frame in emend's look. It sends layout
-again whenever the app crosses its 768px breakpoint, or those preferences change for emend's look,
+The parent adds the View menu's width and sizes only for a frame in recense's look. It sends layout
+again whenever the app crosses its 768px breakpoint, or those preferences change for recense's look,
 without reloading the frame. Custom and legacy frames receive only `wide`.
 The bridge accepts layout only from its parent. When `width`, `prose` or `code` is present, all
 three must be present and valid; otherwise it ignores the whole message, `wide` included. It
-sets `data-emend-layout` to `wide` or `narrow` on the root element and, when supplied, sets
-`data-emend-width` to the width name, `data-emend-prose` and `data-emend-code` to the size strings.
+sets `data-recense-layout` to `wide` or `narrow` on the root element and, when supplied, sets
+`data-recense-width` to the width name, `data-recense-prose` and `data-recense-code` to the size strings.
 A message without preferences leaves the earlier width and size attributes alone. When these
 attributes change while a pinned position still holds, or any container on the reading heading's
 rendered path is scrolled (a nonzero `scrollTop`), the bridge returns to the same heading and
-fraction. Every `emend:goto` pins its target (a restore, a Contents pick or a `#h-` link), and so
+fraction. Every `recense:goto` pins its target (a restore, a Contents pick or a `#h-` link), and so
 does the bridge's own return after a layout change; the pin holds until the view moves away from
 where it landed. This includes nested scrollers and a pinned position temporarily clamped to the
-top because the doc fits. A doc with nothing scrolled and no pin stays where it is. emend's look uses these attributes
+top because the doc fits. A doc with nothing scrolled and no pin stays where it is. recense's look uses these attributes
 to match the Markdown reader's layout and sizes. On phones the measure stays 68ch; sizes still
 apply. Until layout arrives, the frame's own width decides.
 
-For a frame in emend's look, the parent sends the strict message
-`{ type: "emend:theme", mode: "dark" | "light", scales: Record<string, ThemeColor>, tokens: Record<string, ThemeColor | ThemeScaleStep> }`
-after `emend:layout` on each ready. It sends it again whenever the pick, the OS mode under System,
+For a frame in recense's look, the parent sends the strict message
+`{ type: "recense:theme", mode: "dark" | "light", scales: Record<string, ThemeColor>, tokens: Record<string, ThemeColor | ThemeScaleStep> }`
+after `recense:layout` on each ready. It sends it again whenever the pick, the OS mode under System,
 or the custom theme's colours change, without reloading. Only supported scale and token names are
 sent; fonts are excluded. A light-only doc always receives `light`, with colours only from a
 light-based custom theme. Otherwise the resolved mode and the selected custom theme's colours are
@@ -1304,15 +1312,15 @@ The bridge accepts theme messages only from its parent and validates the whole m
 changing anything: mode must be exactly `dark` or `light`; both maps must be non-null, non-array
 objects with at most 256 own entries each. Keys in both maps and token step values are names of
 lowercase letters and digits in dash-separated parts, at most 40 characters, matching
-`^[a-z0-9]+(?:-[a-z0-9]+)*$`. The bridge accepts any such name; the parent sends only emend's own
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`. The bridge accepts any such name; the parent sends only recense's own
 scale-step and token names. Scale values must be colours; token values may also be step names.
 Colours match `^#[0-9a-f]{6}(?:[0-9a-f]{2})?$` or `^oklch\(N N N(?: / N)?\)$`, where each `N` is
 `(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{0,5}[1-9])?`. Range checks stay with the contract.
 Any invalid entry rejects the whole message. The bridge sets only the root's `data-theme` and
 replaces the text of one constructed stylesheet, created and adopted once, with
-`@layer emend{:root:root:root{--<key>:<value>;...}}`; token steps become `var(--<step>)`.
+`@layer recense{:root:root:root{--<key>:<value>;...}}`; token steps become `var(--<step>)`.
 Empty maps clear the sheet. The layer lets the doc's unlayered CSS win, while the selector beats
-emend's default colour rules. Without constructed stylesheets, only `data-theme` is set. Theme
+recense's default colour rules. Without constructed stylesheets, only `data-theme` is set. Theme
 messages do not scroll or change other attributes. An applied theme can request diagrams again
 when their computed text colour changes mode, as described below.
 
@@ -1320,21 +1328,21 @@ Custom and legacy pubs receive no theme message. Their frames inherit the app's 
 which current Chromium and Firefox pass to the frame's `prefers-color-scheme`, so a custom pub
 with its own dark rules follows the pick in those browsers.
 
-After `emend:ready`, the parent sends `{ type: "emend:docs", paths: FilePath[] }`, the exact doc
+After `recense:ready`, the parent sends `{ type: "recense:docs", paths: FilePath[] }`, the exact doc
 paths in this revision. Bridge links resolve against the existing document base, decode each
 segment once, and use the same rejection rules as the core resolver. The parent validates the
 destination again before navigating.
 
-After ready, before highlights, the parent sends `{ type: "emend:repo", url: RepoUrl }` when a
+After ready, before highlights, the parent sends `{ type: "recense:repo", url: RepoUrl }` when a
 repository URL is available. The bridge validates it and accepts only the first valid message;
 it links `#123` text, skipping existing links, code and preformatted text, form controls,
 script/style/template/noscript, non-HTML elements and shadow roots. A click on a bridge link,
 including a modified click or a middle click, sends
-`{ type: "emend:issue", number }` with only an integer from 1 through 9999999. The parent opens
+`{ type: "recense:issue", number }` with only an integer from 1 through 9999999. The parent opens
 its own `repoUrl/issues/<number>` in a new tab with `noopener,noreferrer`.
 
 After ready and whenever an HTML doc's `changes` differs, the parent sends
-`{ type: "emend:changed", parts: number, marks: { index: number, revision: number }[] }`.
+`{ type: "recense:changed", parts: number, marks: { index: number, revision: number }[] }`.
 Absent `changes` sends nothing. The bridge accepts only its parent and exactly these keys;
 `parts` must be an integer from 0 through 10000, and `marks` an array of at most `parts` plain
 objects with exactly `index` and `revision`. Indexes must be integers in `[0, parts)`, strictly
@@ -1344,13 +1352,13 @@ the previous ones, preserving reading position. Each marked part gets a violet l
 each run of consecutive parts with the same revision starts with `Changed in rev N`.
 Labels live in closed shadow roots and never enter quotes or headings. Diagram marks follow
 the visible diagram host. Both looks show marks with a fixed palette from the last applied
-`emend:theme` mode, defaulting to light (also for custom pages and light-only docs). Light uses
+`recense:theme` mode, defaulting to light (also for custom pages and light-only docs). Light uses
 line `#8b5cf6`, label background `#f5f3ff` and text `#6d28d9`; dark uses line `#a78bfa`,
 background `rgba(139, 92, 246, 0.16)` and text `#c4b5fd`. The line and label use inline important
 styles with a fixed palette. A doc's own CSS or markup can still hide marks or show look-alike
 ones, so marks are a reading aid, not proof.
 
-HTML diagrams use `<pre class="mermaid">` in both emend's look and custom pages. Only
+HTML diagrams use `<pre class="mermaid">` in both recense's look and custom pages. Only
 HTML-namespace `pre` elements qualify. A `pre` qualifies with the exact `mermaid` class token
 (split on ASCII whitespace). It also qualifies when its only element child is an HTML-namespace
 `code` with the exact `language-mermaid` class token, split on ASCII whitespace. The `pre`'s other
@@ -1364,8 +1372,8 @@ so authors escape `<` as `&lt;` and `&` as `&amp;`. Empty-after-trimming sources
 50,000 characters stay as text. The scan keeps at most 50 diagrams and stops before the sum of
 source lengths would exceed 1,000,000.
 
-Immediately after `emend:ready`, a nonempty scan sends the strict message
-`{ type: "emend:diagrams", request: number, diagrams: { source: string, mode: "light" | "dark", width: number }[] }`.
+Immediately after `recense:ready`, a nonempty scan sends the strict message
+`{ type: "recense:diagrams", request: number, diagrams: { source: string, mode: "light" | "dark", width: number }[] }`.
 `request` is an integer from 1 through 2147483647, starting at 1 and increasing on every post.
 There are 1..50 entries; sources are well-formed strings of 1..50000 characters, with a total
 of at most 1,000,000. Width is the host's bounding rectangle width once placed, otherwise the
@@ -1386,7 +1394,7 @@ its latest job sequentially in one hidden, laid-out `/mermaid-frame.html` iframe
 outside the reading flow, invisible and noninteractive, with width clamped to 240..2400 px.
 On load, and after each answer, it sends `{ type: "render", source, theme: mode, reply: "svg", colors? }`.
 Source drops leading and trailing blank lines and the common leading whitespace of nonblank
-lines. Colours come from `readMermaidColors()` only in emend's look when the diagram mode matches
+lines. Colours come from `readMermaidColors()` only in recense's look when the diagram mode matches
 the app's resolved mode; otherwise the frame uses its built-in palette. A new request, app theme
 key or resolved mode restarts the whole job with a fresh frame. Each diagram gets
 `DIAGRAM_DRAW_TIMEOUT_MS` (20000 ms); a timeout reports failure, replaces the render frame and
@@ -1404,11 +1412,11 @@ accepts answers only from its render frame's current window. The SVG must be wel
 keys, `size` messages and other invalid replies are ignored.
 
 The parent relays only through its existing guarded content-frame post:
-`{ type: "emend:diagram", request, index, svg, width, height }` or
-`{ type: "emend:diagram", request, index, svg: null }`. Both shapes are strict. The same request,
+`{ type: "recense:diagram", request, index, svg, width, height }` or
+`{ type: "recense:diagram", request, index, svg: null }`. Both shapes are strict. The same request,
 SVG and dimension limits apply, and `index` is an integer in 0..49. The bridge accepts only its
 parent, the current request and an index within its current list; any invalid field rejects the
-whole message. For a string SVG it inserts a `div` with empty `data-emend-diagram` directly
+whole message. For a string SVG it inserts a `div` with empty `data-recense-diagram` directly
 before the `pre`, with a closed shadow root containing one `img`. The image has `alt="Diagram"`,
 the supplied width and height, and CSSOM-set `display: block; max-width: 100%; height: auto`.
 Its last-set attribute is `src`, containing `data:image/svg+xml;charset=utf-8,` plus the encoded
@@ -1421,17 +1429,17 @@ display exactly, removing the property if originally absent. It never changes th
 Quote text, highlight anchors and headings remain intact, and diagram images never enter the image gallery.
 Placement, removal and source visibility changes hold reading position with the same pin and
 scroll-path rules as layout.
-Only emend's look gives the host the margin, padding, border, radius, sunken background and
+Only recense's look gives the host the margin, padding, border, radius, sunken background and
 overflow of a code block. Custom pages receive no host styles.
 
 The app never inserts this SVG into its own DOM. Mermaid still uses `securityLevel: "strict"`
 and its existing sandbox and headers. The content frame shows SVG only as an image, which runs
 no scripts, fetches no resources and takes no input. Content CSP still has `frame-src 'none'`,
 `connect-src 'none'` and only the bridge's script hash. No sandbox, header or sanitize schema
-changes. Download and files opened outside emend, including after `emend look`, show source.
+changes. Download and files opened outside recense, including after `recense look`, show source.
 
 A primary click or tap without modifiers on a qualifying image sends
-`{ type: "emend:image", images: { path: string, caption: string }[], index: number }`.
+`{ type: "recense:image", images: { path: string, caption: string }[], index: number }`.
 Both objects are strict. Each path is a well-formed string of at most `LIMITS.pathChars` (4096)
 characters; the message schema does not require it to be a `FilePath`. Exact membership in
 the doc's server-supplied `images` (all valid `FilePath`s) determines which entries may open.
@@ -1498,7 +1506,7 @@ shows the gallery without a comment action, leaving the frame mounted and
 its reading position unchanged on close. A new frame generation or navigation away closes it.
 
 HTML Contents addresses the server's h2/h3 list by zero-based index. The parent sends
-`{ type: "emend:goto", heading: number, label: string }` for a pick; a restore also includes
+`{ type: "recense:goto", heading: number, label: string }` for a pick; a restore also includes
 `fraction: number`, including when it is zero. Messages go only to the current ready frame. The
 bridge checks an integer index in its matching heading list, the server-cleaned label, and, when
 present, a finite fraction in [0, 1]. It scrolls without changing location. Position is measured
@@ -1528,10 +1536,10 @@ After a goto lands (its last restore pass), the bridge takes one measurement and
 landing measurement. Until the view moves, reports carry the requested heading and fraction (zero
 for a pick). The pin ends at the first measurement that differs from the landing measurement (another
 heading, or a fraction more than 0.002 away), whatever moved the view: a wheel, a scrollbar drag,
-find-in-page, `emend:scroll` or a link scroll. `emend:scroll` and the bridge's own link scrolls also
+find-in-page, `recense:scroll` or a link scroll. `recense:scroll` and the bridge's own link scrolls also
 end it explicitly. Input events alone, and clicks that move nothing, do not end the pin. A same-doc
 fragment link with no matching target does not scroll or end the pin.
-The bridge throttles `{ type: "emend:position", heading: number, fraction: number }` to one message
+The bridge throttles `{ type: "recense:position", heading: number, fraction: number }` to one message
 per 200 ms and posts only when the reported position differs from the last one posted (same heading
 and a fraction within 0.002 is not a change). Window resize and composed `wheel`, `touchmove`,
 `touchend`, `keydown`, `pointerdown` and `pointerup` events start up to five samples. A `scroll`
@@ -1548,7 +1556,7 @@ posted position, so the next visible measurement reports again. Scrolling inside
 no input event reaches may not report. The parent validates it with the message schema and the open
 doc's list, only after ready and before any unexpected load. Labels and quote text never enter position storage.
 When no laid-out heading has reached the reading line, the bridge instead sends
-`{ type: "emend:position", heading: null, fraction: 0 }`. This strict shape clears the stored
+`{ type: "recense:position", heading: null, fraction: 0 }`. This strict shape clears the stored
 position and current Contents marker; it never stores a pseudo-heading. Back and reload return
 to the document's top. A heading is laid out when the native `checkVisibility()` returns true;
 where that method is unavailable, the bridge falls back to having client rects. Each measurement
@@ -1574,7 +1582,7 @@ A comment that failed stays `null` for 10 minutes and is not retried on every re
 comment never blanks the others. A client then shows `body` as plain text. `#123` in a comment links to
 the issue of the viewed revision's `repoUrl`. Unlike docs and the writeup, a comment keeps a single line
 break inside a paragraph as a line break, as GitHub comments do; fences, inline code and raw HTML are
-unchanged. `html` appears only here: hand-offs, `emend wait` and `emend feedback` output, MCP tools, export,
+unchanged. `html` appears only here: hand-offs, `recense wait` and `recense feedback` output, MCP tools, export,
 import and attach bundles keep the raw Markdown `body` and carry no `html`, and comment inputs are
 unchanged. Budgets per response: 1 MiB of HTML in all, and 256 KiB of Markdown that is not already in
 the server's cache. One comment's HTML is also capped at 256 Ki characters (a body that expands past it is
@@ -1633,7 +1641,7 @@ ordering and the 100-row cap, so the cap counts matches. A malformed or repeated
 `400 invalid_request`.
 
 `?key=<key>` keeps only reviews whose stored review key equals the value exactly: 64 lowercase
-hex characters, the `reviewKey` the publisher sent. For a code review, `emend publish` derives it
+hex characters, the `reviewKey` the publisher sent. For a code review, `recense publish` derives it
 from the instance, the worktree root and the branch. With both `key` and `head`, both must match.
 The key filter applies with the owner and origin-instance conditions, before the ordering and
 the cap. A malformed or repeated `key` is `400 invalid_request`. Capabilities lists
@@ -1643,7 +1651,7 @@ whole list, so a client checks that feature before it relies on the filter.
 `head` and `branch` are the values the publisher sent; the server stores them unverified, and a
 review without code files (docs or a plan only) shows the reviewer no diff of that commit. So
 `approved.head === sha` means the reviewer approved a revision that its publisher labelled with that
-commit, not that emend verified the commit's content was shown. A caller that gates on an approval
+commit, not that recense verified the commit's content was shown. A caller that gates on an approval
 should require all of: `approved` is not null, `approved.head === sha`,
 `approved.revision === newest.revision` (an import can carry an approval for an older revision) and
 the expected `branch`; it should also make sure itself that the approved review carried the commit's
@@ -1711,7 +1719,7 @@ These fields deliberately remain unbounded because their write side has no match
 - `RevisionView.changedBlocks`: it unions changes across potentially unbounded revision history
   after the last Send. `blocksPerRevision` limits one revision and cannot cap this accumulated union.
 
-Browser startup calls `configureBrowserValidation()` from the schema-free `@emend/contract/browser`
+Browser startup calls `configureBrowserValidation()` from the schema-free `@recense/contract/browser`
 entry before dynamically loading the app and its schemas. It sets Zod's `jitless` option before
 object construction (when Zod captures this setting), so validation never probes or compiles
 `Function` under the app CSP. The normal contract index also exports the function.
@@ -1734,7 +1742,7 @@ the individual secret links remain usable.
 
 `PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[], htmlLooks? }`.
 An omitted `unrendered` field defaults to `[]`.
-`htmlLooks` is an optional array of `{ path: FilePath, look: "emend" | "custom", colorScheme?: "light" }`,
+`htmlLooks` is an optional array of `{ path: FilePath, look: "recense" | "custom", colorScheme?: "light" }`,
 with at most `filesPerRevision` entries. It lists every rendered HTML doc's look in the new revision,
 using the same metadata stored for that revision, including unchanged re-publishes. A null stored
 look means `custom`. `colorScheme` is present only when that doc is stored as light-only, as in the
@@ -1757,8 +1765,8 @@ Rendered blocks and JSON bytes count every path, including the writeup.
 Docs render in manifest order; once a doc exceeds either budget it and all later Markdown docs
 remain unrendered. A writeup alone exceeding either budget returns 413 `too_large` with
 "The writeup has too many blocks."
-The CLI warns `emend: could not render <path>` for Markdown docs. When `htmlLooks` is present,
-it reports only that a failed HTML doc shows as custom because emend could not read its structure.
+The CLI warns `recense: could not render <path>` for Markdown docs. When `htmlLooks` is present,
+it reports only that a failed HTML doc shows as custom because recense could not read its structure.
 The publish still succeeds.
 The URL is `<baseUrl>/r/<reviewId>` (HTTP or HTTPS);
 it is bounded by `pathChars` (4096 characters). At each start the local server saves its listening URL in `server-url.json` in the state
@@ -1772,7 +1780,7 @@ a missing or invalid JSON record, credentials, path, query or fragment falls bac
 
 ### Machines and import
 
-`emend attach` refuses a hub whose capabilities lack `review-bin` while this machine holds an
+`recense attach` refuses a hub whose capabilities lack `review-bin` while this machine holds an
 unmoved binned review originating on this machine. It refuses before registering or copying
 anything. A review binned during the copy is skipped when that hub lacks `review-bin`, including
 on a resend, and stays in the local bin without being marked as moved.
@@ -1786,7 +1794,7 @@ wrong-purpose, expired, used and unknown pairings all return `401 unauthorized`.
 shares the session endpoint's serialized server-wide lockout. Secret redemption remains available.
 The current or any earlier self instance gives `400 wrong_origin`. An instance with a live
 machine device gives `409 instance_attached`, with exactly: "This machine is already attached.
-Revoke it in the hub's devices, or run emend detach on it." Neither refusal consumes the pairing.
+Revoke it in the hub's devices, or run recense detach on it." Neither refusal consumes the pairing.
 Consumption, instance insertion (or name/attachedAt update), machine device creation and its
 instance-bound agent token creation are one transaction. `201 MachineRegistered = { token,
 hub: { id, name, url } }` returns the token once and the hub's self identity and pairing-link base URL.
@@ -1864,7 +1872,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 | `review` | `id, originInstanceId, reviewKey: Sha256, repo: {key: Sha256, name} or null, project?: string or null, branch, title, state, approvedRevision: UUID or null, intentReviewId?: UUID or null, createdAt, updatedAt` |
 | `revisions` | `id, reviewId, seq, base, head, main, writeupEmpty, createdAt` |
 | `topics` | `id, revisionId` plus `TopicMeta` (optional door and blastRadius) |
-| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView, look?: "emend" \| "custom" \| null, colorScheme?: "light" \| null`; nullable sides, status, topic, flag, parent |
+| `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView, look?: "recense" \| "custom" \| null, colorScheme?: "light" \| null`; nullable sides, status, topic, flag, parent |
 | `docAssets` | `revisionId, docId, assetId` |
 | `agentNotes` | `id, fileId, ord` plus `AgentNote`; optional array, ordered per file, at most 8 per file and 64 per revision |
 | `writeups` | `id, revisionId, sourceBlob, renderedBlob` |
@@ -1889,11 +1897,11 @@ upload them first using HEAD/PUT blobs. A missing reference gives `400 blob_miss
 Media types are chosen on the hub. Rendered writeup and Markdown blobs are untrusted derived
 content: the hub regenerates them from source through the normal sanitizer and rendering budgets.
 A file row that carries `look` keeps the stored look on the hub, null included, so a pub keeps the
-look it was published with; `colorScheme` is kept only with `look: "emend"`. Both apply only to a
+look it was published with; `colorScheme` is kept only with `look: "recense"`. Both apply only to a
 rendered HTML doc and are null on every other row. A row without `look` comes from an exporter
 older than the default look, so its pub was published under the earlier rule, and the hub applies
-that rule to the doc's source: the `emend-look` mark decides, else a page with its own styles is
-`custom`, else `emend`. Such a row never gets `colorScheme`.
+that rule to the doc's source: the `recense-look` mark decides, else a page with its own styles is
+`custom`, else `recense`. Such a row never gets `colorScheme`.
 HTML content capability keys are freshly minted. `agent_waiters` and event state are not copied.
 Confirmed deliveries are retained; unconfirmed deliveries are dropped and their Sends have both
 `deliveryId` and `setAsideAt` cleared, making them available to the next take.
@@ -1909,7 +1917,7 @@ with the review. Failed imports may leave unreferenced immutable bytes, as publi
 
 `ImportResult = { skipped, deleted? }`. A review the owner deleted on the hub is answered
 `{ skipped: true, deleted: true }` (200): the hub keeps a tombstone by review id, so a repeated
-`emend attach` never brings it back. A retired review is exported with its `settled` state; the
+`recense attach` never brings it back. A retired review is exported with its `settled` state; the
 snooze is not part of the bundle. `review.binnedAt` is optional and nullable (an ISO timestamp,
 clamped to at most the hub clock like the other timestamps); a review exported from the bin lands
 in the hub's bin, and a bundle without it is not binned. A review the hub already holds, in its
@@ -1935,8 +1943,8 @@ The device and its still-live bound tokens are revoked in one transaction; earli
 revocation timestamps are preserved. An agent token has no
 `devices:manage` scope and receives 403 for both device endpoints.
 
-With `emend serve --tailscale`, pairing URLs use the configured Tailscale HTTPS origin (with
-`--tailscale-port <n>`, that origin includes `:<n>`). With `emend serve --public-url <url>`, they
+With `recense serve --tailscale`, pairing URLs use the configured Tailscale HTTPS origin (with
+`--tailscale-port <n>`, that origin includes `:<n>`). With `recense serve --public-url <url>`, they
 use the given HTTPS origin instead, including its port when not 443. The secret remains
 exclusively in the fragment. Only the configured origin's Host is added to the allowlist.
 Session cookies use `Secure` when that Host is requested, including renewal
@@ -2059,10 +2067,10 @@ files with a topic; refs remain unique among files without a topic (shown as "Ot
 
 The CLI resolves `source` with `realpath` and reads it only when the resolved result is a regular
 file inside the repository's worktree root or inside a folder the reviewer listed in their own
-global emend configuration (`docRoots`). Neither the repository nor the manifest can name an allowed
+global recense configuration (`docRoots`). Neither the repository nor the manifest can name an allowed
 folder. The worktree root follows the rules `docRoots` follow: the CLI refuses to publish from a
 repository whose root is the filesystem root, the home folder or a folder that holds it, or a
-folder that holds emend's state folder or sits inside it. A symlink leading outside these roots is
+folder that holds recense's state folder or sits inside it. A symlink leading outside these roots is
 refused. The role's size limit applies.
 Plan task 1.6 implements and tests these checks. Assets are collected during publish.
 Markdown image discovery runs in a worker under the render timeout (10 seconds), for both
@@ -2091,7 +2099,7 @@ no colored fill; High is the only red one.
 Skim topics start folded in the writeup. Attention never changes order: `importance` alone sorts.
 When absent, attention stays absent in views and export/import, and the topic starts open.
 Door is `one-way` or `two-way`. The app shows it only as an Undo sentence: `two-way` as "Undo: a
-revert", `one-way` as "Undo: a revert is not enough". The emend-review skill no longer sets it; a
+revert", `one-way` as "Undo: a revert is not enough". The recense-review skill no longer sets it; a
 topic names a repair or a step that cannot be undone in an **Undo:** line of its `why`.
 Blast radius is `{ scope, note }`: scope is one non-whitespace word, and note must contain
 non-whitespace text. The skill uses scope as a plain sensitivity tag (`auth`, `data`, `money`,
@@ -2164,7 +2172,7 @@ The fields `outOfScope`, `whereToLook`, `context`, `review`, `checked` and `notC
 accepted as `review` from older agents and not shown. Its shape is still checked: `topics` is
 required for level `topics` and refused for the other levels; it holds 1–`topicsPerReview` unique
 topic slugs. `reason` is Markdown with non-whitespace text and counts toward the byte limits.
-emend no longer checks it against the declared topics or their attention, renders no Review
+recense no longer checks it against the declared topics or their attention, renders no Review
 section for it, and leaves out the Review section an older revision stored, in the app and in
 the writeup download.
 `checked` (what the agent ran or verified) and `notChecked` (what it did not) are Markdown with
@@ -2335,7 +2343,7 @@ may set `"repoUrl": null` to opt out: the CLI then sends no `repoUrl` and no `#1
 `repoUrl`, the server turns `#123` in rendered writeup and Markdown doc text into a link
 to `<repoUrl>/issues/123`, never inside code, a fence, a diagram or an existing link. A number is 1
 through 7 digits and must follow a non-word character. In HTML docs, the bridge links `#123` text
-after the parent's `emend:repo`; clicks follow the `emend:issue` flow in the HTML frame section.
+after the parent's `recense:repo`; clicks follow the `recense:issue` flow in the HTML frame section.
 
 `issueRefs?: IssueRef[]` holds at most 64 entries `{ number, title, state: "open" | "closed" | "merged" }`,
 one for each issue or pull request number the writeup names as `#123`. `number` is an integer from 1
@@ -2350,13 +2358,13 @@ most 256 UTF-16 code units without splitting a surrogate pair. An entry still in
 blank title, a bad number or state, a repeated number) fails the manifest, like an invalid link.
 Markup in a title stays literal text. The server never calls GitHub: the agent reads titles and
 states and sends them. A revision view returns `issueRefs`, empty when none were sent. The server's
-`#123` anchors carry `data-emend-issue="<number>"`; sanitize drops author `data-*` first, so only
+`#123` anchors carry `data-recense-issue="<number>"`; sanitize drops author `data-*` first, so only
 server-made anchors have it. The CLI sends `issueRefs` only with a `repoUrl`. A number without an entry stays a plain link. Clients show a title as
 plain text, never as HTML. Downloads show no title.
 
 `links`, `repoUrl` and `issueRefs` ride in the writeup's source and rendered blobs, so an import or export keeps them; no table
 changes. Every absolute `http:` or `https:` link in rendered Markdown carries `target="_blank"` and
-`rel="noopener noreferrer nofollow"`, including an absolute link back to the same emend review. Clients
+`rel="noopener noreferrer nofollow"`, including an absolute link back to the same recense review. Clients
 open `links` the same way, after checking again that each URL is https, and show each link's host
 (punycode for a non-ASCII host) beside its label, with the full URL as the title.
 
@@ -2508,8 +2516,8 @@ Capabilities lists the features `review-lifecycle` and `review-bin`.
   deletes stay committed and their blob cleanup still runs; the request returns the delete error.
 - `DELETE /reviews/:id` keeps working on a binned review and deletes it for good.
 
-A binned review acts as deleted for agents and leaves every list. A take (`emend wait`,
-`emend feedback`, the MCP tools), a waiter, an agent reply, a publish to it by id or by key, and
+A binned review acts as deleted for agents and leaves every list. A take (`recense wait`,
+`recense feedback`, the MCP tools), a waiter, an agent reply, a publish to it by id or by key, and
 every reviewer read or write of the review, its revisions, files, threads, comments, Sends, viewed
 marks, snooze, retire and reopen answer `409 review_in_bin`. `/media/:sha256` is the exception:
 an image used only by binned reviews answers `404 not_found`, as described under Writeup media.
@@ -2767,7 +2775,7 @@ Comment bodies and instructions are never truncated.
 
 MCP takes use `maxBytes: 3145728` (3 MiB) so the escaped text copy, structured result, and
 JSON-RPC envelope fit the SDK's 10 MiB stdio message limit. A `413` becomes a tool error directing
-the agent to run `emend feedback <review>` in a shell; the Send stays queued. CLI takes retain
+the agent to run `recense feedback <review>` in a shell; the Send stays queued. CLI takes retain
 the full budget.
 
 `target.quote`, `prefix`, `suffix`, `lines`, `before` and `after` are text from the repository or
@@ -2784,7 +2792,7 @@ A merged Go and Approve delivers Go with `approvalSetAside: true`. The CLI print
 for Go, Approve, Closed or Pending and exits 0; errors print one line to stderr, nothing to stdout,
 and exit 1. A take on a deleted or unknown review prints `review <id> was deleted or never existed`
 (`review <id> was deleted on the hub` for a local copy that moved to the hub). A take or a reply on
-a binned review prints `review <id> is in the bin`. `emend publish --review <id>` on one prints
+a binned review prints `review <id> is in the bin`. `recense publish --review <id>` on one prints
 `review <id> is in the bin. Restore it in Settings, or publish without --review and with a new
 --key for a new review.`, and a publish by key prints `the review this publish would update is in
 the bin. Restore it in Settings, or pass a new --key for a new review.`
@@ -2959,7 +2967,7 @@ escaped line on stderr.
 and at most `LIMITS.titleChars` (200), allowed only on files whose role is `doc`; other roles reject
 a title. At publish the server applies `cleanDocTitle`; an empty result is ignored. Doc titles
 fall back to the document's own title, then its filename. HTML uses only `head > title`, then the
-first HTML-namespace `h1` in the body. Both are read after the leading copy `emend look` writes is
+first HTML-namespace `h1` in the body. Both are read after the leading copy `recense look` writes is
 removed. Markdown uses the first rendered `h1` heading block, so removed raw HTML cannot supply a
 title. CLI inferred review titles use the same extraction. Titles and heading labels are plain
 cleaned text.

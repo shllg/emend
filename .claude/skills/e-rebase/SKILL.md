@@ -20,15 +20,15 @@ Arguments: $ARGUMENTS (`main` rebases onto local `main` instead of `origin/main`
 - `bin/wt push`, `pr` and `land` check names, text and content for private data first. On a hit,
   fix what it names, never the check. When it refuses for lack of a terms list, stop and ask the
   owner to create `<main>/.private-terms`. Never read, create, edit or remove `.private-terms`, and
-  never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
+  never set `RECENSE_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
 
 ## 1. Check the moment
 
-An emend review pins its base. If a review loop is open for this branch (a `go` or `approve` is
+A recense review pins its base. If a review loop is open for this branch (a `go` or `approve` is
 awaited), rebase only when it cannot wait: a conflict with `main`, or CI red only because `main`
-moved. Then stop the running `emend wait` command, say the loop is stopped and why, and go on. If it
+moved. Then stop the running `recense wait` command, say the loop is stopped and why, and go on. If it
 can wait, say so and stop.
 
 The tree must be clean, untracked files included. Check with `git status --short`.

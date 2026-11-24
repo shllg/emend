@@ -1,4 +1,4 @@
-import type { DocHeading } from "@emend/contract";
+import type { DocHeading } from "@recense/contract";
 import { type RefObject, useEffect, useState } from "react";
 import { findDocHeadings, type HeadingDoc } from "../../lib/doc-navigation.ts";
 

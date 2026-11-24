@@ -1,0 +1,894 @@
+import { randomUUID } from "node:crypto";
+import {
+  AgentReviewList,
+  Capabilities,
+  InboxGroup,
+  InboxList,
+  LIMITS,
+  type ReviewEvent,
+  ReviewView,
+} from "@recense/contract";
+import { and, eq, sql } from "drizzle-orm";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import * as t from "../../db/schema.ts";
+import { createToken, SESSION_MS } from "../auth/tokens.ts";
+import { publishReview } from "../mailbox/lifecycle-support.ts";
+import { error, mailboxFixture } from "../mailbox/test-support.ts";
+
+let f: Awaited<ReturnType<typeof mailboxFixture>>;
+beforeEach(async () => {
+  f = await mailboxFixture();
+});
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await f.blobCleanup();
+  await f.cleanup();
+});
+const pin = (reviewId: string, pinned = true, who: "reviewer" | "foreign" = "reviewer") =>
+  f.request(`/reviews/${reviewId}/pin`, "PUT", { pinned }, who);
+const place = (reviewId: string, body: unknown, who: "reviewer" | "foreign" = "reviewer") =>
+  f.request(`/reviews/${reviewId}/pin/place`, "PUT", body, who);
+const inbox = async (who: "reviewer" | "foreign" = "reviewer") =>
+  InboxList.parse(await (await f.request("/reviews", "GET", undefined, who)).json());
+const orderedPins = async (who: "reviewer" | "foreign" = "reviewer") =>
+  (await inbox(who)).items
+    .filter((item) => item.pinnedAt !== null)
+    .sort(
+      (a, b) =>
+        (a.pinOrder ?? 0) - (b.pinOrder ?? 0) ||
+        (a.pinnedAt ?? "").localeCompare(b.pinnedAt ?? "") ||
+        a.id.localeCompare(b.id),
+    );
+const view = async (id: string) => ReviewView.parse(await (await f.request(`/reviews/${id}`, "GET")).json());
+const pins = (ownerId = f.ownerId) =>
+  f.db.read((q) => q.select().from(t.reviewPins).where(eq(t.reviewPins.ownerId, ownerId)).all());
+const post = (id: string, action: string, body?: unknown) => f.request(`/reviews/${id}/${action}`, "POST", body);
+const createGroup = async () => {
+  const response = await f.request("/groups", "POST", { name: "Synthetic group" });
+  expect(response.status).toBe(201);
+  return InboxGroup.parse(await response.json());
+};
+const move = (id: string, groupId: string | null) => f.request(`/reviews/${id}/group`, "PUT", { groupId });
+const markMoved = (id: string) =>
+  f.db.query((q) =>
+    q
+      .update(t.reviews)
+      .set({ movedToUrl: "https://example.com/r/synthetic" })
+      .where(and(eq(t.reviews.ownerId, f.ownerId), eq(t.reviews.id, id))),
+  );
+async function seedMany(count: number, extra: (i: number) => Partial<typeof t.reviews.$inferInsert> = () => ({})) {
+  const rows = Array.from({ length: count }, (_, i) => {
+    const id = randomUUID();
+    return {
+      id,
+      ownerId: f.ownerId,
+      originInstanceId: f.instanceId,
+      title: "Synthetic pin item",
+      reviewKey: id.replaceAll("-", "").repeat(2),
+      updatedAt: f.deps.now(),
+      ...extra(i),
+    };
+  });
+  await f.db.transaction(async (q) => {
+    for (let start = 0; start < rows.length; start += 100) {
+      const batch = rows.slice(start, start + 100);
+      await q.insert(t.reviews).values(batch);
+      await q
+        .insert(t.revisions)
+        .values(batch.map((row) => ({ ownerId: row.ownerId, reviewId: row.id, seq: 1, contentKey: randomUUID() })));
+    }
+  });
+  return rows.map((row) => row.id);
+}
+async function seed(extra: Partial<typeof t.reviews.$inferInsert> = {}) {
+  const [id] = await seedMany(1, () => extra);
+  if (!id) throw new Error("Missing seeded review");
+  return id;
+}
+
+test("pin and unpin reviews and pubs without changing their records; repeated writes keep the first pin time", async () => {
+  const pub = await publishReview(f, { key: "b", writeup: { overview: "", tldr: "", decisions: null, topics: {} } });
+  const review = await publishReview(f);
+  expect((await view(pub.reviewId)).kind).toBe("publish");
+  expect((await view(review.reviewId)).kind).toBe("review");
+  for (const { reviewId } of [pub, review]) {
+    const before = await view(reviewId);
+    expect(before.pinnedAt).toBeNull();
+    expect(before.pinOrder).toBeNull();
+    f.advance(1000);
+    const pinnedAt = new Date(f.deps.now()).toISOString();
+    expect((await pin(reviewId)).status).toBe(204);
+    expect(await view(reviewId)).toEqual({ ...before, pinnedAt, pinOrder: 1 });
+    f.advance(1000);
+    expect((await pin(reviewId)).status).toBe(204);
+    expect(await view(reviewId)).toEqual({ ...before, pinnedAt, pinOrder: 1 });
+    expect((await inbox()).items.find((item) => item.id === reviewId)?.pinnedAt).toBe(pinnedAt);
+    for (let i = 0; i < 2; i++) {
+      expect((await pin(reviewId, false)).status).toBe(204);
+      expect(await view(reviewId)).toEqual(before);
+    }
+  }
+  expect(await pins()).toEqual([]);
+});
+
+test("pinning and repinning keep Active's activity order regardless of pin time", async () => {
+  await seed({ state: "settled" });
+  const first = await seed({ updatedAt: f.deps.now() - 1000 });
+  const tie = await seed({ updatedAt: f.deps.now() - 1000 });
+  const newest = await seed({ updatedAt: f.deps.now() - 2000 });
+  const before = (await inbox()).items.map((item) => item.id);
+  for (const id of [first, tie].sort().reverse()) expect((await pin(id)).status).toBe(204);
+  f.advance(1000);
+  expect((await pin(newest)).status).toBe(204);
+  f.advance(1000);
+  expect((await pin(first)).status).toBe(204);
+  expect((await inbox()).items.map((item) => item.id)).toEqual(before);
+  expect((await pin(first, false)).status).toBe(204);
+  expect((await pin(first)).status).toBe(204);
+  expect((await inbox()).items.map((item) => item.id)).toEqual(before);
+});
+
+test.each(["pin", "pin/place"])("%s refuses bearers before path, body or review lookup", async (action) => {
+  const admin = (await createToken(f.db, f.ownerId, "admin")).secret;
+  const deviceId = randomUUID();
+  await f.db.query((q) =>
+    q.insert(t.devices).values({ id: deviceId, ownerId: f.ownerId, kind: "browser", name: "Synthetic" }),
+  );
+  const reviewer = (
+    await createToken(f.db, f.ownerId, "reviewer", {
+      deviceId,
+      now: f.deps.now(),
+      expiresAt: f.deps.now() + SESSION_MS,
+    })
+  ).secret;
+  const transaction = vi.spyOn(f.db, "transaction");
+  for (const id of ["bad", randomUUID(), f.reviewId]) {
+    const path = `/reviews/${id}/${action}`;
+    await error(await f.request(path, "PUT", undefined, "agent"), 403, "forbidden");
+    for (const [secret, status, code] of [
+      [admin, 403, "forbidden"],
+      [reviewer, 401, "unauthorized"],
+    ] as const) {
+      await error(
+        await f.app.request(`http://127.0.0.1:3636/api/v1${path}`, {
+          method: "PUT",
+          headers: { Host: "127.0.0.1:3636", Authorization: `Bearer ${secret}` },
+        }),
+        status,
+        code,
+      );
+    }
+  }
+  expect(transaction).not.toHaveBeenCalled();
+  expect(await pins()).toEqual([]);
+});
+
+test("missing and foreign reviews are unknown_review; malformed UUIDs and invalid bodies are refused", async () => {
+  for (const pinned of [true, false]) {
+    await error(await pin(f.reviewId, pinned, "foreign"), 404, "unknown_review");
+    await error(await pin(randomUUID(), pinned), 404, "unknown_review");
+    await error(await pin("bad", pinned), 404, "not_found");
+  }
+  for (const body of [{}, { pinned: "true" }, { pinned: 1 }, { pinned: null }, { pinned: true, extra: true }])
+    await error(await f.request(`/reviews/${f.reviewId}/pin`, "PUT", body), 400, "invalid_request");
+  expect((await pin(f.reviewId)).status).toBe(204);
+  expect((await inbox("foreign")).items).toEqual([]);
+  expect((await inbox()).items[0]?.pinnedAt).not.toBeNull();
+});
+
+test("only 50 pins per owner including binned pins; idempotent writes still work and other owners have room", async () => {
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const ids = await seedMany(LIMITS.pins - 1);
+  await f.db.query((q) =>
+    q.insert(t.reviewPins).values(ids.map((reviewId) => ({ ownerId: f.ownerId, reviewId, createdAt: f.deps.now() }))),
+  );
+  const before = await pins();
+  const existing = ids[0];
+  if (!existing) throw new Error("Missing pin");
+  f.advance(1000);
+  expect((await pin(existing)).status).toBe(204);
+  expect(await pins()).toEqual(before);
+  expect((await post(f.reviewId, "bin")).status).toBe(204);
+  expect((await inbox()).items.filter((item) => item.pinnedAt !== null)).toHaveLength(LIMITS.pins - 1);
+  const next = await seed();
+  const response = await pin(next);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toEqual({
+    error: {
+      code: "invalid_state",
+      message: "You have the most pins allowed, pins in the bin included. Unpin one first.",
+    },
+  });
+  expect((await pin(next, false)).status).toBe(204);
+  expect(await pins()).toEqual(before);
+  const foreign = await seed({ ownerId: f.otherOwnerId });
+  expect((await pin(foreign, true, "foreign")).status).toBe(204);
+  expect((await inbox("foreign")).items).toMatchObject([{ id: foreign, pinnedAt: expect.any(String) }]);
+  await error(await pin(foreign, false), 404, "unknown_review");
+  expect((await pin(existing, false)).status).toBe(204);
+  expect((await pin(next)).status).toBe(204);
+  expect(await pins()).toHaveLength(LIMITS.pins);
+});
+
+test("bin hides a pin and refuses changes, restore keeps its time, and delete for good removes it", async () => {
+  const pinnedAt = new Date(f.deps.now()).toISOString();
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const before = await pins();
+  expect((await post(f.reviewId, "bin")).status).toBe(204);
+  for (const pinned of [true, false]) await error(await pin(f.reviewId, pinned), 409, "review_in_bin");
+  expect((await inbox()).items).toEqual([]);
+  expect(await pins()).toEqual(before);
+  f.advance(1000);
+  expect((await post(f.reviewId, "restore")).status).toBe(204);
+  expect((await inbox()).items).toMatchObject([{ id: f.reviewId, pinnedAt }]);
+  expect((await view(f.reviewId)).pinnedAt).toBe(pinnedAt);
+  expect((await post(f.reviewId, "bin")).status).toBe(204);
+  expect((await f.request(`/bin/${f.reviewId}`, "DELETE")).status).toBe(204);
+  expect(await pins()).toEqual([]);
+});
+
+test("moved reviews show as unpinned and refuse pin and unpin without changing the pin row", async () => {
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const before = await pins();
+  await markMoved(f.reviewId);
+  for (const pinned of [true, false]) await error(await pin(f.reviewId, pinned), 409, "review_moved");
+  expect(await pins()).toEqual(before);
+  expect((await inbox()).items).toMatchObject([{ id: f.reviewId, pinnedAt: null, pinOrder: null }]);
+  expect(await view(f.reviewId)).toMatchObject({ id: f.reviewId, pinnedAt: null, pinOrder: null });
+});
+
+test("a moved pin keeps its row but leaves room for a new pin among 49 other pins", async () => {
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const ids = await seedMany(LIMITS.pins - 1);
+  await f.db.query((q) =>
+    q.insert(t.reviewPins).values(ids.map((reviewId) => ({ ownerId: f.ownerId, reviewId, createdAt: f.deps.now() }))),
+  );
+  const next = await seed();
+  await error(await pin(next), 409, "invalid_state");
+  await markMoved(f.reviewId);
+  const before = await pins();
+  expect((await pin(next)).status).toBe(204);
+  expect(await pins()).toHaveLength(LIMITS.pins + 1);
+  expect(await pins()).toEqual(expect.arrayContaining(before));
+  expect((await inbox()).items.filter((item) => item.pinnedAt !== null)).toHaveLength(LIMITS.pins);
+  await error(await pin(await seed()), 409, "invalid_state");
+});
+
+test("a pinned open review takes an Active place and stays in the sorted Active part at the cap", async () => {
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const ids = await seedMany(LIMITS.inboxItems, (i) => ({ updatedAt: f.deps.now() - i - 1 }));
+  const done = await seed({ state: "settled" });
+  const { items } = await inbox();
+  expect(items).toHaveLength(LIMITS.inboxItems + 1);
+  expect(items.slice(0, LIMITS.inboxItems).map((item) => item.id)).toEqual([f.reviewId, ...ids.slice(0, -1)]);
+  expect(items.at(-1)?.id).toBe(done);
+  expect(items[0]).toMatchObject({ id: f.reviewId, list: "active", groupId: null, pinnedAt: expect.any(String) });
+  expect(items.filter((item) => item.id === f.reviewId)).toHaveLength(1);
+});
+
+test("pinned approvals take approval-cap places and stay in Done when the approval or Active cap is full", async () => {
+  const pinned = await seed({ state: "approved", approvedAt: f.deps.now() });
+  expect((await pin(pinned)).status).toBe(204);
+  const approvals = await seedMany(6, (i) => ({ state: "approved", approvedAt: f.deps.now() - i - 1 }));
+  const { items } = await inbox();
+  expect(items.filter((item) => item.state === "approved" && item.list === "active").map((item) => item.id)).toEqual(
+    [pinned, ...approvals.slice(0, 4)].sort(),
+  );
+  const overflow = approvals[5];
+  if (!overflow) throw new Error("Missing approval");
+  expect(items.find((item) => item.id === overflow)).toMatchObject({ list: "done", activeUntil: null });
+  expect((await pin(overflow)).status).toBe(204);
+  expect((await inbox()).items.find((item) => item.id === overflow)).toMatchObject({
+    list: "done",
+    activeUntil: null,
+    pinnedAt: expect.any(String),
+  });
+  const activeUntil = new Date(f.deps.now() + 12 * 3_600_000).toISOString();
+  expect(items.find((item) => item.id === pinned)).toMatchObject({ list: "active", activeUntil });
+  expect(items.filter((item) => item.id === pinned)).toHaveLength(1);
+  expect((await f.request("/settings", "PATCH", { approvedActiveLimit: 0 })).status).toBe(200);
+  const atZero = await inbox();
+  for (const id of [pinned, ...approvals])
+    expect(atZero.items.find((item) => item.id === id)).toMatchObject({ list: "done", activeUntil: null });
+  expect(await view(pinned)).toMatchObject({ list: "active", activeUntil });
+  expect((await f.request("/settings", "PATCH", { approvedActiveLimit: 5 })).status).toBe(200);
+  await seedMany(LIMITS.inboxItems);
+  expect((await inbox()).items.find((item) => item.id === pinned)).toMatchObject({ list: "done", activeUntil: null });
+  f.advance(12 * 3_600_000);
+  expect((await inbox()).items.find((item) => item.id === pinned)).toMatchObject({ list: "done", activeUntil: null });
+});
+
+test("a pinned open review beyond the Active cap appears once in Active before the other blocks", async () => {
+  const ids = await seedMany(LIMITS.inboxItems, (i) => ({ updatedAt: f.deps.now() - i - 1 }));
+  const pinned = ids.at(-1);
+  if (!pinned) throw new Error("Missing review");
+  expect((await pin(pinned)).status).toBe(204);
+  const done = await seed({ state: "settled" });
+  const { items } = await inbox();
+  expect(items.map((item) => item.id)).toEqual([f.reviewId, ...ids, done]);
+  expect(items.filter((item) => item.id === pinned)).toHaveLength(1);
+  expect(items.find((item) => item.id === pinned)).toMatchObject({ list: "active", pinnedAt: expect.any(String) });
+  await markMoved(pinned);
+  expect((await inbox()).items.map((item) => item.id)).toEqual([f.reviewId, ...ids.slice(0, -1), done]);
+});
+
+test.each(["snoozed", "grouped", "done"] as const)(
+  "pinned %s overflow follows capped rows in block order and excludes moved reviews",
+  async (block) => {
+    const group = block === "grouped" ? await createGroup() : null;
+    const ids = await seedMany(LIMITS.inboxItems + 2, (i) => ({
+      state: block === "done" ? "settled" : "open",
+      updatedAt: f.deps.now() - i,
+      snoozedAt: block === "snoozed" ? f.deps.now() : null,
+      snoozedUntil: block === "snoozed" ? f.deps.now() + (i + 1) * 1000 : null,
+    }));
+    if (group)
+      await f.db.query((q) =>
+        q
+          .insert(t.reviewGroupMembers)
+          .values(ids.map((reviewId) => ({ ownerId: f.ownerId, reviewId, groupId: group.id }))),
+      );
+    const overflow = ids.slice(LIMITS.inboxItems);
+    for (const id of overflow.toReversed()) {
+      expect((await pin(id)).status).toBe(204);
+      f.advance(1);
+    }
+    const { items } = await inbox();
+    expect(items.map((item) => item.id)).toEqual([f.reviewId, ...ids]);
+    for (const id of overflow) {
+      expect(items.filter((item) => item.id === id)).toHaveLength(1);
+      expect(items.find((item) => item.id === id)).toMatchObject({
+        pinnedAt: expect.any(String),
+        groupId: group?.id ?? null,
+        list: block === "grouped" ? "active" : block,
+      });
+    }
+    const moved = overflow[0];
+    if (!moved) throw new Error("Missing review");
+    await markMoved(moved);
+    expect((await inbox()).items.map((item) => item.id)).toEqual([f.reviewId, ...ids.filter((id) => id !== moved)]);
+  },
+);
+
+test("pinned overflow shares one budget across blocks when more than 50 pins are live", async () => {
+  const overflowPerBlock = Math.floor(LIMITS.pins / 2) + 1;
+  const active = [
+    f.reviewId,
+    ...(await seedMany(LIMITS.inboxItems + overflowPerBlock - 1, (i) => ({ updatedAt: f.deps.now() - i - 1 }))),
+  ];
+  const snoozed = await seedMany(LIMITS.inboxItems + overflowPerBlock, (i) => ({
+    snoozedAt: f.deps.now(),
+    snoozedUntil: f.deps.now() + (i + 1) * 1000,
+  }));
+  const group = await createGroup();
+  const grouped = await seedMany(LIMITS.inboxItems, (i) => ({ updatedAt: f.deps.now() - i }));
+  await f.db.query((q) =>
+    q
+      .insert(t.reviewGroupMembers)
+      .values(grouped.map((reviewId) => ({ ownerId: f.ownerId, reviewId, groupId: group.id }))),
+  );
+  const done = await seedMany(LIMITS.inboxItems, (i) => ({ state: "settled", updatedAt: f.deps.now() - i }));
+  const overflow = [...active.slice(LIMITS.inboxItems), ...snoozed.slice(LIMITS.inboxItems)];
+  expect(overflow.length).toBeGreaterThan(LIMITS.pins);
+  // A move rollback can leave more live pins than the pin route allows.
+  await f.db.query((q) =>
+    q
+      .insert(t.reviewPins)
+      .values([f.reviewId, ...overflow].map((reviewId) => ({ ownerId: f.ownerId, reviewId, createdAt: f.deps.now() }))),
+  );
+
+  const response = await f.request("/reviews", "GET");
+  expect(response.status).toBe(200);
+  const { items } = InboxList.parse(await response.json());
+  const overflowIds = new Set(overflow);
+  expect(items.filter((item) => overflowIds.has(item.id)).map((item) => item.id)).toEqual(
+    overflow.slice(0, LIMITS.pins),
+  );
+  expect(items.map((item) => item.id)).toEqual([
+    ...active,
+    ...snoozed.slice(0, LIMITS.inboxItems + LIMITS.pins - overflowPerBlock),
+    ...grouped,
+    ...done,
+  ]);
+  expect(items.length).toBeLessThanOrEqual(LIMITS.inboxItems * 4 + LIMITS.pins);
+});
+
+test("all Snoozed overflow pins follow capped rows when its pins exceed the remaining budget", async () => {
+  const remainingBudget = 20;
+  const active = [
+    f.reviewId,
+    ...(await seedMany(LIMITS.inboxItems + LIMITS.pins - remainingBudget - 1, (i) => ({
+      updatedAt: f.deps.now() - i - 1,
+    }))),
+  ];
+  const snoozed = await seedMany(LIMITS.inboxItems + 10, (i) => ({
+    snoozedAt: f.deps.now(),
+    snoozedUntil: f.deps.now() + (i + 1) * 1000,
+  }));
+  const overflow = snoozed.slice(LIMITS.inboxItems);
+  const pinned = [...active.slice(LIMITS.inboxItems), ...snoozed.slice(0, remainingBudget), ...overflow];
+  await f.db.query((q) =>
+    q.insert(t.reviewPins).values(
+      pinned.toReversed().map((reviewId, i) => ({
+        ownerId: f.ownerId,
+        reviewId,
+        createdAt: f.deps.now() + i,
+      })),
+    ),
+  );
+
+  const { items } = await inbox();
+  expect(items.map((item) => item.id)).toEqual([...active, ...snoozed]);
+  expect(items.slice(active.length + LIMITS.inboxItems)).toMatchObject(
+    overflow.map((id) => ({ id, list: "snoozed", pinnedAt: expect.any(String) })),
+  );
+});
+
+test("pinned Snoozed, grouped and Done items keep their normal block position and appear once", async () => {
+  const group = await createGroup();
+  const snoozed = await seed({ snoozedAt: f.deps.now(), snoozedUntil: f.deps.now() + 1000 });
+  const snoozedLast = await seed({ snoozedAt: f.deps.now() });
+  const grouped = await seed();
+  const groupedLast = await seed({ updatedAt: f.deps.now() - 1 });
+  for (const id of [grouped, groupedLast]) expect((await move(id, group.id)).status).toBe(204);
+  const done = await seed({ state: "settled" });
+  const doneLast = await seed({ state: "approved", approvedAt: null, updatedAt: f.deps.now() - 1 });
+  const active = await seed({ updatedAt: f.deps.now() - 1 });
+  for (const id of [active, done, grouped, snoozed]) expect((await pin(id)).status).toBe(204);
+  const { items } = await inbox();
+  expect(items.map((item) => item.id)).toEqual([
+    f.reviewId,
+    active,
+    snoozed,
+    snoozedLast,
+    grouped,
+    groupedLast,
+    done,
+    doneLast,
+  ]);
+  expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+});
+
+test("pins preserve review state, snooze and approval; a zero approval window keeps pins in Done", async () => {
+  const group = await createGroup();
+  const ids = [
+    await seed({ snoozedAt: f.deps.now(), snoozedUntil: f.deps.now() + 1000 }),
+    await seed({ state: "approved", approvedAt: f.deps.now() }),
+    await seed({ state: "approved", approvedAt: null }),
+    await seed({ state: "settled" }),
+  ];
+  for (const id of ids) {
+    expect((await move(id, group.id)).status).toBe(204);
+    const before = await view(id);
+    const stored = () =>
+      f.db.read((q) =>
+        q
+          .select()
+          .from(t.reviews)
+          .where(and(eq(t.reviews.ownerId, f.ownerId), eq(t.reviews.id, id)))
+          .get(),
+      );
+    const record = await stored();
+    expect((await pin(id)).status).toBe(204);
+    expect(await view(id)).toEqual({
+      ...before,
+      pinnedAt: new Date(f.deps.now()).toISOString(),
+      pinOrder: ids.indexOf(id) + 1,
+    });
+    expect(await stored()).toEqual(record);
+  }
+  expect((await f.request("/settings", "PATCH", { approvedActiveHours: 0 })).status).toBe(200);
+  for (const id of ids.slice(1)) {
+    expect((await move(id, null)).status).toBe(204);
+    expect((await inbox()).items.find((item) => item.id === id)).toMatchObject({ list: "done", activeUntil: null });
+  }
+});
+
+test("new revisions, snooze, retire, reopen, approval and group changes keep the pin; agents see no pins", async () => {
+  const { reviewId } = await publishReview(f);
+  expect((await pin(reviewId)).status).toBe(204);
+  const pinnedAt = (await view(reviewId)).pinnedAt;
+  for (const [action, body] of [
+    ["snooze", { untilRevision: true }],
+    ["retire", {}],
+    ["reopen", undefined],
+    ["sends", { kind: "approve", revision: 1 }],
+  ] as const) {
+    expect((await post(reviewId, action, body)).status).toBe(action === "sends" ? 201 : 204);
+    expect((await view(reviewId)).pinnedAt).toBe(pinnedAt);
+  }
+  await publishReview(f);
+  expect(await view(reviewId)).toMatchObject({ pinnedAt, newestRevision: 2, state: "open" });
+  const group = await createGroup();
+  for (const groupId of [group.id, null, group.id]) {
+    expect((await move(reviewId, groupId)).status).toBe(204);
+    expect(await view(reviewId)).toMatchObject({ pinnedAt, groupId });
+  }
+  expect((await f.request(`/groups/${group.id}`, "DELETE")).status).toBe(204);
+  expect(await view(reviewId)).toMatchObject({ pinnedAt, groupId: null });
+  const response = await (await f.request("/agent/reviews", "GET", undefined, "agent")).json();
+  expect(AgentReviewList.safeParse(response).success).toBe(true);
+  expect(JSON.stringify(response)).not.toMatch(/pinnedAt|pinOrder|pins/);
+  expect((await f.request(`/reviews/${reviewId}`, "DELETE")).status).toBe(204);
+  expect(await pins()).toEqual([]);
+});
+
+test("pins events name the review after commit, reach both streams, and never fire for refused requests", async () => {
+  const seen: ReviewEvent[] = [];
+  const snapshots: Promise<unknown>[] = [];
+  const stop = f.deps.events?.subscribe(f.ownerId, null, (event) => {
+    if (event.type !== "pins") return;
+    seen.push(event);
+    snapshots.push(pins());
+  });
+  const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
+  try {
+    for (const path of ["/events", `/reviews/${f.reviewId}/events`]) {
+      const response = await f.request(path, "GET");
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Missing stream");
+      readers.push(reader);
+      await reader.read();
+    }
+    const at = f.deps.now();
+    for (const pinned of [true, false]) {
+      expect((await pin(f.reviewId, pinned)).status).toBe(204);
+      for (const reader of readers)
+        expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+          `event: pins\ndata: ${JSON.stringify({ reviewId: f.reviewId })}\n\n`,
+        );
+    }
+    await error(await f.request(`/reviews/${f.reviewId}/pin`, "PUT", { pinned: true }, "agent"), 403, "forbidden");
+    await error(await pin(f.reviewId, true, "foreign"), 404, "unknown_review");
+    await error(
+      await f.request(`/reviews/${f.reviewId}/pin`, "PUT", { pinned: true, extra: 1 }),
+      400,
+      "invalid_request",
+    );
+    await error(await pin(randomUUID()), 404, "unknown_review");
+    expect((await post(f.reviewId, "bin")).status).toBe(204);
+    await error(await pin(f.reviewId), 409, "review_in_bin");
+    expect(seen).toEqual([
+      { type: "pins", reviewId: f.reviewId },
+      { type: "pins", reviewId: f.reviewId },
+    ]);
+    expect(await Promise.all(snapshots)).toEqual([
+      [{ ownerId: f.ownerId, reviewId: f.reviewId, createdAt: at, position: 1 }],
+      [],
+    ]);
+  } finally {
+    stop?.();
+    await Promise.all(readers.map((reader) => reader.cancel()));
+  }
+});
+
+test("capabilities advertise pin ordering after review pins", async () => {
+  const { features } = Capabilities.parse(await (await f.request("/capabilities", "GET")).json());
+  expect(features).toEqual(expect.arrayContaining(["review-pins", "review-pin-order"]));
+  expect(features[features.indexOf("review-pins") + 1]).toBe("review-pin-order");
+});
+
+test("pin placement persists across reloads and single-review views, and a new pin joins at the bottom", async () => {
+  const a = f.reviewId;
+  const b = await seed();
+  const c = await seed();
+  for (const id of [a, b, c]) {
+    expect((await pin(id)).status).toBe(204);
+    f.advance(1000);
+  }
+  expect((await orderedPins()).map(({ id, pinOrder }) => [id, pinOrder])).toEqual([
+    [a, 1],
+    [b, 2],
+    [c, 3],
+  ]);
+  expect((await place(c, { before: a })).status).toBe(204);
+  const reloaded = await orderedPins();
+  expect(reloaded.map(({ id, pinOrder }) => [id, pinOrder])).toEqual([
+    [c, 1],
+    [a, 2],
+    [b, 3],
+  ]);
+  for (const { id, pinOrder } of reloaded) expect((await view(id)).pinOrder).toBe(pinOrder);
+  expect((await place(a, { after: b })).status).toBe(204);
+  expect((await orderedPins()).map(({ id, pinOrder }) => [id, pinOrder])).toEqual([
+    [c, 1],
+    [b, 2],
+    [a, 3],
+  ]);
+  const before = await pins();
+  expect((await pin(c)).status).toBe(204);
+  expect(await pins()).toEqual(before);
+  const next = await seed();
+  expect((await pin(next)).status).toBe(204);
+  expect((await orderedPins()).map(({ id, pinOrder }) => [id, pinOrder])).toEqual([
+    [c, 1],
+    [b, 2],
+    [a, 3],
+    [next, 4],
+  ]);
+});
+
+test.each(["binned", "moved"])("a new pin follows the highest position even when that pin is %s", async (state) => {
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const hidden = await seed();
+  expect((await pin(hidden)).status).toBe(204);
+  if (state === "binned") expect((await post(hidden, "bin")).status).toBe(204);
+  else await markMoved(hidden);
+  const before = await pins();
+  const next = await seed();
+  expect((await pin(next)).status).toBe(204);
+  expect(await pins()).toEqual(expect.arrayContaining(before));
+  expect((await view(next)).pinOrder).toBe(3);
+  expect((await orderedPins()).map((item) => item.id)).toEqual([f.reviewId, next]);
+});
+
+test("legacy pins at zero keep pin-time and id order above new pins, including when a move renumbers them", async () => {
+  const [a, b, c] = (await seedMany(3)).sort();
+  if (!a || !b || !c) throw new Error("Missing legacy pins");
+  await f.db.query((q) =>
+    q.insert(t.reviewPins).values(
+      [c, b, a].map((reviewId) => ({
+        ownerId: f.ownerId,
+        reviewId,
+        createdAt: f.deps.now() - (reviewId === a ? 1000 : 0),
+        position: 0,
+      })),
+    ),
+  );
+  expect((await pin(f.reviewId)).status).toBe(204);
+  expect((await orderedPins()).map(({ id, pinOrder }) => [id, pinOrder])).toEqual([
+    [a, 0],
+    [b, 0],
+    [c, 0],
+    [f.reviewId, 1],
+  ]);
+  expect((await place(f.reviewId, { before: a })).status).toBe(204);
+  expect((await orderedPins()).map(({ id, pinOrder }) => [id, pinOrder])).toEqual([
+    [f.reviewId, 1],
+    [a, 2],
+    [b, 3],
+    [c, 4],
+  ]);
+});
+
+test("placement refuses malformed, missing, foreign, binned, moved and unpinned targets without writes or events", async () => {
+  const anchor = await seed();
+  const foreign = await seed({ ownerId: f.otherOwnerId });
+  const binned = await seed();
+  const moved = await seed();
+  expect((await pin(foreign, true, "foreign")).status).toBe(204);
+  for (const id of [anchor, binned, moved]) expect((await pin(id)).status).toBe(204);
+  expect((await post(binned, "bin")).status).toBe(204);
+  await markMoved(moved);
+  const before = await pins();
+  const seen: ReviewEvent[] = [];
+  const stop = f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
+  try {
+    for (const [id, status, code] of [
+      ["bad", 404, "not_found"],
+      [randomUUID(), 404, "unknown_review"],
+      [foreign, 404, "unknown_review"],
+      [binned, 409, "review_in_bin"],
+      [moved, 409, "review_moved"],
+    ] as const) {
+      for (const anchorId of [anchor, randomUUID(), foreign])
+        await error(await place(id, { before: anchorId }), status, code);
+    }
+    for (const body of [{ before: anchor }, { after: f.reviewId }]) {
+      const response = await place(f.reviewId, body);
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: { code: "invalid_state", message: "The pins changed. Check them and try again." },
+      });
+    }
+    expect(await pins()).toEqual(before);
+    expect(seen).toEqual([]);
+  } finally {
+    stop?.();
+  }
+});
+
+test("missing and foreign pinned anchors give identical not_found responses before checking the target pin", async () => {
+  const unpinned = await seed();
+  const foreign = await seed({ ownerId: f.otherOwnerId });
+  expect((await pin(foreign, true, "foreign")).status).toBe(204);
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const before = await pins();
+  const foreignBefore = await pins(f.otherOwnerId);
+  const seen: ReviewEvent[] = [];
+  const stop = f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
+  const bodies: string[] = [];
+  try {
+    for (const target of [f.reviewId, unpinned]) {
+      for (const anchor of [randomUUID(), foreign]) {
+        for (const body of [{ before: anchor }, { after: anchor }]) {
+          const response = await place(target, body);
+          expect(response.status).toBe(404);
+          const text = await response.text();
+          expect(JSON.parse(text)).toEqual({ error: { code: "not_found", message: "The resource was not found." } });
+          bodies.push(text);
+          expect(await pins()).toEqual(before);
+          expect(await pins(f.otherOwnerId)).toEqual(foreignBefore);
+          expect(seen).toEqual([]);
+        }
+      }
+    }
+    expect(new Set(bodies).size).toBe(1);
+  } finally {
+    stop?.();
+  }
+});
+
+test("owned unpinned, binned and moved anchors give identical pin_changed responses without writes or events", async () => {
+  const unpinned = await seed();
+  const binned = await seed();
+  const moved = await seed();
+  for (const id of [f.reviewId, binned, moved]) expect((await pin(id)).status).toBe(204);
+  expect((await post(binned, "bin")).status).toBe(204);
+  await markMoved(moved);
+  const before = await pins();
+  const seen: ReviewEvent[] = [];
+  const stop = f.deps.events?.subscribe(f.ownerId, null, (event) => seen.push(event));
+  const bodies: string[] = [];
+  try {
+    for (const anchor of [unpinned, binned, moved]) {
+      for (const body of [{ before: anchor }, { after: anchor }]) {
+        const response = await place(f.reviewId, body);
+        expect(response.status).toBe(409);
+        const text = await response.text();
+        expect(JSON.parse(text)).toEqual({
+          error: { code: "invalid_state", message: "The pins changed. Check them and try again." },
+        });
+        bodies.push(text);
+        expect(await pins()).toEqual(before);
+        expect(seen).toEqual([]);
+      }
+    }
+    expect(new Set(bodies).size).toBe(1);
+  } finally {
+    stop?.();
+  }
+});
+
+test("placement bodies require exactly one UUID anchor before any transaction", async () => {
+  expect((await pin(f.reviewId)).status).toBe(204);
+  const transaction = vi.spyOn(f.db, "transaction");
+  for (const body of [
+    undefined,
+    null,
+    [],
+    {},
+    { before: f.reviewId, after: f.reviewId },
+    { before: f.reviewId, extra: 1 },
+    { after: f.reviewId, extra: 1 },
+    { before: "bad" },
+    { after: "bad" },
+    { before: null },
+    { after: 1 },
+    { pinned: true },
+  ])
+    await error(await place(f.reviewId, body), 400, "invalid_request");
+  expect(transaction).not.toHaveBeenCalled();
+});
+
+test("placing a pin at itself writes nothing, even with legacy positions", async () => {
+  const other = await seed();
+  await f.db.query(async (q) => {
+    await q
+      .insert(t.reviewPins)
+      .values([f.reviewId, other].map((reviewId) => ({ ownerId: f.ownerId, reviewId, position: 0 })));
+    await q.run(sql`CREATE TEMP TRIGGER refuse_pin_update BEFORE UPDATE ON review_pins
+      BEGIN SELECT RAISE(ABORT, 'Unexpected pin write'); END`);
+  });
+  const before = await pins();
+  for (const body of [{ before: f.reviewId }, { after: f.reviewId }]) {
+    expect((await place(f.reviewId, body)).status).toBe(204);
+    expect(await pins()).toEqual(before);
+  }
+});
+
+test("placement only updates rows whose position changes", async () => {
+  const a = f.reviewId;
+  const b = await seed();
+  const c = await seed();
+  for (const id of [a, b, c]) expect((await pin(id)).status).toBe(204);
+  await f.db.query((q) =>
+    q.run(sql`CREATE TEMP TRIGGER refuse_unchanged_pin_update BEFORE UPDATE ON review_pins
+      WHEN OLD.position = NEW.position
+      BEGIN SELECT RAISE(ABORT, 'Unchanged pin rewritten'); END`),
+  );
+  expect((await place(b, { before: a })).status).toBe(204);
+  expect((await orderedPins()).map((item) => item.id)).toEqual([b, a, c]);
+});
+
+test("placement keeps hidden pins in relative order and restoring a binned pin keeps its place", async () => {
+  const a = f.reviewId;
+  const b = await seed();
+  const c = await seed();
+  const d = await seed();
+  const e = await seed();
+  for (const id of [a, b, c, d, e]) expect((await pin(id)).status).toBe(204);
+  const pinnedAt = (await view(b)).pinnedAt;
+  expect((await post(b, "bin")).status).toBe(204);
+  await markMoved(d);
+  expect((await place(e, { before: a })).status).toBe(204);
+  expect((await place(a, { after: c })).status).toBe(204);
+  const before = await pins();
+  expect(
+    before.toSorted((x, y) => x.position - y.position).map(({ reviewId, position }) => [reviewId, position]),
+  ).toEqual([
+    [e, 1],
+    [b, 2],
+    [c, 3],
+    [a, 4],
+    [d, 5],
+  ]);
+  expect((await orderedPins()).map((item) => item.id)).toEqual([e, c, a]);
+  f.advance(1000);
+  expect((await post(b, "restore")).status).toBe(204);
+  expect(await pins()).toEqual(before);
+  expect(await view(b)).toMatchObject({ pinnedAt, pinOrder: 2 });
+  expect((await orderedPins()).map((item) => item.id)).toEqual([e, b, c, a]);
+});
+
+test("owners see only their own pins and positions, and placement leaves other owners unchanged", async () => {
+  const foreign = await seed({ ownerId: f.otherOwnerId });
+  await f.db.query((q) => q.insert(t.reviewPins).values({ ownerId: f.otherOwnerId, reviewId: foreign, position: 80 }));
+  const foreignPins = () =>
+    f.db.read((q) => q.select().from(t.reviewPins).where(eq(t.reviewPins.ownerId, f.otherOwnerId)).all());
+  const foreignBefore = await foreignPins();
+  const other = await seed();
+  for (const id of [f.reviewId, other]) expect((await pin(id)).status).toBe(204);
+  expect((await place(other, { before: f.reviewId })).status).toBe(204);
+  expect((await orderedPins()).map(({ id, pinOrder }) => [id, pinOrder])).toEqual([
+    [other, 1],
+    [f.reviewId, 2],
+  ]);
+  expect((await inbox()).items.some((item) => item.id === foreign)).toBe(false);
+  expect((await inbox("foreign")).items).toMatchObject([{ id: foreign, pinnedAt: expect.any(String), pinOrder: 80 }]);
+  await error(await place(f.reviewId, { before: foreign }, "foreign"), 404, "unknown_review");
+  expect(await foreignPins()).toEqual(foreignBefore);
+});
+
+test("a placement emits one pins event after commit to both streams without changing pin times or reviews", async () => {
+  const other = await seed();
+  for (const id of [other, f.reviewId]) expect((await pin(id)).status).toBe(204);
+  const before = await pins();
+  const records = () => f.db.read((q) => q.select().from(t.reviews).where(eq(t.reviews.ownerId, f.ownerId)).all());
+  const reviewsBefore = await records();
+  const viewBefore = await view(f.reviewId);
+  const seen: ReviewEvent[] = [];
+  const snapshots: Promise<unknown>[] = [];
+  const stop = f.deps.events?.subscribe(f.ownerId, null, (event) => {
+    if (event.type !== "pins") return;
+    seen.push(event);
+    snapshots.push(pins());
+  });
+  const readers: ReadableStreamDefaultReader<Uint8Array>[] = [];
+  try {
+    for (const path of ["/events", `/reviews/${f.reviewId}/events`]) {
+      const response = await f.request(path, "GET");
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Missing stream");
+      readers.push(reader);
+      await reader.read();
+    }
+    f.advance(1000);
+    expect((await place(f.reviewId, { before: other })).status).toBe(204);
+    for (const reader of readers)
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe(
+        `event: pins\ndata: ${JSON.stringify({ reviewId: f.reviewId })}\n\n`,
+      );
+    expect(seen).toEqual([{ type: "pins", reviewId: f.reviewId }]);
+    const expected = before.map((row) => ({ ...row, position: row.reviewId === f.reviewId ? 1 : 2 }));
+    expect(await Promise.all(snapshots)).toEqual([expected]);
+    expect(await pins()).toEqual(expected);
+    expect(await records()).toEqual(reviewsBefore);
+    expect(await view(f.reviewId)).toEqual({ ...viewBefore, pinOrder: 1 });
+  } finally {
+    stop?.();
+    await Promise.all(readers.map((reader) => reader.cancel()));
+  }
+});

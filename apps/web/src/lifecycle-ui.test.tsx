@@ -5,7 +5,7 @@ import {
   type RevisionView,
   reviewDownloadPath,
   type ThreadView,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";

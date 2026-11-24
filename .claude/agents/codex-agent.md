@@ -1,6 +1,6 @@
 ---
 name: codex-agent
-description: Sonnet gateway for Codex MCP calls. emend's default implementation route and its cross-vendor review arm. Keeps raw MCP output out of the main context.
+description: Sonnet gateway for Codex MCP calls. recense's default implementation route and its cross-vendor review arm. Keeps raw MCP output out of the main context.
 model: sonnet
 disallowedTools:
   - Edit

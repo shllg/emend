@@ -6,7 +6,7 @@ import {
   type SettingsView,
   SHORTCUT_DEFAULTS,
   type ShortcutCommand,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -423,7 +423,7 @@ test.each(["search", "machine", "project"])("%s narrows both numbers and the jum
 test.each([1280, 768, 1023])("rail at %s numbers its own rows and ignores Kind", async (pixels) => {
   width = pixels;
   layoutStore.update({ inboxCollapsed: true });
-  localStorage.setItem("emend:inbox-kind", "publish");
+  localStorage.setItem("recense:inbox-kind", "publish");
   inbox = inbox.map((item, i) => ({ ...item, kind: i % 2 ? "publish" : "review" }));
   const history = mount(`/r/${id(1)}`);
   await ready();

@@ -1,4 +1,4 @@
-import { SAMPLE_REVIEW_ID, type SampleView } from "@emend/contract";
+import { SAMPLE_REVIEW_ID, type SampleView } from "@recense/contract";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";

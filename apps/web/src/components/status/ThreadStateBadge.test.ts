@@ -1,4 +1,4 @@
-import type { ThreadView } from "@emend/contract";
+import type { ThreadView } from "@recense/contract";
 import { expect, test } from "vitest";
 import { formatThreadCounts, threadCounts } from "./ThreadStateBadge.tsx";
 

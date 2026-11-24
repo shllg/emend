@@ -13,7 +13,7 @@ import { diffTheme } from "./theme.ts";
 
 // A real Vite build, cold workers and highlighting two languages are the integration workload.
 test("built JS worker highlights TypeScript and a language loaded late without its own registries", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "emend-diff-worker-"));
+  const dir = await mkdtemp(join(tmpdir(), "recense-diff-worker-"));
   const workers: NodeWorker[] = [];
   const requests: {
     type: string;

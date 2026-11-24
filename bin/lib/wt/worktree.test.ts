@@ -73,7 +73,7 @@ function expectCode(fn: () => unknown, code: number): void {
   assert.throws(fn, (e: unknown) => e instanceof WtError && e.code === code, `expected exit ${code}`);
 }
 
-test("setup creates worktree, port and EMEND_HOME", () =>
+test("setup creates worktree, port and RECENSE_HOME", () =>
   scenario({}, ({ repo, fx }) => {
     const r = newWorktree(repo, "feat-a");
     assert.equal(r.path, join(fx.main, ".claude", "worktrees", "feat-a"));
@@ -84,7 +84,7 @@ test("setup creates worktree, port and EMEND_HOME", () =>
 
 test("setup, metadata, list and cleanup treat a numbered non-issue branch as a plain branch", () =>
   scenario({}, ({ repo, fx, env }) => {
-    for (const branch of ["014-some-work", "emend-task-014-some-work"]) {
+    for (const branch of ["014-some-work", "recense-task-014-some-work"]) {
       const wt = setup(repo, { branch });
       assert.equal(wt.branch, branch);
       const info = JSON.parse(readFileSync(join(wt.path, ".wt/worktree.json"), "utf8"));
@@ -102,7 +102,7 @@ test("setup, metadata, list and cleanup treat a numbered non-issue branch as a p
     }
     fakeGithubOrigin(env, fx);
     installFake(env, "gh", issueRules([readyIssue(14)]));
-    const issueBranch = setup(repo, { branch: "emend-14-an-issue", issue: 14 });
+    const issueBranch = setup(repo, { branch: "recense-14-an-issue", issue: 14 });
     assert.equal(readRegistry(repo).worktrees[issueBranch.branch]?.issue, 14);
   }));
 
@@ -116,7 +116,7 @@ test("a registry and a worktree.json with legacy task keys still load and list",
     });
     const path = registryPath(repo);
     const legacy = JSON.parse(readFileSync(path, "utf8"));
-    legacy.reservations = { "014": { branch: "emend-task-014-x", slug: "x", reservedAt: "2020-01-01T00:00:00Z" } };
+    legacy.reservations = { "014": { branch: "recense-task-014-x", slug: "x", reservedAt: "2020-01-01T00:00:00Z" } };
     writeFileSync(path, JSON.stringify(legacy));
     assert.equal(readRegistry(repo).worktrees["feat-legacy"]?.port, wt.port);
     const row = list(repo).find((r) => r.branch === "feat-legacy");
@@ -133,10 +133,10 @@ test("setup writes .wt/worktree.json and private directories", () =>
     assert.deepEqual(info, {
       branch: "feat-a",
       port: P0,
-      emendHome: join(r.path, ".wt", "home"),
+      recenseHome: join(r.path, ".wt", "home"),
       mode: "github",
     });
-    assert.equal(r.emendHome, join(r.path, ".wt", "home"));
+    assert.equal(r.recenseHome, join(r.path, ".wt", "home"));
     for (const dir of [".wt", ".wt/home"]) {
       assert.equal(statSync(join(r.path, dir)).mode & 0o777, 0o700, dir);
     }

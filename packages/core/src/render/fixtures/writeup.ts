@@ -1,4 +1,4 @@
-import type { TopicMeta, WriteupInput } from "@emend/contract";
+import type { TopicMeta, WriteupInput } from "@recense/contract";
 
 export const topics: TopicMeta[] = [
   { slug: "labels", title: "Clear labels", importance: 70, summary: "Name each shelf." },

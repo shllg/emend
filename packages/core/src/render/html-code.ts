@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { toString as hastText } from "hast-util-to-string";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, html as parse5Html } from "parse5";
 import { hastToHtml } from "shiki/core";
@@ -103,7 +103,7 @@ export async function htmlCodeColours(html: string): Promise<HtmlCodeColour[]> {
     if (lang === undefined || !spendHighlightBudget(budget, bytes)) continue;
     const highlighted = highlighter.codeToHast(text, {
       lang,
-      theme: "emend",
+      theme: "recense",
       tokenizeMaxLineLength: HIGHLIGHT_LINE_CHARS,
       // The colour worker's job timeout bounds work; per-line limits truncate colours on cold or busy workers.
       tokenizeTimeLimit: 0,

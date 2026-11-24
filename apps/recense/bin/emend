@@ -1,0 +1,28 @@
+#!/bin/sh
+# The command before the rename. It says so on stderr, then runs exactly what bin/recense runs.
+set -eu
+
+# `status --line` promises no stderr output, and stdout stays untouched for MCP over stdio.
+if ! { [ "$#" -eq 2 ] && [ "$1" = status ] && [ "$2" = --line ]; }; then
+  printf 'emend is now recense: use the recense command. The emend command goes away in a later release.\n' >&2
+fi
+
+script="$0"
+hops=0
+while :; do
+  directory=$(CDPATH= cd -P -- "$(dirname -- "$script")" && pwd)
+  script="$directory/$(basename -- "$script")"
+  [ -L "$script" ] || break
+  if [ "$hops" -ge 40 ]; then
+    printf 'emend: too many levels of symlinks\n' >&2
+    exit 1
+  fi
+  hops=$((hops + 1))
+  link=$(readlink "$script")
+  case "$link" in
+    /*) script="$link" ;;
+    *) script="$directory/$link" ;;
+  esac
+done
+
+exec "$directory/recense" "$@"

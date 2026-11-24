@@ -1,4 +1,4 @@
-import { FilePath } from "@emend/contract";
+import { FilePath } from "@recense/contract";
 import { createRootRoute, createRoute, createRouter, Link, Outlet, type RouterHistory } from "@tanstack/react-router";
 import { cancelThreadActionFocus } from "./lib/thread-action-focus.ts";
 import { DevicesPage } from "./routes/devices.tsx";

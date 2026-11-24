@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import {
   type Element,
   type HTMLDivElement,
@@ -19,7 +19,7 @@ import { normalizeText } from "../../../packages/core/src/render/normalize.ts";
 const corpus: { name: string; old: string; new: string }[] = JSON.parse(
   readFileSync(new URL("../../../packages/core/src/place/corpus/html.json", import.meta.url), "utf8"),
 );
-const source = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+const source = readFileSync(new URL("../../recense/src/server/content/bridge.ts", import.meta.url), "utf8");
 const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
 const windows: Window[] = [];
 afterEach(async () => {
@@ -57,7 +57,7 @@ function bridge(html: string) {
     Intl,
   });
   window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
-  expect(post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+  expect(post).toHaveBeenCalledWith({ type: "recense:ready" }, "*");
   const message = (data: unknown, sender: unknown = parent) =>
     window.dispatchEvent(new window.MessageEvent("message", { data, source: sender as Window }));
   const select = (element: Element) => {
@@ -67,7 +67,7 @@ function bridge(html: string) {
     selection?.removeAllRanges();
     selection?.addRange(range);
     window.document.dispatchEvent(new window.Event("mouseup"));
-    return post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0];
+    return post.mock.calls.findLast(([data]) => data.type === "recense:anchor")?.[0];
   };
   const marked = () =>
     Array.from(window.document.querySelectorAll<HTMLElement>("[style]")).filter(
@@ -142,7 +142,7 @@ test.each([
   const b = bridge(html);
   const expected = htmlPartTexts(parseDocHtml(html));
   b.message({
-    type: "emend:changed",
+    type: "recense:changed",
     parts: expected.length,
     marks: expected.map((_, index) => ({ index, revision: 2 })),
   });
@@ -152,7 +152,7 @@ test.each([
 test("changed paragraphs around a heading both receive marks", () => {
   const b = bridge("<p>Changed before</p><h2>Heading</h2><p>Changed after</p>");
   b.message({
-    type: "emend:changed",
+    type: "recense:changed",
     parts: 3,
     marks: [
       { index: 0, revision: 2 },
@@ -192,20 +192,20 @@ test("every core part tag is marked in order, including inline text in a part", 
   expect(expected).toEqual([...HTML_PART_TAGS.map((tag) => `Part ${tag}`), "With inline bold link"]);
   const b = bridge(html);
   b.message({
-    type: "emend:changed",
+    type: "recense:changed",
     parts: expected.length,
     marks: expected.map((_, index) => ({ index, revision: 2 })),
   });
   expect(b.marked().map(ownText)).toEqual(expected);
 });
 
-test.each(["emend", "custom"])("%s pages mark changed and added paragraphs with isolated labels", (look) => {
+test.each(["recense", "custom"])("%s pages mark changed and added paragraphs with isolated labels", (look) => {
   const b = bridge(
-    `<meta name="emend-look" content="${look}"><p>Stable</p><p>Changed</p><p>Stable too</p><p>Added</p>`,
+    `<meta name="recense-look" content="${look}"><p>Stable</p><p>Changed</p><p>Stable too</p><p>Added</p>`,
   );
   expect(b.marked()).toEqual([]);
   b.message({
-    type: "emend:changed",
+    type: "recense:changed",
     parts: 4,
     marks: [
       { index: 1, revision: 2 },
@@ -231,7 +231,7 @@ test("doc CSS does not change the inline line, palette or label styles", () => {
     p { box-shadow: none !important; }
     p > div { display: none !important; }
     </style></head><body><p>Changed</p></body></html>`);
-  b.message({ type: "emend:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
+  b.message({ type: "recense:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
   expect(b.marked().map(ownText)).toEqual(["Changed"]);
   expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2"]);
   expectMarkColors(b, { line: "#8b5cf6", background: "#f5f3ff", text: "#6d28d9" });
@@ -256,11 +256,11 @@ test.each(["", "important"])("clearing reapplied marks restores inline box-shado
   expect(before[0]?.value).not.toBe("");
   expect(before[0]?.priority).toBe(priority);
   for (const revision of [2, 3]) {
-    b.message({ type: "emend:changed", parts: 2, marks: [0, 1].map((index) => ({ index, revision })) });
+    b.message({ type: "recense:changed", parts: 2, marks: [0, 1].map((index) => ({ index, revision })) });
     expect(b.marked()).toEqual(paragraphs);
     expectMarkColors(b, { line: "#8b5cf6", background: "#f5f3ff", text: "#6d28d9" });
   }
-  b.message({ type: "emend:changed", parts: 2, marks: [] });
+  b.message({ type: "recense:changed", parts: 2, marks: [] });
   expect(b.marked()).toEqual([]);
   expect(b.labels()).toEqual([]);
   expect(
@@ -274,9 +274,9 @@ test.each(["", "important"])("clearing reapplied marks restores inline box-shado
 
 test.each([false, true])("marks follow valid theme messages (theme first: %s)", (themeFirst) => {
   const b = bridge("<p>Changed</p>");
-  const dark = { type: "emend:theme", mode: "dark", scales: {}, tokens: {} };
+  const dark = { type: "recense:theme", mode: "dark", scales: {}, tokens: {} };
   if (themeFirst) b.message(dark);
-  b.message({ type: "emend:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
+  b.message({ type: "recense:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
   expect(b.marked()).toHaveLength(1);
   expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2"]);
   if (!themeFirst) {
@@ -298,7 +298,7 @@ test.each([false, true])("marks follow valid theme messages (theme first: %s)", 
 test("consecutive marks share a label only within the same revision", () => {
   const b = bridge("<p>One</p><p>Two</p><p>Three</p><p>Four</p><p>Five</p>");
   b.message({
-    type: "emend:changed",
+    type: "recense:changed",
     parts: 5,
     marks: [
       { index: 0, revision: 2 },
@@ -313,17 +313,17 @@ test("consecutive marks share a label only within the same revision", () => {
 
 test("new messages replace marks, empty marks and count mismatches clear them", () => {
   const b = bridge("<p>One</p><p>Two</p>");
-  b.message({ type: "emend:changed", parts: 2, marks: [{ index: 0, revision: 2 }] });
+  b.message({ type: "recense:changed", parts: 2, marks: [{ index: 0, revision: 2 }] });
   const oldLabel = b.labels()[0];
-  b.message({ type: "emend:changed", parts: 2, marks: [{ index: 1, revision: 3 }] });
+  b.message({ type: "recense:changed", parts: 2, marks: [{ index: 1, revision: 3 }] });
   expect(b.marked().map(ownText)).toEqual(["Two"]);
   expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 3"]);
   expect(oldLabel?.parentNode).toBeNull();
-  b.message({ type: "emend:changed", parts: 2, marks: [] });
+  b.message({ type: "recense:changed", parts: 2, marks: [] });
   expect(b.marked()).toEqual([]);
   expect(b.labels()).toEqual([]);
-  b.message({ type: "emend:changed", parts: 2, marks: [{ index: 0, revision: 2 }] });
-  b.message({ type: "emend:changed", parts: 3, marks: [{ index: 2, revision: 3 }] });
+  b.message({ type: "recense:changed", parts: 2, marks: [{ index: 0, revision: 2 }] });
+  b.message({ type: "recense:changed", parts: 3, marks: [{ index: 2, revision: 3 }] });
   expect(b.marked()).toEqual([]);
   expect(b.labels()).toEqual([]);
   expect(b.window.document.adoptedStyleSheets).toHaveLength(0);
@@ -331,7 +331,7 @@ test("new messages replace marks, empty marks and count mismatches clear them", 
 
 test("invalid messages and non-parent sources leave the previous marks untouched", () => {
   const b = bridge("<p>One</p><p>Two</p>");
-  const good = { type: "emend:changed", parts: 2, marks: [{ index: 0, revision: 2 }] };
+  const good = { type: "recense:changed", parts: 2, marks: [{ index: 0, revision: 2 }] };
   b.message(good);
   const label = b.labels()[0];
   const bad = [
@@ -378,7 +378,7 @@ test("invalid messages and non-parent sources leave the previous marks untouched
 test("label text never enters an anchor quote, including selection across parts", () => {
   const b = bridge("<p>First paragraph.</p> <p>Second paragraph.</p>");
   b.message({
-    type: "emend:changed",
+    type: "recense:changed",
     parts: 2,
     marks: [
       { index: 0, revision: 2 },
@@ -387,7 +387,7 @@ test("label text never enters an anchor quote, including selection across parts"
   });
   expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2", "Changed in rev 3"]);
   expect(b.select(b.window.document.body)).toEqual({
-    type: "emend:anchor",
+    type: "recense:anchor",
     quote: "First paragraph. Second paragraph.",
     prefix: "",
     suffix: "",
@@ -399,7 +399,7 @@ test("hostile HTML remains inert while its static text receives marks", () => {
     '<p>Safe<script>window.docRan = true</script><img src="x" onerror="window.docRan = true">' +
       '<a href="javascript:window.docRan=true"> link</a><svg onload="window.docRan=true"><text> SVG</text></svg></p>',
   );
-  b.message({ type: "emend:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
+  b.message({ type: "recense:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
   expect(b.marked().map(ownText)).toEqual(["Safe link SVG"]);
   expect(Reflect.get(b.window, "docRan")).toBeUndefined();
   expect(b.labels().map(b.labelText)).toEqual(["Changed in rev 2"]);
@@ -409,13 +409,13 @@ test("bridge cap matches the contract and over-nested documents expose no parts"
   expect(script).toContain(`const HTML_PARTS_MAX = ${LIMITS.htmlPartsPerDoc};`);
   const b = bridge(Array.from({ length: LIMITS.htmlPartsPerDoc + 1 }, (_, index) => `<p>Part ${index}</p>`).join(""));
   b.message({
-    type: "emend:changed",
+    type: "recense:changed",
     parts: LIMITS.htmlPartsPerDoc,
     marks: [{ index: LIMITS.htmlPartsPerDoc - 1, revision: 2 }],
   });
   expect(b.marked().map(ownText)).toEqual([`Part ${LIMITS.htmlPartsPerDoc - 1}`]);
   const deep = bridge(`${"<div>".repeat(513)}<p>Too deep</p>${"</div>".repeat(513)}`);
-  deep.message({ type: "emend:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
+  deep.message({ type: "recense:changed", parts: 1, marks: [{ index: 0, revision: 2 }] });
   expect(deep.marked()).toEqual([]);
 });
 
@@ -423,24 +423,24 @@ test("marks follow diagram hosts and return to the unchanged source pre when ren
   const b = bridge('<pre class="mermaid">graph TD; A--&gt;B</pre><p>Stable</p>');
   const pre = b.window.document.querySelector("pre");
   if (!pre) throw new Error("missing diagram");
-  const request = b.post.mock.calls.findLast(([data]) => data.type === "emend:diagrams")?.[0].request;
+  const request = b.post.mock.calls.findLast(([data]) => data.type === "recense:diagrams")?.[0].request;
   expect(request).toBe(1);
-  b.message({ type: "emend:changed", parts: 2, marks: [{ index: 0, revision: 2 }] });
+  b.message({ type: "recense:changed", parts: 2, marks: [{ index: 0, revision: 2 }] });
   expect(b.marked()).toEqual([pre]);
   b.message({
-    type: "emend:diagram",
+    type: "recense:diagram",
     request,
     index: 0,
     svg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
     width: 100,
     height: 50,
   });
-  const host = b.window.document.querySelector("[data-emend-diagram]");
+  const host = b.window.document.querySelector("[data-recense-diagram]");
   expect(host).not.toBeNull();
   expect(b.marked()).toEqual([host]);
   expect(host?.previousSibling).toBe(b.labels()[0]);
   expect(pre.textContent).toBe("graph TD; A-->B");
-  b.message({ type: "emend:diagram", request, index: 0, svg: null });
+  b.message({ type: "recense:diagram", request, index: 0, svg: null });
   expect(b.marked()).toEqual([pre]);
   expect(pre.firstChild).toBe(b.labels()[0]);
   expect(pre.textContent).toBe("graph TD; A-->B");

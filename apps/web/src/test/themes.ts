@@ -1,4 +1,4 @@
-import type { ThemeValid } from "@emend/contract";
+import type { ThemeValid } from "@recense/contract";
 
 export const customTheme: ThemeValid = {
   valid: true,

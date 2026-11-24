@@ -52,11 +52,11 @@ test("every agent file pins a model", () => {
 
 test("each agent uses its assigned model", () => {
   for (const [name, model] of Object.entries({
-    "emend-review-manager": "opus",
-    "emend-reviewer": "sonnet",
-    "emend-security-reviewer": "opus",
-    "emend-react-reviewer": "sonnet",
-    "emend-architecture-reviewer": "opus",
+    "recense-review-manager": "opus",
+    "recense-reviewer": "sonnet",
+    "recense-security-reviewer": "opus",
+    "recense-react-reviewer": "sonnet",
+    "recense-architecture-reviewer": "opus",
     "codex-agent": "sonnet",
     "e-outside-reader": "opus",
   })) {
@@ -68,10 +68,10 @@ test("each agent uses its assigned model", () => {
 
 test("reviewers cannot edit files or dispatch agents", () => {
   for (const name of [
-    "emend-reviewer",
-    "emend-security-reviewer",
-    "emend-react-reviewer",
-    "emend-architecture-reviewer",
+    "recense-reviewer",
+    "recense-security-reviewer",
+    "recense-react-reviewer",
+    "recense-architecture-reviewer",
     "codex-agent",
   ]) {
     const fields = agents.get(name);
@@ -83,14 +83,14 @@ test("reviewers cannot edit files or dispatch agents", () => {
 });
 
 test("the review manager has exactly the tools it needs", () => {
-  const fields = agents.get("emend-review-manager");
-  assert.ok(fields, "emend-review-manager must exist");
+  const fields = agents.get("recense-review-manager");
+  assert.ok(fields, "recense-review-manager must exist");
   const tools = fields.get("tools") ?? [];
   assert.deepEqual([...tools].sort(), ["Read", "Grep", "Glob", "Bash", "Agent"].sort());
 });
 
 test("the review manager removes a finding only on a false positive", () => {
-  const body = readFileSync(path.join(directory, "emend-review-manager.md"), "utf8");
+  const body = readFileSync(path.join(directory, "recense-review-manager.md"), "utf8");
   assert.ok(!body.includes("Send the decision itself"));
   assert.ok(body.includes('A finding leaves `fix` only on "false positive".'));
 });
@@ -100,11 +100,11 @@ test("a measured UI or UX problem is at least a defect", () => {
     /\s+/g,
     " ",
   );
-  const manager = readFileSync(path.join(directory, "emend-review-manager.md"), "utf8").replace(
+  const manager = readFileSync(path.join(directory, "recense-review-manager.md"), "utf8").replace(
     /\s+/g,
     " ",
   );
-  const react = readFileSync(path.join(directory, "emend-react-reviewer.md"), "utf8").replace(/\s+/g, " ");
+  const react = readFileSync(path.join(directory, "recense-react-reviewer.md"), "utf8").replace(/\s+/g, " ");
   assert.ok(rounds.includes("a UI or UX problem the reviewer shows with measured evidence"));
   assert.ok(manager.includes("is at least a defect when its reviewer justifies it with"));
   assert.ok(
@@ -118,7 +118,7 @@ test("a measured UI or UX problem is at least a defect", () => {
 });
 
 test("react and architecture reviewers have exactly the local read-only tools", () => {
-  for (const name of ["emend-react-reviewer", "emend-architecture-reviewer"]) {
+  for (const name of ["recense-react-reviewer", "recense-architecture-reviewer"]) {
     const fields = agents.get(name);
     assert.ok(fields, `${name} must exist`);
     const tools = fields.get("tools") ?? [];

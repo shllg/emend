@@ -106,9 +106,9 @@ const marked = (tree: HtmlRoot) => {
     for (const child of node.children) {
       if (child.type !== "element") continue;
       const className = child.properties.className;
-      if (Array.isArray(className) && className.includes("emend-term"))
+      if (Array.isArray(className) && className.includes("recense-term"))
         found.push([
-          String(child.properties.dataEmendTerm),
+          String(child.properties.dataRecenseTerm),
           child.children.map((c) => (c.type === "text" ? c.value : "")).join(""),
         ]);
       visit(child);

@@ -64,7 +64,7 @@ test("validators accept the documented forms", () => {
 });
 
 test("issue numbers parse strictly", () => {
-  assert.equal(BRANCH_PREFIX, "emend-");
+  assert.equal(BRANCH_PREFIX, "recense-");
   assert.equal(issueNumber("42"), 42);
   for (const s of ["0", "042", "1.2", "-1", "1x", ""]) refuses(() => issueNumber(s), s || "<empty>");
 });
@@ -170,22 +170,23 @@ test("textArg returns text, reads a file, and refuses bad combinations", () => {
 
 test("issue branch parsing treats an unrepresentable number as no inferred issue", () => {
   for (const digits of ["99999999999999999999", "9007199254740992"]) {
-    assert.equal(issueFromBranch(`emend-${digits}-x`), null);
+    assert.equal(issueFromBranch(`recense-${digits}-x`), null);
     refuses(() => issueNumber(digits), digits);
   }
-  assert.equal(issueFromBranch("emend-42-x"), 42);
-  assert.equal(issueFromBranch("emend-9007199254740991-x"), Number.MAX_SAFE_INTEGER);
-  assert.equal(issueFromBranch("emend-042-x"), null);
-  assert.equal(issueFromBranch("emend-feature-042-x"), null);
+  assert.equal(issueFromBranch("recense-42-x"), 42);
+  assert.equal(issueFromBranch("recense-9007199254740991-x"), Number.MAX_SAFE_INTEGER);
+  assert.equal(issueFromBranch("recense-042-x"), null);
+  assert.equal(issueFromBranch("recense-feature-042-x"), null);
 });
 
-test("requireIssueBranch asks for --issue on numeric emend names and checks the number", () => {
+test("requireIssueBranch asks for --issue on numeric recense names and checks the number", () => {
   assert.throws(
-    () => requireIssueBranch("emend-042-x"),
-    (e: unknown) => e instanceof WtError && e.code === 2 && e.message === "Numeric emend branch names require --issue.",
+    () => requireIssueBranch("recense-042-x"),
+    (e: unknown) =>
+      e instanceof WtError && e.code === 2 && e.message === "Numeric recense branch names require --issue.",
   );
-  assert.throws(() => requireIssueBranch("emend-42-x", 43), /must match --issue/);
-  requireIssueBranch("emend-42-x", 42);
-  requireIssueBranch("emend-task-042-x");
+  assert.throws(() => requireIssueBranch("recense-42-x", 43), /must match --issue/);
+  requireIssueBranch("recense-42-x", 42);
+  requireIssueBranch("recense-task-042-x");
   requireIssueBranch("feat-a");
 });

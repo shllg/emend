@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,13 +8,13 @@ import { BUILT_IN_FONTS } from "../apps/web/src/lib/built-in-fonts.ts";
 import { cleanPackageDocs } from "./package-docs.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const pkg = join(root, "apps/emend");
+const pkg = join(root, "apps/recense");
 let temporary: string | undefined;
 let check = "create temporary folder";
 let failed: string | undefined;
 
 try {
-  temporary = mkdtempSync(join(tmpdir(), "emend-check-package-"));
+  temporary = mkdtempSync(join(tmpdir(), "recense-check-package-"));
   const work = realpathSync(temporary);
   const pack = join(work, "pack");
   mkdirSync(pack);
@@ -42,13 +42,14 @@ try {
     "package/package.json",
     "package/README.md",
     "package/LICENSE",
+    "package/bin/recense",
     "package/bin/emend",
-    "package/dist/emend.mjs",
+    "package/dist/recense.mjs",
     "package/dist/publish-worker.mjs",
   ]);
   for (const name of entries) {
     check = `tarball excludes the theme skill ${JSON.stringify(name)}`;
-    assert(!name.includes("emend-theme"));
+    assert(!name.includes("recense-theme"));
     const permitted =
       allowed.has(name) || name.startsWith("package/dist/web/") || name.startsWith("package/dist/skills/");
     if (!permitted || name.startsWith("package/dist/web/.vite/") ||
@@ -64,15 +65,16 @@ try {
   for (const name of [
     "README.md",
     "LICENSE",
+    "bin/recense",
     "bin/emend",
-    "dist/emend.mjs",
+    "dist/recense.mjs",
     "dist/publish-worker.mjs",
     "dist/web/index.html",
     "dist/web/pub-frame.css",
-    "dist/skills/emend-review/SKILL.md",
-    "dist/skills/emend-review/references/writing.md",
-    "dist/skills/emend-feedback/SKILL.md",
-    "dist/skills/emend-publish/SKILL.md",
+    "dist/skills/recense-review/SKILL.md",
+    "dist/skills/recense-review/references/writing.md",
+    "dist/skills/recense-feedback/SKILL.md",
+    "dist/skills/recense-publish/SKILL.md",
   ]) {
     check = `tarball includes ${name}`;
     assert(entries.has(`package/${name}`));
@@ -101,8 +103,8 @@ try {
   check = "read packed manifest";
   const manifestText = readFileSync(join(extracted, "package/package.json"), "utf8");
   const manifest = JSON.parse(manifestText);
-  check = "packed manifest has no @emend/ references";
-  assert(!manifestText.includes("@emend/"));
+  check = "packed manifest has no @recense/ references";
+  assert(!manifestText.includes("@recense/"));
   for (const field of [
     "dependencies",
     "devDependencies",
@@ -139,7 +141,7 @@ try {
   writeFileSync(globalconfig, "");
   // Isolate npm's config, cache and install prefix, including config supplied through the environment.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^npm_config_/i.test(key)));
-  env.EMEND_HOME = join(work, "state");
+  env.RECENSE_HOME = join(work, "state");
   env.HOME = join(work, "home");
   mkdirSync(env.HOME);
   command(
@@ -162,10 +164,19 @@ try {
     work,
     env,
   );
-  const installed = join(work, "bin/emend");
-  const actualVersion = command("installed emend --version", installed, ["--version"], work, env);
+  const installed = join(work, "bin/recense");
+  const actualVersion = command("installed recense --version", installed, ["--version"], work, env);
   check = "installed version matches package";
-  assert.equal(actualVersion, `emend ${version}\n`);
+  assert.equal(actualVersion, `recense ${version}\n`);
+  // The old command still works: same stdout, one line about the rename on stderr.
+  const alias = spawnSync(join(work, "bin/emend"), ["--version"], { cwd: work, env, encoding: "utf8" });
+  check = "installed emend alias runs recense";
+  assert.equal(alias.status, 0);
+  assert.equal(alias.stdout, `recense ${version}\n`);
+  assert.equal(
+    alias.stderr,
+    "emend is now recense: use the recense command. The emend command goes away in a later release.\n",
+  );
 
   const skills = join(work, "skills");
   const output = command(
@@ -178,10 +189,10 @@ try {
   check = "skills link into installed package";
   assert.equal(
     output,
-    ["emend-feedback", "emend-publish", "emend-review"]
+    ["recense-feedback", "recense-publish", "recense-review"]
       .map(
         (name) =>
-          `would link ${join(skills, name)} -> ${join(work, "lib/node_modules/@shllg/emend/dist/skills", name)}\n`,
+          `would link ${join(skills, name)} -> ${join(work, "lib/node_modules/@shllg/recense/dist/skills", name)}\n`,
       )
       .join(""),
   );

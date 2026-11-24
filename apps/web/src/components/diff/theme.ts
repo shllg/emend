@@ -1,6 +1,6 @@
 import { createCSSVariablesTheme, registerCustomCSSVariableTheme, registerCustomTheme } from "@pierre/diffs";
 
-const name = "emend";
+const name = "recense";
 export const syntaxVariables = {
   foreground: "var(--syn-plain)",
   background: "var(--bg-surface)",

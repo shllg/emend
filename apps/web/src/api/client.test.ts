@@ -1,4 +1,4 @@
-import { InboxList } from "@emend/contract";
+import { InboxList } from "@recense/contract";
 import { afterEach, expect, test, vi } from "vitest";
 import { get } from "./client.ts";
 

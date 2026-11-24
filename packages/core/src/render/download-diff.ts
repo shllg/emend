@@ -1,4 +1,4 @@
-import { type FileFlag, type FileStatus, OTHER_TOPIC, type TopicMeta } from "@emend/contract";
+import { type FileFlag, type FileStatus, OTHER_TOPIC, type TopicMeta } from "@recense/contract";
 import { structuredPatch } from "diff";
 
 export const DOWNLOAD_DIFF_CONTEXT = 4;

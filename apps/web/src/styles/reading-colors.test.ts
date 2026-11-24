@@ -228,7 +228,7 @@ test.each([
   expect(labels?.[2]).toContain(`color: var(${labelColor});`);
 });
 
-test.each(["emend-comment", "emend-comment-active"])(
+test.each(["recense-comment", "recense-comment-active"])(
   "%s highlights use body text colour throughout quiet and muted writeup prose",
   (highlight) => {
     const reading = readFileSync(resolve(import.meta.dirname, "reading.css"), "utf8");

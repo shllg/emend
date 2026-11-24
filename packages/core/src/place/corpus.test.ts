@@ -5,7 +5,7 @@ import {
   Placement,
   Target,
   type WriteupSpanTarget,
-} from "@emend/contract";
+} from "@recense/contract";
 import { expect, test } from "vitest";
 import type { Block } from "../render/blocks.ts";
 import { renderMarkdown } from "../render/markdown.ts";

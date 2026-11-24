@@ -1,4 +1,4 @@
-import type { SourceLinesTarget } from "@emend/contract";
+import type { SourceLinesTarget } from "@recense/contract";
 import { expect, it } from "vitest";
 import { type PlaceContext, placeThread } from "./place.ts";
 

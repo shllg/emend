@@ -4,7 +4,7 @@ import {
   type ReviewView,
   type RevisionView,
   reviewDownloadPath,
-} from "@emend/contract";
+} from "@recense/contract";
 import { Link } from "@tanstack/react-router";
 import {
   ChevronDown,

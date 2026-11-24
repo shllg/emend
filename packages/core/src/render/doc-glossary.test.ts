@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { expect, test, vi } from "vitest";
 import type { HtmlElement, HtmlRoot } from "./blocks.ts";
 import { extractDocGlossary } from "./doc-glossary.ts";
@@ -11,7 +11,9 @@ async function render(markdown: string) {
   const blocks = await renderDoc(markdown, "guide.md", undefined, undefined, effects);
   return { blocks, terms: effects.terms, html: blocks.map((block) => block.html).join("") };
 }
-const marks = (html: string) => [...html.matchAll(/<span class="emend-term" data-emend-term="(\d+)">([^<]*)<\/span>/g)];
+const marks = (html: string) => [
+  ...html.matchAll(/<span class="recense-term" data-recense-term="(\d+)">([^<]*)<\/span>/g),
+];
 
 const doc = (glossary: string, body = "The budget is spent on a hub. Allowance and BUDGET again.") =>
   `# Title\n\n${body}\n\n## Glossary\n\n${glossary}\n`;
@@ -140,7 +142,7 @@ test("a doc without a glossary section renders exactly as before", async () => {
   const source = "# Title\n\nThe hub and the budget.\n\n## Glossary terms\n\n- **Hub:** A thing.\n";
   const withTerms = await render(source);
   expect(withTerms.terms).toBeUndefined();
-  expect(withTerms.html).not.toContain("emend-term");
+  expect(withTerms.html).not.toContain("recense-term");
   const plain = await renderDoc(source, "guide.md");
   expect(plain.map((block) => block.html)).toEqual(withTerms.blocks.map((block) => block.html));
 });
@@ -186,7 +188,7 @@ test("javascript links, raw SVG and a Mermaid click directive stay inert", async
   }
   const diagram = blocks.find((block) => block.text.includes("click Hub"));
   expect(diagram).toBeDefined();
-  expect(diagram?.html).not.toContain("emend-term");
+  expect(diagram?.html).not.toContain("recense-term");
   expect(terms?.map((term) => term.term)).toContain("Hub");
   for (const term of terms ?? []) {
     for (const text of [term.term, term.definition]) {

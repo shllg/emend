@@ -24,7 +24,7 @@ stop.
 - Keep private data out of what you commit: `bin/wt push` checks it before anything leaves. Add a
   `check-public: allow` marker only with the owner's OK; `bin/wt push` refuses a new one until the
   owner pushes it, and you never pass `--accept-new-markers`. Never read, create, edit or remove
-  `.private-terms`, and never set `EMEND_PRIVATE_TERMS`.
+  `.private-terms`, and never set `RECENSE_PRIVATE_TERMS`.
 
 ## 1. Preflight
 
@@ -35,7 +35,7 @@ stop.
 2. Read `.wt/worktree.json` for `issue` and `mode`. For an issue, its `issue` and the number
    in the branch name must agree; `bin/wt issue check` and the merge refuse otherwise.
 3. Resolve the input.
-   - An issue: the branch must be `emend-<n>-<slug>` for the same `<n>`; otherwise stop. Run
+   - An issue: the branch must be `recense-<n>-<slug>` for the same `<n>`; otherwise stop. Run
      `<main>/bin/wt issue check`. It confirms that the owner released the issue, that nobody else
      changed it since, and that it matches the snapshot `bin/wt spawn --issue` wrote. Any exit but 0:
      stop, run `<main>/bin/wt notify blocked`, report its reason line, and do nothing else. Then read
@@ -68,11 +68,11 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    (`chromium --headless=new …`).
    Before each review round, with the change committed and `pnpm verify` green at that commit,
    run `pnpm bundle:diff --json .wt/bundle-diff.json`.
-4. Before "done": dispatch `emend-review-manager` (`model: "opus"`) with the round, the range
+4. Before "done": dispatch `recense-review-manager` (`model: "opus"`) with the round, the range
    (`origin/main...HEAD` for a full round, the fix commits for a check round), the task file
    `.wt/issue.md` (or the description), `.wt/bundle-diff.json`, `.wt/bundle-reason.md` when it
    exists, and, for a check round, `.wt/review-findings.json`. See "Bundle growth" in
-   `.claude/agents/emend-review-manager.md`. It picks and runs the reviewers. Fixes go to
+   `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Fixes go to
    Codex. Review in rounds as
    `.claude/rules/review-rounds.md` says: commit first, round 1 over the whole change, then at most
    two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each manager JSON
@@ -104,7 +104,7 @@ options:
 
 - Open a ready PR and finalize it (Recommended)
 - Open a draft PR and finalize it
-- Land locally after an emend review (not offered when `.wt/worktree.json` names an issue: issue
+- Land locally after a recense review (not offered when `.wt/worktree.json` names an issue: issue
   branches land only through a PR)
 - Stop here
 
@@ -139,4 +139,4 @@ stopped, and stop.
   so in your reply.
 - At a terminal state (merged, landed, handed to the owner and stopped, or blocked), end the dynamic
   loop by calling ScheduleWakeup with `stop: true`. Never start another pass of `/e-work`.
-- While waiting on emend, the wait command blocks, so no wakeup is needed.
+- While waiting on recense, the wait command blocks, so no wakeup is needed.

@@ -1,4 +1,4 @@
-import type { FileView } from "@emend/contract";
+import type { FileView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";

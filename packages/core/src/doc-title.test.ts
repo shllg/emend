@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import * as html from "parse5";
 import { afterEach, expect, test, vi } from "vitest";
 import { cleanDocTitle, inferDocTitle, TITLE_PREFIX_BYTES } from "./doc-title.ts";

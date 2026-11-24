@@ -1,5 +1,5 @@
 function disabled() {
-  throw new Error("This diff backend is disabled. emend uses shiki-js.");
+  throw new Error("This diff backend is disabled. recense uses shiki-js.");
 }
 
 export {

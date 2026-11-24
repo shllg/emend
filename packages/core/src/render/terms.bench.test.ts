@@ -1,4 +1,4 @@
-import { LIMITS, WriteupInput } from "@emend/contract";
+import { LIMITS, WriteupInput } from "@recense/contract";
 import { test, vi } from "vitest";
 import * as matching from "./terms.ts";
 import { renderWriteup } from "./writeup.ts";
@@ -54,7 +54,7 @@ test.each([
         const units = matcher ? matching.TERM_MATCH_WORK_BUDGET - matcher.remaining : 0;
         const marks = rendered.sections
           .flatMap((section) => section.blocks)
-          .reduce((count, block) => count + (block.html.match(/data-emend-term=/g)?.length ?? 0), 0);
+          .reduce((count, block) => count + (block.html.match(/data-recense-term=/g)?.length ?? 0), 0);
         const measurement = { bench: withGlossary ? name : `${name}-baseline`, ms, units, marks };
         // Keep each measurement on one JSON line, outside the test console reporter.
         process.stdout.write(`${JSON.stringify(measurement)}\n`);

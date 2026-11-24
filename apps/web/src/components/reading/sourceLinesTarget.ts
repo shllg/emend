@@ -1,4 +1,4 @@
-import { SourceLinesTarget } from "@emend/contract";
+import { SourceLinesTarget } from "@recense/contract";
 import { type LinesError, lineContext } from "../../lib/line-context.ts";
 
 /** Token rows already use core splitLines coordinates; never split their text a second time. */

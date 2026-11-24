@@ -1,4 +1,4 @@
-import type { FileView } from "@emend/contract";
+import type { FileView } from "@recense/contract";
 
 /** The deepest folder shared by every changed file in this revision. */
 export function sharedDiffFolder(files: Pick<FileView, "path" | "role">[]): string | undefined {

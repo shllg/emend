@@ -15,12 +15,12 @@ test("HTML doc images are optional, bounded asset paths", () => {
     expect(schema.safeParse([{ ...doc, images }]).success).toBe(false);
 });
 
-test("HTML doc looks accept emend, custom or absence, and reject other values", () => {
+test("HTML doc looks accept recense, custom or absence, and reject other values", () => {
   const schema = contract.RevisionView.shape.docs;
   const doc = { path: "page.html", kind: "html", contentUrl: "/content/synthetic/page.html" };
   expect(schema.parse([doc])).toEqual([doc]);
-  for (const look of ["emend", "custom"]) expect(schema.parse([{ ...doc, look }])).toEqual([{ ...doc, look }]);
-  for (const look of ["other", "EMEND", "", null, false])
+  for (const look of ["recense", "custom"]) expect(schema.parse([{ ...doc, look }])).toEqual([{ ...doc, look }]);
+  for (const look of ["other", "RECENSE", "", null, false])
     expect(schema.safeParse([{ ...doc, look }]).success).toBe(false);
   expect(schema.parse([{ ...doc, colorScheme: "light" }])).toEqual([{ ...doc, colorScheme: "light" }]);
   for (const colorScheme of ["auto", "dark", "", null, false])
@@ -296,4 +296,12 @@ test("deviations are a revision section and a rendered section with stable block
       sections: [{ key: "deviations", label: "Deviations from the approved intent", topic: null, blocks: [block] }],
     }).sections[0]?.blocks,
   ).toEqual([block]);
+});
+
+test("the look `emend`, as named before the rename, is accepted and read as `recense`", () => {
+  const schema = contract.RevisionView.shape.docs;
+  const doc = { path: "page.html", kind: "html", contentUrl: "/content/synthetic/page.html" };
+  expect(schema.parse([{ ...doc, look: "emend" }])).toEqual([{ ...doc, look: "recense" }]);
+  expect(contract.HtmlLookValue.parse("emend")).toBe("recense");
+  expect(contract.HtmlLookValue.safeParse("EMEND").success).toBe(false);
 });

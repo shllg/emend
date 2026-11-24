@@ -89,8 +89,8 @@ function captureStdout(fn: () => void): string {
   return out;
 }
 
-const BRANCH = "emend-42-fix-the-review-pane";
-const AGENT = "wt-emend-42-fix-the-review-pane";
+const BRANCH = "recense-42-fix-review-pane";
+const AGENT = "wt-recense-42-fix-review-pane";
 
 /** The gh fake for one ready issue 42, the issue every spawn test below uses. */
 function readyIssueGh(env: TestEnv): void {
@@ -229,7 +229,7 @@ test("spawn still tries agent start after the pane wait expires and preserves it
         assert.equal(e.code, 1);
         assert.match(e.message, /agent_pane_busy/);
         assert.match(e.message, /no agent was started/);
-        assert.match(e.message, /cleanup emend-42-fix-the-review-pane/);
+        assert.match(e.message, /cleanup recense-42-fix-review-pane/);
         return true;
       });
       assert.equal(clock.now(), 30_000);
@@ -243,11 +243,11 @@ test("spawn still tries agent start after the pane wait expires and preserves it
 for (const mode of ["github"] as const) {
   test(`spawn --issue in ${mode} mode ignores oversized branch claims, writes only issue metadata and passes the issue prompt`, () =>
     scenario({ withBin: true }, async ({ env, fx, repo }) => {
-      gitIn(fx.main, "branch", "emend-99999999999999999999-x");
-      gitIn(fx.origin, "branch", "emend-99999999999999999998-x", "main");
+      gitIn(fx.main, "branch", "recense-99999999999999999999-x");
+      gitIn(fx.origin, "branch", "recense-99999999999999999998-x", "main");
       installFake(env, "gh", issueRules([readyIssue(42)]));
       const expected = issueSnapshot(pickIssue(repo, 42));
-      installFake(env, "herdr", herdrRules("wt-emend-42-fix-the-review-pane"));
+      installFake(env, "herdr", herdrRules("wt-recense-42-fix-review-pane"));
       const result = await runWt(
         join(fx.main, "bin/wt"),
         ["spawn", "--issue", "42", "--mode", mode, "--model", "opus", "--effort", "high"],
@@ -256,9 +256,9 @@ for (const mode of ["github"] as const) {
       assert.equal(result.code, 0, result.stderr);
       const url = "https://example.invalid/test/issues/42";
       assert.equal(result.stdout.split("\n")[0], `Issue: #42 ${url}`);
-      assert.equal(result.stdout.split("\n")[1], "Branch: emend-42-fix-the-review-pane");
+      assert.equal(result.stdout.split("\n")[1], "Branch: recense-42-fix-review-pane");
       assert.doesNotMatch(result.stdout, /Task:/);
-      const path = join(repo.worktreesDir, "emend-42-fix-the-review-pane");
+      const path = join(repo.worktreesDir, "recense-42-fix-review-pane");
       const metadata = JSON.parse(readFileSync(join(path, ".wt/worktree.json"), "utf8"));
       assert.equal(metadata.issue, 42);
       assert.equal(Object.hasOwn(metadata, "task"), false);
@@ -266,7 +266,7 @@ for (const mode of ["github"] as const) {
       assert.equal(readFileSync(join(path, ".wt/brief.md"), "utf8"), `${url}\n`);
       assert.equal(
         readFileSync(join(path, ".wt/issue.md"), "utf8"),
-        `# Fix the review pane\n${url}\nThe issue body as its owner wrote it, in Markdown.\n\nApproved task.\n`,
+        `# Fix review pane\n${url}\nThe issue body as its owner wrote it, in Markdown.\n\nApproved task.\n`,
       );
       const snapshot = JSON.parse(readFileSync(join(path, ".wt/issue.json"), "utf8"));
       assert.deepEqual({ ...snapshot, fetchedAt: expected.fetchedAt }, expected);
@@ -276,13 +276,13 @@ for (const mode of ["github"] as const) {
       assert.ok(fakeCalls(env, "gh").filter((c) => c.includes("number=42")).length >= 3);
       assert.ok(fakeCalls(env, "gh").every((c) => !c.some((a) => /comments/.test(a))));
       assert.equal(existsSync(join(path, "tasks")), false);
-      assert.equal(readRegistry(repo).worktrees["emend-42-fix-the-review-pane"]?.issue, 42);
+      assert.equal(readRegistry(repo).worktrees["recense-42-fix-review-pane"]?.issue, 42);
       const calls = fakeCalls(env, "herdr");
       assert.deepEqual(calls.find((c) => c[1] === "start")?.slice(-4), ["--model", "opus", "--effort", "high"]);
       assert.equal(calls.find((c) => c[1] === "prompt")?.[3], spawnPrompt("#42", mode));
       const listed = await runWt(join(fx.main, "bin/wt"), ["list"], { cwd: fx.main });
       assert.equal(listed.code, 0, listed.stderr);
-      assert.match(listed.stdout, /emend-42-fix-the-review-pane\s+#42\s/);
+      assert.match(listed.stdout, /recense-42-fix-review-pane\s+#42\s/);
       const json = await runWt(join(fx.main, "bin/wt"), ["list", "--json"], { cwd: fx.main });
       assert.equal(JSON.parse(json.stdout)[0].issue, 42);
     }));
@@ -309,7 +309,7 @@ test("spawn --issue rejects other sources and invalid numbers before any externa
 
 test("spawn --issue preflight refuses blocked, untrusted, taken and not-ready work without creating anything", () =>
   scenario({ withBin: true }, async ({ env, fx, repo }) => {
-    gitIn(fx.main, "branch", "emend-3-existing-other-title");
+    gitIn(fx.main, "branch", "recense-3-existing-other-title");
     installFake(
       env,
       "gh",
@@ -347,7 +347,7 @@ test("issue spawn reports a stalled prompt once, and leaves the worktree", () =>
       installFake(
         env,
         "herdr",
-        herdrRules("wt-emend-42-issue", [
+        herdrRules("wt-recense-42-issue", [
           { match: ["agent", "prompt"], code: 1, stderr: failWith("agent_prompt_stalled") },
         ]),
       );
@@ -355,11 +355,11 @@ test("issue spawn reports a stalled prompt once, and leaves the worktree", () =>
         assert.ok(e instanceof WtError);
         assert.equal(e.code, 124);
         assert.match(e.message, /Do not resend the prompt/);
-        assert.match(e.message, /cleanup emend-42-issue/);
+        assert.match(e.message, /cleanup recense-42-issue/);
         return true;
       });
       assert.equal(fakeCalls(env, "herdr").filter((c) => c[1] === "prompt").length, 1);
-      assert.ok(readRegistry(repo).worktrees["emend-42-issue"]);
+      assert.ok(readRegistry(repo).worktrees["recense-42-issue"]);
     }),
   ));
 
@@ -380,7 +380,7 @@ test("the prompt names the issue and the closing answer", () => {
   );
   assert.equal(
     spawnPrompt("#14", "local"),
-    "/loop /e-work #14 Closing answer from /e-spawn: Land locally after an emend review.",
+    "/loop /e-work #14 Closing answer from /e-spawn: Land locally after a recense review.",
   );
 });
 
@@ -448,15 +448,15 @@ test("issue spawn makes these herdr calls and writes the issue URL as the brief"
     const r = await runWt(join(fx.main, "bin", "wt"), SPAWN_ARGS, { cwd: fx.main, env: { HERDR_ENV: "1" } });
     assert.equal(r.code, 0, r.stderr);
 
-    const wtPath = join(fx.main, ".claude", "worktrees", "emend-42-fix-the-review-pane");
+    const wtPath = join(fx.main, ".claude", "worktrees", "recense-42-fix-review-pane");
     const lines = r.stdout.trimEnd().split("\n");
     assert.equal(lines[0], "Issue: #42 https://example.invalid/test/issues/42");
-    assert.equal(lines[1], "Branch: emend-42-fix-the-review-pane");
+    assert.equal(lines[1], "Branch: recense-42-fix-review-pane");
     assert.match(lines[2] as string, /^Port: 36\d\d$/);
     assert.equal(lines[3], `Worktree: ${wtPath}`);
     assert.equal(
       lines.at(-1),
-      "Claude agent wt-emend-42-fix-the-review-pane is working on emend-42-fix-the-review-pane in herdr workspace task-ws (w9).",
+      "Claude agent wt-recense-42-fix-review-pane is working on recense-42-fix-review-pane in herdr workspace task-ws (w9).",
     );
 
     const prompt = "/loop /e-work #42 Closing answer from /e-spawn: Open a ready PR and finalize it.";
@@ -478,7 +478,7 @@ test("issue spawn makes these herdr calls and writes the issue URL as the brief"
         "--permission-mode",
         "auto",
         "--name",
-        "emend-42-fix-the-review-pane",
+        "recense-42-fix-review-pane",
       ],
       ["agent", "prompt", AGENT, prompt, "--wait", "--until", "working", "--until", "blocked", "--timeout", "60000"],
     ]);
@@ -541,7 +541,7 @@ test("spawn outside herdr creates nothing", () =>
     assert.equal(r.code, 69);
     assert.match(r.stdout + r.stderr, /Nothing was created\./);
     assert.deepEqual(readRegistry(repo).worktrees, {});
-    assert.equal(gitIn(fx.main, "branch", "--list", "emend-42-*"), "");
+    assert.equal(gitIn(fx.main, "branch", "--list", "recense-42-*"), "");
     assert.equal(existsSync(join(fx.main, ".claude", "worktrees")), false);
   }));
 
@@ -586,7 +586,7 @@ test("spawn: an existing branch on origin creates nothing", () =>
   scenario({ withBin: true }, async ({ fx, env, repo }) => {
     readyIssueGh(env);
     installFake(env, "herdr", herdrRules(AGENT));
-    gitIn(fx.main, "push", "--quiet", "origin", "main:refs/heads/emend-42-fix-the-review-pane");
+    gitIn(fx.main, "push", "--quiet", "origin", "main:refs/heads/recense-42-fix-review-pane");
     const r = await runWt(join(fx.main, "bin", "wt"), SPAWN_ARGS, { cwd: fx.main, env: { HERDR_ENV: "1" } });
     assert.equal(r.code, 3);
     assert.match(r.stderr, /Nothing was created\./);
@@ -609,7 +609,7 @@ test("spawn: prompt stalled is not resent", () =>
     assert.match(r.stderr, /Do not resend the prompt/);
     const wtPath = join(fx.main, ".claude", "worktrees", BRANCH);
     assert.ok(r.stderr.includes(wtPath));
-    assert.ok(r.stderr.includes(`${fx.main}/bin/wt cleanup emend-42-fix-the-review-pane`));
+    assert.ok(r.stderr.includes(`${fx.main}/bin/wt cleanup recense-42-fix-review-pane`));
     // nothing was cleaned up
     assert.ok(existsSync(wtPath));
     assert.ok(readRegistry(repo).worktrees[BRANCH]);
@@ -627,7 +627,7 @@ test("spawn: start refused reports the worktree", () =>
     assert.equal(r.code, 1);
     const wtPath = join(fx.main, ".claude", "worktrees", BRANCH);
     assert.ok(r.stderr.includes(wtPath));
-    assert.match(r.stderr, /bin\/wt cleanup emend-42-fix-the-review-pane/);
+    assert.match(r.stderr, /bin\/wt cleanup recense-42-fix-review-pane/);
     assert.match(r.stderr, /no agent was started/);
     assert.equal(fakeCalls(env, "herdr").filter((c) => c[1] === "prompt").length, 0);
     assert.ok(existsSync(wtPath));
@@ -651,7 +651,7 @@ test("spawn: a blocked agent is reported as waiting", () =>
     assert.equal(r.code, 0, r.stderr);
     assert.equal(
       r.stdout.trimEnd().split("\n").at(-1),
-      "Claude agent wt-emend-42-fix-the-review-pane started and is waiting for an answer in herdr workspace task-ws (w9).",
+      "Claude agent wt-recense-42-fix-review-pane started and is waiting for an answer in herdr workspace task-ws (w9).",
     );
   }));
 
@@ -676,7 +676,7 @@ test("spawn: an already open workspace starts no agent", () =>
     const r = await runWt(join(fx.main, "bin", "wt"), SPAWN_ARGS, { cwd: fx.main, env: { HERDR_ENV: "1" } });
     assert.equal(r.code, 3);
     assert.equal(fakeCalls(env, "herdr").filter((c) => c[1] === "start").length, 0);
-    assert.match(r.stderr, /bin\/wt cleanup emend-42-fix-the-review-pane/);
+    assert.match(r.stderr, /bin\/wt cleanup recense-42-fix-review-pane/);
   }));
 
 test("spawn without --issue refuses and creates nothing", () =>
@@ -700,7 +700,7 @@ test("spawn without --issue refuses and creates nothing", () =>
       assert.deepEqual(readRegistry(repo).worktrees, {});
       assert.equal(existsSync(join(fx.main, ".claude", "worktrees")), false);
     }
-    assert.equal(gitIn(fx.main, "branch", "--list", "emend-*"), "");
+    assert.equal(gitIn(fx.main, "branch", "--list", "recense-*"), "");
     assert.deepEqual(fakeCalls(env, "herdr"), []);
     assert.deepEqual(fakeCalls(env, "gh"), []);
   }));
@@ -762,7 +762,7 @@ test("notify shows the branch title and body", () =>
     }
     assert.deepEqual(fakeCalls(env, "herdr"), [
       ["notification", "show", "main: your answer is needed", "--body", "A question waits in this session"],
-      ["notification", "show", "main: review ready", "--body", "The emend review waits for you"],
+      ["notification", "show", "main: review ready", "--body", "The recense review waits for you"],
       ["notification", "show", "main: merged", "--body", "The change is merged; this workspace closes"],
       ["notification", "show", "main: blocked", "--body", "This session stopped and needs you"],
     ]);
@@ -1126,7 +1126,7 @@ test("spawn refreshes the single issue immediately before setup and refuses a ch
         { match: ["number=42"], stdout: githubPage({ issue: readyIssue(42) }), times: 1 },
         ...issueRules([untrusted]),
       ]);
-      installFake(env, "herdr", herdrRules("wt-emend-42-fix-the-review-pane"));
+      installFake(env, "herdr", herdrRules("wt-recense-42-fix-review-pane"));
       await assert.rejects(
         spawn(repo, { issue: 42, mode: "github" }, fakeClock()),
         (e: unknown) => e instanceof WtError && e.code === 2 && /untrusted/.test(e.message),
@@ -1156,11 +1156,11 @@ test("spawn snapshots the refreshed owner-edited body", () =>
           }),
         ]),
       ]);
-      installFake(env, "herdr", herdrRules("wt-emend-42-fix-the-review-pane"));
+      installFake(env, "herdr", herdrRules("wt-recense-42-fix-review-pane"));
       const result = await spawn(repo, { issue: 42, mode: "github" }, fakeClock());
       assert.equal(
         readFileSync(join(result.path, ".wt/issue.md"), "utf8"),
-        `# Fix the review pane\nhttps://example.invalid/test/issues/42\nThe issue body as its owner wrote it, in Markdown.\n\n${body}`,
+        `# Fix review pane\nhttps://example.invalid/test/issues/42\nThe issue body as its owner wrote it, in Markdown.\n\n${body}`,
       );
       assert.equal(fakeCalls(env, "gh").filter((c) => c.includes("number=42")).length, 2);
     }),
@@ -1185,9 +1185,9 @@ test("spawn omits a stranger's title from the snapshot and branch name", () =>
           }),
         ]),
       );
-      installFake(env, "herdr", herdrRules("wt-emend-42-issue"));
+      installFake(env, "herdr", herdrRules("wt-recense-42-issue"));
       const result = await spawn(repo, { issue: 42, mode: "github" }, fakeClock());
-      assert.equal(result.branch, "emend-42-issue");
+      assert.equal(result.branch, "recense-42-issue");
       const markdown = readFileSync(join(result.path, ".wt/issue.md"), "utf8");
       assert.ok(markdown.startsWith("# Issue 42\nThe title is left out because the owner did not write it.\n"));
       assert.ok(!markdown.includes(title));

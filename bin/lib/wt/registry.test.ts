@@ -203,7 +203,7 @@ test("a legacy registry with reservations and task keys loads, and a write keeps
     JSON.stringify({
       version: 1,
       worktrees: { old: { ...entry(PORT_MIN), task: "014" } },
-      reservations: { "014": { branch: "emend-task-014-x", slug: "x", reservedAt: "2020-01-01T00:00:00Z" } },
+      reservations: { "014": { branch: "recense-task-014-x", slug: "x", reservedAt: "2020-01-01T00:00:00Z" } },
     }),
   );
   assert.equal(readRegistry(repo).worktrees.old?.port, PORT_MIN);

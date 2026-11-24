@@ -1,7 +1,7 @@
-import { Target } from "@emend/contract";
+import { Target } from "@recense/contract";
 
-const prefix = "emend.draft.";
-const instructionPrefix = "emend.instruction.";
+const prefix = "recense.draft.";
+const instructionPrefix = "recense.instruction.";
 const texts = new Map<string, string | null>();
 const saving = new Set<string>();
 const reviewSaves = new Map<string, number>();
@@ -28,7 +28,7 @@ window.addEventListener("storage", (event) => {
 
 export function draftKey(reviewId: string, target: Target, threadId?: string) {
   const stable = Object.fromEntries(Object.entries(target).sort(([left], [right]) => left.localeCompare(right)));
-  return `emend.draft.${reviewId}.${JSON.stringify(stable)}${threadId ? `.reply.${threadId}` : ""}`;
+  return `recense.draft.${reviewId}.${JSON.stringify(stable)}${threadId ? `.reply.${threadId}` : ""}`;
 }
 export function editDraftKey(reviewId: string, commentId: string) {
   return `${prefix}${reviewId}.edit.${commentId}`;

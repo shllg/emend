@@ -3,10 +3,17 @@
   let pick;
   let color;
   try {
-    pick = localStorage.getItem("emend.theme");
+    // Entries kept under the name before the rename move over first (src/lib/legacy-storage.ts does the rest).
+    for (const key of ["theme", "theme.custom"]) {
+      const old = localStorage.getItem(`emend.${key}`);
+      if (old === null) continue;
+      if (localStorage.getItem(`recense.${key}`) === null) localStorage.setItem(`recense.${key}`, old);
+      localStorage.removeItem(`emend.${key}`);
+    }
+    pick = localStorage.getItem("recense.theme");
     if (pick?.startsWith("theme:")) {
       const name = pick.slice(6);
-      const cached = JSON.parse(localStorage.getItem("emend.theme.custom") || "null");
+      const cached = JSON.parse(localStorage.getItem("recense.theme.custom") || "null");
       if (
         /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$(?![\s\S])/.test(name) &&
         !["system", "dark", "light", "fonts"].includes(name) &&

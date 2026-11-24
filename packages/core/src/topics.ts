@@ -1,4 +1,4 @@
-import { type FileStatus, OTHER_TOPIC, type PublishManifest } from "@emend/contract";
+import { type FileStatus, OTHER_TOPIC, type PublishManifest } from "@recense/contract";
 
 export type ChangedPath = { path: string; oldPath: string | null; status: FileStatus };
 export class UnchangedFilesError extends Error {

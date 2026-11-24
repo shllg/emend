@@ -1,4 +1,4 @@
-import { InboxItem, LIMITS } from "@emend/contract";
+import { InboxItem, LIMITS } from "@recense/contract";
 import { expect, test } from "vitest";
 import {
   adjacentInboxRow,
@@ -236,7 +236,7 @@ test("Active jumps count only rows shown by Kind, text, machine and project filt
 
 test.each([
   ["title", { title: "Needle" }],
-  ["branch", { branch: "emend-needle" }],
+  ["branch", { branch: "recense-needle" }],
   ["project", { project: "Needle" }],
   ["machine", { origin: { id: b.id, name: "Needle" } }],
 ] as const)("palette matches the %s", (_field, patch) => {
@@ -245,21 +245,21 @@ test.each([
 });
 
 test("palette finds a title's initials and words in different fields", () => {
-  const match = item(1, { title: "Performance Harness Results", branch: "emend-175-harness" });
+  const match = item(1, { title: "Performance Harness Results", branch: "recense-175-harness" });
   expect(matchInboxItems([match], now, "phr").map(({ item }) => item)).toEqual([match]);
   expect(matchInboxItems([match], now, "175 results workshop").map(({ item }) => item)).toEqual([match]);
 });
 
 test("palette ranks the branch carrying an issue number above separated digits and rejects reversed digits", () => {
-  const match = item(1, { branch: "emend-175-a-perf-harness" });
+  const match = item(1, { branch: "recense-175-a-perf-harness" });
   const apart = item(2, { title: "1 thing, 7 tasks, 5 results" });
-  const reversed = item(3, { branch: "emend-157-foo" });
+  const reversed = item(3, { branch: "recense-157-foo" });
   expect(matchInboxItems([apart, reversed, match], now, "175").map(({ item }) => item)).toEqual([match, apart]);
 });
 
 test.each([
-  ["175", "emend-175-a-perf-harness", "emend-1750-other"],
-  ["18", "emend-18-x", "emend-184-y"],
+  ["175", "recense-175-a-perf-harness", "recense-1750-other"],
+  ["18", "recense-18-x", "recense-184-y"],
 ] as const)("palette ranks issue %s above a longer number despite inbox order", (query, branch, longerBranch) => {
   const match = item(1, { branch });
   const longer = item(2, { branch: longerBranch });
@@ -267,7 +267,7 @@ test.each([
 });
 
 test("palette finds an issue number at the start of a long branch", () => {
-  const match = item(1, { branch: `emend-175-${"x".repeat(4000)}` });
+  const match = item(1, { branch: `recense-175-${"x".repeat(4000)}` });
   expect(matchInboxItems([match], now, "175").map(({ item }) => item)).toEqual([match]);
 });
 

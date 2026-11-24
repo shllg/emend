@@ -1,4 +1,4 @@
-import type { NeedsYouKind } from "@emend/contract";
+import type { NeedsYouKind } from "@recense/contract";
 import { plural } from "./count.ts";
 
 export const needsYouLabels: Record<NeedsYouKind, string> = {

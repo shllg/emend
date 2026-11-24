@@ -1,4 +1,4 @@
-import type { Outcome, Placement, Target, ThreadState, TopicMeta, UnplacedReason } from "@emend/contract";
+import type { Outcome, Placement, Target, ThreadState, TopicMeta, UnplacedReason } from "@recense/contract";
 import type { DownloadDiffFile, DownloadDiffReveal } from "./download-diff.ts";
 
 export type DownloadComment = {

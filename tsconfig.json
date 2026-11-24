@@ -10,7 +10,7 @@
   "references": [
     { "path": "./packages/contract" },
     { "path": "./packages/core" },
-    { "path": "./apps/emend" },
+    { "path": "./apps/recense" },
     { "path": "./apps/web" }
   ]
 }

@@ -1,5 +1,5 @@
 /* Unlayered author styles win over every default, including the token definitions. */
-@layer emend {
+@layer recense {
   :root {
     color-scheme: light dark;
   }
@@ -9,34 +9,34 @@
   :root[data-theme="dark"] {
     color-scheme: dark;
   }
-  :root[data-emend-width="narrow"] {
+  :root[data-recense-width="narrow"] {
     --reader-measure: 68ch;
   }
-  :root[data-emend-width="wide"] {
+  :root[data-recense-width="wide"] {
     --reader-measure: 1248px;
   }
-  :root[data-emend-prose="15"] {
+  :root[data-recense-prose="15"] {
     --reader-prose-size: 15px;
   }
-  :root[data-emend-prose="16"] {
+  :root[data-recense-prose="16"] {
     --reader-prose-size: 16px;
   }
-  :root[data-emend-prose="17"] {
+  :root[data-recense-prose="17"] {
     --reader-prose-size: 17px;
   }
-  :root[data-emend-prose="18"] {
+  :root[data-recense-prose="18"] {
     --reader-prose-size: 18px;
   }
-  :root[data-emend-code="12"] {
+  :root[data-recense-code="12"] {
     --reader-code-size: 12px;
   }
-  :root[data-emend-code="13"] {
+  :root[data-recense-code="13"] {
     --reader-code-size: 13px;
   }
-  :root[data-emend-code="14"] {
+  :root[data-recense-code="14"] {
     --reader-code-size: 14px;
   }
-  :root[data-emend-code="15"] {
+  :root[data-recense-code="15"] {
     --reader-code-size: 15px;
   }
   html {
@@ -58,14 +58,14 @@
     margin: 0 auto;
     padding: var(--space-4) var(--space-10) var(--space-8);
   }
-  :root[data-emend-layout="wide"] body {
+  :root[data-recense-layout="wide"] body {
     --reading-max: var(--reader-measure, 1024px);
     max-width: calc(var(--reading-max) + 112px);
     padding: calc(var(--space-6) + var(--space-1)) 56px calc(var(--space-16) + var(--space-2));
     padding-right: clamp(var(--space-8), calc(100% - var(--reading-max) - 56px), 56px);
   }
   @media (min-width: 768px) {
-    :root:not([data-emend-layout]) body {
+    :root:not([data-recense-layout]) body {
       --reading-max: 1024px;
       max-width: calc(var(--reading-max) + 112px);
       padding: calc(var(--space-6) + var(--space-1)) 56px calc(var(--space-16) + var(--space-2));
@@ -149,7 +149,7 @@
     border: 1px solid var(--border-1);
   }
   pre,
-  [data-emend-diagram] {
+  [data-recense-diagram] {
     margin: 0 0 calc(var(--space-3) + var(--space-0-5));
     padding: var(--space-3) calc(var(--space-3) + var(--space-0-5));
     border: 1px solid var(--border-1);
@@ -302,11 +302,11 @@
     overflow-wrap: anywhere;
     color: var(--fg-reading);
   }
-  :root[data-emend-layout="narrow"] dl.facts {
+  :root[data-recense-layout="narrow"] dl.facts {
     grid-template-columns: minmax(0, 1fr);
   }
   @media (max-width: 767px) {
-    :root:not([data-emend-layout]) dl.facts {
+    :root:not([data-recense-layout]) dl.facts {
       grid-template-columns: minmax(0, 1fr);
     }
   }

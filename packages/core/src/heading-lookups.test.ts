@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { expect, test } from "vitest";
 import { headingLookups } from "./heading-lookups.ts";
 

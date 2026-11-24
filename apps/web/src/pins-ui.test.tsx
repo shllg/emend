@@ -6,7 +6,7 @@ import {
   type ReviewView,
   type SettingsView,
   SHORTCUT_DEFAULTS,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -432,7 +432,7 @@ test("j and k start from the focused Done duplicate's position", async () => {
 });
 
 test("the collapsed rail lists each review once, pins first, and keeps its jump badges", async () => {
-  localStorage.setItem("emend:inbox-kind", "review");
+  localStorage.setItem("recense:inbox-kind", "review");
   layoutStore.update({ inboxCollapsed: true });
   items = [
     item(1),

@@ -1,4 +1,4 @@
-import { type InboxItem, LIMITS } from "@emend/contract";
+import { type InboxItem, LIMITS } from "@recense/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, PanelLeftClose, Search } from "lucide-react";

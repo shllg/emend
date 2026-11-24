@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 
 function baseDoc(revision: RevisionView) {
   // The server builds docs in file order (ord, id), including both views of a path.

@@ -1,4 +1,4 @@
-import { type DocSpanTarget, LIMITS, type Placement, type WriteupSpanTarget } from "@emend/contract";
+import { type DocSpanTarget, LIMITS, type Placement, type WriteupSpanTarget } from "@recense/contract";
 import type { Block } from "../render/blocks.ts";
 import { normalizeText } from "../render/normalize.ts";
 import { firstTwoMatches } from "./search.ts";

@@ -35,21 +35,21 @@ function inside(roots: string[], path: string): boolean {
 function unavailable(): WtError {
   return new WtError(
     69,
-    process.env.EMEND_BIN
-      ? "EMEND_BIN does not name an executable file."
-      : "emend is not on PATH. Install emend, or set EMEND_BIN to its absolute path.",
+    process.env.RECENSE_BIN
+      ? "RECENSE_BIN does not name an executable file."
+      : "recense is not on PATH. Install recense, or set RECENSE_BIN to its absolute path.",
   );
 }
 
-export function emendProgram(roots: string[]): string {
-  const override = process.env.EMEND_BIN;
-  if (override && !isAbsolute(override)) throw new WtError(2, "EMEND_BIN must be an absolute path.");
+export function recenseProgram(roots: string[]): string {
+  const override = process.env.RECENSE_BIN;
+  if (override && !isAbsolute(override)) throw new WtError(2, "RECENSE_BIN must be an absolute path.");
   const candidates = override
     ? [override]
     : (process.env.PATH ?? "")
         .split(delimiter)
         .filter(isAbsolute)
-        .map((dir) => `${dir}${sep}emend`);
+        .map((dir) => `${dir}${sep}recense`);
   for (const program of candidates) {
     let real: string;
     try {
@@ -59,11 +59,11 @@ export function emendProgram(roots: string[]): string {
     } catch {
       continue;
     }
-    // This catches an emend copy in the repository. A wrapper can still dispatch elsewhere.
+    // This catches a recense copy in the repository. A wrapper can still dispatch elsewhere.
     if (inside(roots, program) || inside(roots, real)) {
       throw new WtError(
         69,
-        "The emend program lies inside this repository. bin/wt reads approvals only through an installed emend.",
+        "The recense program lies inside this repository. bin/wt reads approvals only through an installed recense.",
       );
     }
     // Shims dispatch on the invoked name.
@@ -72,7 +72,7 @@ export function emendProgram(roots: string[]): string {
   throw unavailable();
 }
 
-/** Check the nearest existing directory too, since emend can create its state on first use. */
+/** Check the nearest existing directory too, since recense can create its state on first use. */
 function realpathInside(roots: string[], path: string): boolean {
   let dir = path;
   for (;;) {
@@ -88,20 +88,25 @@ function realpathInside(roots: string[], path: string): boolean {
   }
 }
 
-export function assertEmendEnv(roots: string[]): void {
-  // Mirror stateDir and configDir in apps/emend/src/state/paths.ts.
+export function assertRecenseEnv(roots: string[]): void {
+  // Mirror stateDir and configDir in apps/recense/src/state/paths.ts.
   const home = homedir();
-  const { EMEND_HOME, XDG_DATA_HOME, XDG_CONFIG_HOME } = process.env;
-  if (EMEND_HOME && !isAbsolute(EMEND_HOME)) throw new WtError(69, "EMEND_HOME must be an absolute path.");
+  const { XDG_DATA_HOME, XDG_CONFIG_HOME } = process.env;
+  // The command also honours EMEND_HOME, the name before the rename, when RECENSE_HOME is unset.
+  const homeName = process.env.RECENSE_HOME ? "RECENSE_HOME" : "EMEND_HOME";
+  const RECENSE_HOME = process.env.RECENSE_HOME || process.env.EMEND_HOME;
+  if (RECENSE_HOME && !isAbsolute(RECENSE_HOME)) throw new WtError(69, `${homeName} must be an absolute path.`);
   const dataHome = XDG_DATA_HOME && isAbsolute(XDG_DATA_HOME) ? XDG_DATA_HOME : join(home, ".local", "share");
   const configHome = XDG_CONFIG_HOME && isAbsolute(XDG_CONFIG_HOME) ? XDG_CONFIG_HOME : join(home, ".config");
   const state =
-    EMEND_HOME ||
-    (process.platform === "darwin" ? join(home, "Library", "Application Support", "emend") : join(dataHome, "emend"));
+    RECENSE_HOME ||
+    (process.platform === "darwin"
+      ? join(home, "Library", "Application Support", "recense")
+      : join(dataHome, "recense"));
   for (const [name, path] of [
     ["home", home],
     ["state", state],
-    ["config", join(configHome, "emend")],
+    ["config", join(configHome, "recense")],
   ] as const) {
     const resolved = resolve(path);
     if (
@@ -111,7 +116,7 @@ export function assertEmendEnv(roots: string[]): void {
     ) {
       throw new WtError(
         69,
-        `emend's ${name} folder lies inside this repository. bin/wt reads approvals only from your own emend state.`,
+        `recense's ${name} folder lies inside this repository. bin/wt reads approvals only from your own recense state.`,
       );
     }
   }
@@ -161,7 +166,7 @@ function isReview(value: unknown): value is Review {
 }
 
 function parseReviews(stdout: string): Review[] {
-  const unreadable = "emend returned a review list bin/wt cannot read.";
+  const unreadable = "recense returned a review list bin/wt cannot read.";
   let list: unknown;
   try {
     list = JSON.parse(stdout);
@@ -179,22 +184,22 @@ type Approval = { ok: true; reviewId: string; revision: number } | { ok: false; 
 export function readApproval(repo: Repo, branch: string, sha: string): Approval {
   commitSha(sha);
   const roots = worktreeRoots(repo);
-  const program = emendProgram(roots);
-  assertEmendEnv(roots);
+  const program = recenseProgram(roots);
+  assertRecenseEnv(roots);
   const { code, stdout, stderr } = run(program, ["ls", "--json", "--head", sha], { cwd: homedir(), timeoutMs: 30_000 });
   if (code === 127) throw unavailable();
-  if (code === 124) throw new WtError(69, "emend did not answer within 30 seconds.");
+  if (code === 124) throw new WtError(69, "recense did not answer within 30 seconds.");
   if (code !== 0) {
-    const usage = "Usage: emend ls [--json].";
+    const usage = "Usage: recense ls [--json].";
     if (stdout.includes(usage) || stderr.includes(usage)) {
-      const source = process.env.EMEND_BIN ? "in EMEND_BIN" : "on PATH";
+      const source = process.env.RECENSE_BIN ? "in RECENSE_BIN" : "on PATH";
       throw new WtError(
         69,
-        `The emend ${source} is too old to report approvals; it needs 0.8.0 or later. Update it, or set EMEND_BIN.`,
+        `The recense ${source} is too old to report approvals; it needs 0.8.0 or later. Update it, or set RECENSE_BIN.`,
       );
     }
     const first = repoDiagnostic(repo, stderr).split("\n", 1)[0] ?? "";
-    throw new WtError(69, `emend ls failed: ${first.slice(0, 200).replaceAll("\t", " ")}`);
+    throw new WtError(69, `recense ls failed: ${first.slice(0, 200).replaceAll("\t", " ")}`);
   }
 
   const matches = parseReviews(stdout).filter((r) => r.approved?.head === sha || r.newest?.head === sha);

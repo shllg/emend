@@ -7,7 +7,7 @@ import {
   type ThreadView,
   type TopicMeta,
   type WriteupInput,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -1007,7 +1007,7 @@ test("a changed glossary stays folded and opens on navigation", () => {
   const target = document.getElementById(`block-${block.id}`);
   expect(target).toBeTruthy();
   act(() => {
-    target?.dispatchEvent(new Event("emend:reveal-reading", { bubbles: true }));
+    target?.dispatchEvent(new Event("recense:reveal-reading", { bubbles: true }));
   });
   expect(glossary?.open).toBe(true);
   expect(glossary && within(glossary).getByRole("button", { name: "Comment on block" })).toBeTruthy();
@@ -1109,16 +1109,16 @@ test("a writeup image renders inline with its caption and takes a block comment"
     ),
   );
   const { container } = mount(<Writeup {...props} writeup={writeup} />);
-  const images = container.querySelectorAll<HTMLImageElement>(".em-prose .emend-media img");
+  const images = container.querySelectorAll<HTMLImageElement>(".em-prose .recense-media img");
   expect(images).toHaveLength(2);
   expect(images[0]?.getAttribute("src")).toBe(`/api/v1/media/${hash}`);
   expect(images[0]?.getAttribute("alt")).toBe("Before");
-  expect(container.querySelector("p.emend-media-row")).toBeTruthy();
-  expect([...container.querySelectorAll(".emend-media-caption")].map((caption) => caption.textContent)).toEqual([
+  expect(container.querySelector("p.recense-media-row")).toBeTruthy();
+  expect([...container.querySelectorAll(".recense-media-caption")].map((caption) => caption.textContent)).toEqual([
     "Before",
     "After",
   ]);
-  const wrapper = container.querySelector<HTMLElement>(".emend-media")?.closest<HTMLElement>(".em-reading-block");
+  const wrapper = container.querySelector<HTMLElement>(".recense-media")?.closest<HTMLElement>(".em-reading-block");
   if (!wrapper) throw new Error("Missing commentable image block");
   fireEvent.click(within(wrapper).getByRole("button", { name: "Comment on block" }));
   fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Which one is new?" } });
@@ -1150,20 +1150,20 @@ test("each writeup image's wrapper gets its size as custom properties, and nothi
     ),
   );
   const { container } = mount(<Writeup {...props} writeup={writeup} />);
-  const wrappers = container.querySelectorAll<HTMLElement>("span.emend-media");
+  const wrappers = container.querySelectorAll<HTMLElement>("span.recense-media");
   expect(wrappers).toHaveLength(2);
-  expect(wrappers[0]?.classList.contains("emend-media-sized")).toBe(true);
-  expect(wrappers[1]?.classList.contains("emend-media-sized")).toBe(false);
+  expect(wrappers[0]?.classList.contains("recense-media-sized")).toBe(true);
+  expect(wrappers[1]?.classList.contains("recense-media-sized")).toBe(false);
   expect(wrappers[0]?.querySelector("img")?.getAttribute("width")).toBe("640");
-  expect(wrappers[0]?.style.getPropertyValue("--emend-media-w")).toBe("640");
-  expect(wrappers[0]?.style.getPropertyValue("--emend-media-h")).toBe("480");
-  expect(wrappers[1]?.style.getPropertyValue("--emend-media-w")).toBe("");
-  expect(wrappers[1]?.style.getPropertyValue("--emend-media-h")).toBe("");
+  expect(wrappers[0]?.style.getPropertyValue("--recense-media-w")).toBe("640");
+  expect(wrappers[0]?.style.getPropertyValue("--recense-media-h")).toBe("480");
+  expect(wrappers[1]?.style.getPropertyValue("--recense-media-w")).toBe("");
+  expect(wrappers[1]?.style.getPropertyValue("--recense-media-h")).toBe("");
   cleanup();
 
   const crafted = (attributes: string): RenderedBlock => ({
     ...block,
-    html: `<p><span class="emend-media emend-media-sized"><img src="/api/v1/media/${hash}" alt="x" ${attributes}><span class="emend-media-caption">x</span></span></p>`,
+    html: `<p><span class="recense-media recense-media-sized"><img src="/api/v1/media/${hash}" alt="x" ${attributes}><span class="recense-media-caption">x</span></span></p>`,
   });
   for (const attributes of [
     'width="0" height="10"',
@@ -1173,19 +1173,33 @@ test("each writeup image's wrapper gets its size as custom properties, and nothi
     'width="10"',
   ]) {
     const view = mount(<BlockView block={crafted(attributes)} />);
-    const wrapper = view.container.querySelector<HTMLElement>("span.emend-media");
-    expect(wrapper?.style.getPropertyValue("--emend-media-w"), attributes).toBe("");
-    expect(wrapper?.style.getPropertyValue("--emend-media-h"), attributes).toBe("");
+    const wrapper = view.container.querySelector<HTMLElement>("span.recense-media");
+    expect(wrapper?.style.getPropertyValue("--recense-media-w"), attributes).toBe("");
+    expect(wrapper?.style.getPropertyValue("--recense-media-h"), attributes).toBe("");
     cleanup();
   }
   const legacy: RenderedBlock = {
     ...block,
-    html: `<p><span class="emend-media"><img src="/api/v1/media/${hash}" alt="x" width="2000" height="100"><span class="emend-media-caption">x</span></span></p>`,
+    html: `<p><span class="recense-media"><img src="/api/v1/media/${hash}" alt="x" width="2000" height="100"><span class="recense-media-caption">x</span></span></p>`,
   };
   const view = mount(<BlockView block={legacy} />);
-  const wrapper = view.container.querySelector<HTMLElement>("span.emend-media");
-  expect(wrapper?.style.getPropertyValue("--emend-media-w")).toBe("");
-  expect(wrapper?.style.getPropertyValue("--emend-media-h")).toBe("");
+  const wrapper = view.container.querySelector<HTMLElement>("span.recense-media");
+  expect(wrapper?.style.getPropertyValue("--recense-media-w")).toBe("");
+  expect(wrapper?.style.getPropertyValue("--recense-media-h")).toBe("");
+});
+
+test("a block stored before the rename, with emend-* classes, still sizes its images and finds its pair", async () => {
+  const hash = "a".repeat(64);
+  const stored: RenderedBlock = {
+    ...block,
+    html: `<p class="emend-media-row emend-media-pair"><span class="emend-media emend-media-sized"><img src="/api/v1/media/${hash}" alt="x" width="640" height="480"><span class="emend-media-caption">x</span></span><span class="emend-media"><img src="/api/v1/media/${hash}" alt="y"><span class="emend-media-caption">y</span></span></p>`,
+  };
+  const { container } = mount(<BlockView block={stored} />);
+  const wrapper = container.querySelector<HTMLElement>("span.emend-media");
+  expect(wrapper?.style.getPropertyValue("--recense-media-w")).toBe("640");
+  expect(wrapper?.style.getPropertyValue("--recense-media-h")).toBe("480");
+  // The before/after switch shows for an old pair.
+  expect(screen.getAllByRole("button").length).toBeGreaterThan(0);
 });
 
 test("the new opening lifts commentable facts into Risk and Frame in order, with links below", async () => {
@@ -1887,7 +1901,7 @@ test.each([false, true])("a fact block keeps its target, marker and outline coun
   expect(JSON.parse(fetchMock.mock.calls[0]?.[1].body).target).toEqual(target);
 });
 
-test.each(["jump", "emend:reveal-reading", "beforematch"])(
+test.each(["jump", "recense:reveal-reading", "beforematch"])(
   "Assurance opens for %s and remembers its own fold",
   (event) => {
     const checks: RenderedBlock[] = [
@@ -2031,7 +2045,7 @@ test("computed facts isolate literal titles, undo text and doc paths even when h
   ]);
 });
 
-test("PDI and RLO in agent text are removed while emend's fact text stays outside each bdi in order", () => {
+test("PDI and RLO in agent text are removed while recense's fact text stays outside each bdi in order", () => {
   const title = "Docs\u2069\u202e";
   const undo = "Restore state\u2069\u202e";
   const why = { ...block, id: "t-seed-why-12345678", section: "t-seed-why" as const, text: `Undo: ${undo}` };
@@ -2348,11 +2362,11 @@ test("Details remembers summary clicks, browser expansion and nested toggle isol
 
 test("pair controls preserve the prose element and switch only the trusted pair", () => {
   const hash = "a".repeat(64);
-  const images = `<span class="emend-media"><img src="/api/v1/media/${hash}" alt="Before"></span> <span class="emend-media"><img src="/api/v1/media/${hash}" alt="After"></span>`;
-  const legacy = { ...block, html: `<p class="emend-media-row">${images}</p>` };
+  const images = `<span class="recense-media"><img src="/api/v1/media/${hash}" alt="Before"></span> <span class="recense-media"><img src="/api/v1/media/${hash}" alt="After"></span>`;
+  const legacy = { ...block, html: `<p class="recense-media-row">${images}</p>` };
   const pair = {
     ...block,
-    html: `<p class="emend-media-row emend-media-pair">${images}\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+    html: `<p class="recense-media-row recense-media-pair">${images}\n<span class="recense-media-effect">More room for seeds.</span></p>`,
   };
   const { container, rerender } = render(<BlockView block={legacy} />);
   const prose = container.querySelector(".em-prose");

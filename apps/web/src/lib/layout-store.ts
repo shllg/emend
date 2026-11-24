@@ -1,8 +1,8 @@
-import { z } from "@emend/contract/browser";
+import { z } from "@recense/contract/browser";
 import { useSyncExternalStore } from "react";
 
-export const layoutKey = "emend.layout.v1";
-export const tabsDefaultKey = "emend.layout.tabs-default";
+export const layoutKey = "recense.layout.v1";
+export const tabsDefaultKey = "recense.layout.tabs-default";
 const paneChoice = z.enum(["split", "tabs"]);
 export const readingWidthSchema = z.enum(["comfortable", "wide", "narrow"]);
 export const proseSizeSchema = z.union([z.literal(15), z.literal(16), z.literal(17), z.literal(18)]);
@@ -70,9 +70,9 @@ export function createLayoutStore() {
   let snapshot =
     saved == null
       ? layoutSchema.parse({
-          diffStyle: read("emend.diff.layout") ?? undefined,
-          wrap: read("emend.diff.wrap") === "true",
-          inboxCollapsed: read("emend.inbox.collapsed") === "true",
+          diffStyle: read("recense.diff.layout") ?? undefined,
+          wrap: read("recense.diff.wrap") === "true",
+          inboxCollapsed: read("recense.inbox.collapsed") === "true",
         })
       : parse(saved);
   const listeners = new Set<() => void>();

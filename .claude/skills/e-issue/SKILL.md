@@ -113,7 +113,7 @@ owner's OK.
 Pick the kind label from the table. When the kind is unclear, say your guess and why; the owner
 confirms it in step 6.
 
-**Security stop.** When the input describes a way to break emend's security, create nothing public.
+**Security stop.** When the input describes a way to break recense's security, create nothing public.
 Examples: reading another owner's data, running code from a reviewed repository, agent HTML on the
 app origin, a token leak, a way past a guard. Stop here, before step 3, and write no draft file.
 Tell the owner, and offer two routes: a private security advisory on GitHub, or a note in the
@@ -144,7 +144,7 @@ Answer what the repository can answer yourself. Ask the owner only what it canno
    with `model: "sonnet"`. Name files by their path from the repository root.
 5. **Bug.** Write a one-sentence root-cause hypothesis with `file:line`, marked as a hypothesis.
    Reproduce the bug only when that is cheap and safe: tests with their own temporary state, never
-   emend's real state folder. Fix nothing, and change no file.
+   recense's real state folder. Fix nothing, and change no file.
 6. **Size.** When the work would clearly need more than one PR, propose several issues linked by
    blocked-by, in the order they should land.
 
@@ -161,7 +161,7 @@ Answer what the repository can answer yourself. Ask the owner only what it canno
 Before you draft, these must be clear:
 
 - **Bug:** where it happens (web app on which device and browser, or which CLI command; the
-  version from `emend --version`), the steps or the situation, what happens, and what should happen.
+  version from `recense --version`), the steps or the situation, what happens, and what should happen.
 - **Feature or improvement:** who it serves and the moment it is needed, what should happen, what
   stays out of scope, and how the owner will check that it is done.
 - **Priority:** propose `P0`, `P1` or `P2`, with a one-line reason.
@@ -252,7 +252,7 @@ where `<main>` is the parent of `git rev-parse --path-format=absolute --git-comm
 only locations and rule names, never the matched text. Fix every hit and run it again until it
 exits 0. It also checks the owner's private terms from `<main>/.private-terms`. When no terms list
 exists it refuses: stop and ask the owner to create that file. Never read, create, edit or remove
-`.private-terms`, and never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix.
+`.private-terms`, and never set `RECENSE_PRIVATE_TERMS`: a hit names the place to fix.
 Run it again on the final files, after every change from step 6 and after step 7.4 merges a
 concurrent edit, right before each create or edit, and on any other text this skill sends to
 GitHub.

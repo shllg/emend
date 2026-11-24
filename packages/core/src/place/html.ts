@@ -1,4 +1,4 @@
-import type { HtmlSpanTarget, Placement } from "@emend/contract";
+import type { HtmlSpanTarget, Placement } from "@recense/contract";
 import { type DefaultTreeAdapterTypes, defaultTreeAdapter, parse } from "parse5";
 import { normalizeText } from "../render/normalize.ts";
 import { spanCandidates } from "./span.ts";

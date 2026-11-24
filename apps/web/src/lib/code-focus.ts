@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { diffGroups } from "./diff-groups.ts";
 
 export type CodeFocus = { kind: "topic"; slug: string } | { kind: "file"; id: string };

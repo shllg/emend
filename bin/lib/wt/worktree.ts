@@ -87,7 +87,7 @@ export interface SetupResult {
   path: string;
   branch: string;
   port: number;
-  emendHome: string;
+  recenseHome: string;
 }
 
 function pathExists(p: string): boolean {
@@ -126,14 +126,14 @@ function createNew(file: string, data: string | Buffer, mode: number): void {
 /** Writes `.wt/worktree.json`, `.wt/.gitignore` and `.wt/home`. Refuses a symlink anywhere on the way. */
 export function writeWtFiles(entry: WorktreeEntry, branch: string): string {
   const wt = join(entry.path, ".wt");
-  const emendHome = join(wt, "home");
+  const recenseHome = join(wt, "home");
   ensureRealDir(wt, 0o700);
-  ensureRealDir(emendHome, 0o700);
+  ensureRealDir(recenseHome, 0o700);
   // .wt holds this checkout's private state; ignore it even where the repository's .gitignore does not.
   createNew(join(wt, ".gitignore"), "*\n", 0o600);
-  const info = { branch, port: entry.port, emendHome, issue: entry.issue, mode: entry.mode };
+  const info = { branch, port: entry.port, recenseHome, issue: entry.issue, mode: entry.mode };
   createNew(join(wt, "worktree.json"), `${JSON.stringify(info, null, 2)}\n`, 0o600);
-  return emendHome;
+  return recenseHome;
 }
 
 /** The gitignored files a new worktree needs (such as the MCP server registration) are listed in this file. */
@@ -274,7 +274,7 @@ function fromLinkedWorktree(repo: Repo): boolean {
   return repo.callerTop !== null && repo.callerTop !== repo.mainRoot;
 }
 
-/** Creates a worktree for `branch` with a port and a private EMEND_HOME. Exit 3 when the branch or directory is taken. */
+/** Creates a worktree for `branch` with a port and a private RECENSE_HOME. Exit 3 when the branch or directory is taken. */
 export function setup(repo: Repo, o: SetupOptions): SetupResult {
   const branch = branchName(o.branch);
   const from = o.from === undefined ? undefined : refName(o.from);
@@ -365,9 +365,9 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
     const entry: WorktreeEntry = { path, port, issue, mode, createdAt: new Date().toISOString() };
     r.worktrees[branch] = entry;
     try {
-      const emendHome = writeWtFiles(entry, branch);
+      const recenseHome = writeWtFiles(entry, branch);
       if (approved) writeIssueSnapshot(join(path, ".wt"), approved);
-      return { entry, emendHome, failure: null as WtError | null };
+      return { entry, recenseHome, failure: null as WtError | null };
     } catch (e) {
       const why = e instanceof Error ? e.message : "unknown error";
       const failure = new WtError(
@@ -375,12 +375,12 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
         `The worktree exists at ${path} but its .wt files could not be written (${why}). ` +
           `Registered with port ${port}. Remove it with: bin/wt cleanup ${branch}`,
       );
-      return { entry, emendHome: join(path, ".wt", "home"), failure };
+      return { entry, recenseHome: join(path, ".wt", "home"), failure };
     }
   });
   if (outcome.failure) throw outcome.failure;
   copyLocalFiles(repo, path);
-  return { path, branch, port: outcome.entry.port, emendHome: outcome.emendHome };
+  return { path, branch, port: outcome.entry.port, recenseHome: outcome.recenseHome };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -939,7 +939,7 @@ const setupCommand: Command = async ({ repo, args }) => {
   say(`worktree: ${r.path}`);
   say(`branch: ${r.branch}`);
   say(`port: ${r.port}`);
-  say(`EMEND_HOME: ${r.emendHome}`);
+  say(`RECENSE_HOME: ${r.recenseHome}`);
   say(`next: cd ${r.path} && pnpm install --frozen-lockfile`);
   return 0;
 };

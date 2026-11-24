@@ -397,7 +397,7 @@ function localSnapshot(fn: (dir: string, issue: PickedIssue, repo: Repo) => void
     commonDir: join(top, ".git"),
     worktreesDir: join(top, "worktrees"),
     callerTop: top,
-    callerBranch: "emend-42-fix",
+    callerBranch: "recense-42-fix",
   };
   try {
     fn(dir, issue, repo);
@@ -473,7 +473,7 @@ for (const state of ["untrusted", "blocked", "taken", "missing", "unavailable"] 
             ? { blockedBy: { nodes: [{ number: 9, state: "OPEN" }], pageInfo: { hasNextPage: false } } }
             : {},
       );
-      if (state === "taken") gitIn(fx.main, "branch", "emend-42-taken");
+      if (state === "taken") gitIn(fx.main, "branch", "recense-42-taken");
       const rules =
         state === "unavailable"
           ? [{ code: 1, stderr: "network is unreachable" }]
@@ -542,7 +542,7 @@ const otherReferences = [
 for (const ref of otherReferences) {
   test(`closing guard rejects ${ref} in all PR text`, () =>
     scenario(({ env, fx, repo }) => {
-      const branch = "emend-42-fix";
+      const branch = "recense-42-fix";
       gitIn(fx.main, "checkout", "--quiet", "-b", branch);
       repo.callerBranch = branch;
       mkdirSync(join(fx.main, ".wt"));
@@ -604,14 +604,14 @@ test("closing guard recognizes every keyword and same-repository full reference"
         "www.github.com/owner/repo/issues/42/",
         "https://www.github.com/owner/repo/issues/42/",
       ]) {
-        closingGuard(repo, "emend-42-fix", `${keyword.toUpperCase()}:\n${ref}`);
+        closingGuard(repo, "recense-42-fix", `${keyword.toUpperCase()}:\n${ref}`);
       }
     }
     assert.throws(
-      () => closingGuard(repo, "emend-42-fix", "Closes #42\nFixes GH-42"),
+      () => closingGuard(repo, "recense-42-fix", "Closes #42\nFixes GH-42"),
       /Text after a closing keyword looks like an issue reference/,
     );
-    assert.throws(() => closingGuard(repo, "emend-42-fix", "Closes GH-42"), /must close/);
+    assert.throws(() => closingGuard(repo, "recense-42-fix", "Closes GH-42"), /must close/);
     assert.throws(() => closingGuard(repo, "feature", "Closes other/repo#9"), /only issue branches/i);
   }));
 

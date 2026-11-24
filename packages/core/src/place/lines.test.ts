@@ -1,4 +1,4 @@
-import type { LinesTarget } from "@emend/contract";
+import type { LinesTarget } from "@recense/contract";
 import * as diff from "diff";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { LINE_MAP_MAX_EDIT_LENGTH, lineMap } from "./linemap.ts";

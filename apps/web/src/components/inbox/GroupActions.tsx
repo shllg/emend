@@ -1,4 +1,4 @@
-import { type InboxGroup, LIMITS } from "@emend/contract";
+import { type InboxGroup, LIMITS } from "@recense/contract";
 import { Ellipsis } from "lucide-react";
 import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { mutationMessage, useDeleteGroup, useRenameGroup } from "../../api/mutations.ts";

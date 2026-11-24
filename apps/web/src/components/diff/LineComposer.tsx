@@ -1,4 +1,4 @@
-import type { LinesTarget, TopicMeta } from "@emend/contract";
+import type { LinesTarget, TopicMeta } from "@recense/contract";
 import { Composer } from "../threads/Composer.tsx";
 
 export function LineComposer({

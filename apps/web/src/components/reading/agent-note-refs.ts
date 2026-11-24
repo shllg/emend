@@ -1,4 +1,4 @@
-import type { FileView } from "@emend/contract";
+import type { FileView } from "@recense/contract";
 import { type RefObject, useLayoutEffect } from "react";
 import type { ReaderGroup } from "./BlockReader.tsx";
 

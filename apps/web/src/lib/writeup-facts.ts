@@ -1,4 +1,4 @@
-import type { RenderedBlock, RenderedWriteup, RevisionView, TopicMeta } from "@emend/contract";
+import type { RenderedBlock, RenderedWriteup, RevisionView, TopicMeta } from "@recense/contract";
 import { WRITEUP_SECTION_NAMES } from "../components/diff/targets.ts";
 import { plural } from "./count.ts";
 import { rankedTopics } from "./topics.ts";

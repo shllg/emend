@@ -1,7 +1,7 @@
 import { activateShell, routeShellRequest, SHELL_CACHE_PREFIX, shellResponse } from "./sw-routing.ts";
 
-declare const __EMEND_SHELL__: string[];
-declare const __EMEND_BUILD_ID__: string;
+declare const __RECENSE_SHELL__: string[];
+declare const __RECENSE_BUILD_ID__: string;
 interface WorkerEvent {
   waitUntil(promise: Promise<unknown>): void;
 }
@@ -19,9 +19,9 @@ const worker = globalThis as unknown as {
   addEventListener(type: "message", handler: (event: { data?: unknown }) => void): void;
   addEventListener(type: "fetch", handler: (event: FetchEvent) => void): void;
 };
-const name = `${SHELL_CACHE_PREFIX}${__EMEND_BUILD_ID__}`;
+const name = `${SHELL_CACHE_PREFIX}${__RECENSE_BUILD_ID__}`;
 worker.addEventListener("install", (event) => {
-  event.waitUntil(worker.caches.open(name).then((cache) => cache.addAll(__EMEND_SHELL__)));
+  event.waitUntil(worker.caches.open(name).then((cache) => cache.addAll(__RECENSE_SHELL__)));
 });
 worker.addEventListener("activate", (event) => {
   event.waitUntil(activateShell(worker.caches, name).then(() => worker.clients.claim()));
@@ -35,6 +35,6 @@ worker.addEventListener("message", (event) => {
     void worker.skipWaiting();
 });
 worker.addEventListener("fetch", (event) => {
-  const route = routeShellRequest(event.request, worker.location.origin, __EMEND_SHELL__);
+  const route = routeShellRequest(event.request, worker.location.origin, __RECENSE_SHELL__);
   if (route) event.respondWith(shellResponse(event.request, route, name, worker.caches, worker.fetch.bind(worker)));
 });

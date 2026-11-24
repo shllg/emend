@@ -1,4 +1,4 @@
-import type { ReviewState } from "@emend/contract";
+import type { ReviewState } from "@recense/contract";
 import { BellOff, CheckCheck, CircleCheck, CircleDot } from "lucide-react";
 import { wakeHasPassed, wakeTime } from "../../lib/time.ts";
 import { Icon } from "../ui/Icon.tsx";

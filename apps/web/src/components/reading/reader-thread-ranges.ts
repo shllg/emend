@@ -1,4 +1,4 @@
-import type { ThreadView } from "@emend/contract";
+import type { ThreadView } from "@recense/contract";
 import { mapBlockText } from "../../lib/block-ranges.ts";
 import { supportsCommentHighlights } from "../../lib/comment-highlights.ts";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
@@ -122,7 +122,7 @@ export function threadAtPoint(
   if (
     !(event.target instanceof Element) ||
     event.target.closest(
-      'a, button, input, textarea, select, summary, span.emend-term, img, [role="button"], [contenteditable], [data-reading-thread-popover]',
+      'a, button, input, textarea, select, summary, span:is(.recense-term, .emend-term), img, [role="button"], [contenteditable], [data-reading-thread-popover]',
     )
   )
     return;

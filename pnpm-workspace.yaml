@@ -6,7 +6,7 @@ packages:
 allowBuilds:
   esbuild: false
 
-# GHSA-67mh-4wv8-2f99 is about esbuild's serve dev server. emend never starts it; esbuild 0.18.20
+# GHSA-67mh-4wv8-2f99 is about esbuild's serve dev server. recense never starts it; esbuild 0.18.20
 # arrives only through drizzle-kit (dev only).
 audit:
   ignore:

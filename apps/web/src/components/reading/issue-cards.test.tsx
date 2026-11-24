@@ -1,4 +1,4 @@
-import { type IssueRef, RenderedWriteup } from "@emend/contract";
+import { type IssueRef, RenderedWriteup } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
@@ -68,7 +68,7 @@ async function mount(options: MountOptions = {}) {
     </QueryClientProvider>,
   );
   const anchor = (n: number) => {
-    const found = view.container.querySelector<HTMLElement>(`a[data-emend-issue="${n}"]`);
+    const found = view.container.querySelector<HTMLElement>(`a[data-recense-issue="${n}"]`);
     if (!found) throw new Error(`Missing anchor #${n}`);
     return found;
   };
@@ -194,26 +194,26 @@ function Fixture({ title = "Plain title", href }: { title?: string; href?: strin
     <>
       <div ref={root}>
         <div data-block-id="overview-12345678">
-          <a data-emend-issue="5" href={good}>
+          <a data-recense-issue="5" href={good}>
             #5
           </a>
-          <a data-emend-issue="5" href={href ?? `${good}/other`}>
+          <a data-recense-issue="5" href={href ?? `${good}/other`}>
             #5 odd
           </a>
-          <a data-emend-issue="05" href={good}>
+          <a data-recense-issue="05" href={good}>
             #05
           </a>
           <div data-thread-card>
-            <a data-emend-issue="5" href={good}>
+            <a data-recense-issue="5" href={good}>
               #5 in thread
             </a>
           </div>
         </div>
-        <a data-emend-issue="5" href={good}>
+        <a data-recense-issue="5" href={good}>
           #5 no block
         </a>
       </div>
-      <a data-emend-issue="5" href={good}>
+      <a data-recense-issue="5" href={good}>
         #5 outside
       </a>
       <IssueCards root={root} repoUrl={repoUrl} refs={[{ number: 5, title, state: "closed" }]} />
@@ -256,7 +256,7 @@ test("a writeup with glossary terms and issue refs shares one pair of document p
     calls.mock.calls.filter(([type, , capture]) => type === name && capture === true).length;
   // "Fixes" is a glossary term, so GlossaryTerms mounts its own hover card beside IssueCards.
   const view = await mount({ glossary: [{ term: "Fixes", definition: "Closes the named issue." }] });
-  expect(view.container.querySelector("span.emend-term")).not.toBeNull();
+  expect(view.container.querySelector("span.recense-term")).not.toBeNull();
   // Per-instance listeners would register two of each here.
   expect(count(spy, "pointerover")).toBe(1);
   expect(count(spy, "pointerout")).toBe(1);

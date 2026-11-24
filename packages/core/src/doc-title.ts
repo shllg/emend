@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { defaultTreeAdapter, html } from "parse5";
 import { docNodes, htmlPart, nodeText, parseDocHtml } from "./place/html.ts";
 import type { Block } from "./render/blocks.ts";
@@ -7,7 +7,7 @@ import { renderMetadataBlocks } from "./render/markdown.ts";
 export const TITLE_PREFIX_BYTES = 64 * 1024;
 
 // Terminal and bidi controls, and characters that render as nothing or reorder text.
-// It matches the CLI's terminal escape set (apps/emend/src/cli/escape.ts), except U+2028 and U+2029,
+// It matches the CLI's terminal escape set (apps/recense/src/cli/escape.ts), except U+2028 and U+2029,
 // which the whitespace step turns into spaces first.
 const discardedRanges: readonly (readonly [number, number])[] = [
   [0, 0x1f],

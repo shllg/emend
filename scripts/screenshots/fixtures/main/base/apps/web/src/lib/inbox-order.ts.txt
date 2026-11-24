@@ -1,4 +1,4 @@
-import type { InboxRow } from "@emend/contract";
+import type { InboxRow } from "@recense/contract";
 
 export type InboxGroup = "needs-you" | "open" | "snoozed" | "done";
 

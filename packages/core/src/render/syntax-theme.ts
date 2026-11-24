@@ -1,4 +1,4 @@
-import type { SyntaxRole } from "@emend/contract";
+import type { SyntaxRole } from "@recense/contract";
 import type { ThemeRegistration } from "shiki/core";
 
 export const syntaxColors = {
@@ -27,7 +27,7 @@ const rule = (scope: string[], role: SyntaxRole, fontStyle = "") => ({
 
 // Keep the token rules in step with apps/web/src/components/diff/theme.ts.
 export const syntaxTheme = {
-  name: "emend",
+  name: "recense",
   type: "dark",
   colors: { "editor.foreground": syntaxColors.plain, "editor.background": "var(--bg-sunken)" },
   tokenColors: [

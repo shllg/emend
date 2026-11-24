@@ -1,4 +1,4 @@
-import type { SourceContent, SourceToken } from "@emend/contract";
+import type { SourceContent, SourceToken } from "@recense/contract";
 import { splitLines } from "../place/linemap.ts";
 import { HIGHLIGHT_LINE_CHARS } from "./highlight.ts";
 import { sharedHighlighter } from "./highlighter.ts";
@@ -47,7 +47,7 @@ export async function renderSource(text: string, path: string, highlight = true)
   const highlighter = await sharedHighlighter();
   const { tokens } = highlighter.codeToTokens(raw.join("\n"), {
     lang: language,
-    theme: "emend",
+    theme: "recense",
     tokenizeMaxLineLength: HIGHLIGHT_LINE_CHARS,
   });
   // Shiki may split lone CRs; placement deliberately does not. Preserve the original lines.

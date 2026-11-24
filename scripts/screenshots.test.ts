@@ -44,7 +44,7 @@ import {
 } from "./screenshots/safety.ts";
 
 test("child environments contain only the allowlist and never inherit parent values", () => {
-  const root = "/tmp/emend-screenshots-synthetic";
+  const root = "/tmp/recense-screenshots-synthetic";
   const poisoned = {
     PATH: "/synthetic/parent/bin",
     HOME: "/synthetic/parent/home",
@@ -54,7 +54,7 @@ test("child environments contain only the allowlist and never inherit parent val
     XDG_CACHE_HOME: "/synthetic/cache",
     XDG_RUNTIME_DIR: "/synthetic/runtime",
     TMPDIR: "/synthetic/tmp",
-    EMEND_HOME: "/synthetic/emend",
+    RECENSE_HOME: "/synthetic/recense",
     LANG: "synthetic",
     TZ: "synthetic",
     GIT_CONFIG_NOSYSTEM: "0",
@@ -85,7 +85,7 @@ test("child environments contain only the allowlist and never inherit parent val
         XDG_CACHE_HOME: join(root, "cache"),
         XDG_RUNTIME_DIR: join(root, "runtime"),
         TMPDIR: join(root, "tmp"),
-        EMEND_HOME: join(root, "emend"),
+        RECENSE_HOME: join(root, "recense"),
         LANG: "C.UTF-8",
         TZ: "UTC",
         GIT_CONFIG_NOSYSTEM: "1",
@@ -103,26 +103,26 @@ test("child environments contain only the allowlist and never inherit parent val
 
 const home = "/synthetic/home";
 const stateCases = [
-  { name: "Linux default", platform: "linux", env: {}, expected: join(home, ".local/share/emend") },
+  { name: "Linux default", platform: "linux", env: {}, expected: join(home, ".local/share/recense") },
   {
     name: "Linux XDG",
     platform: "linux",
     env: { XDG_DATA_HOME: "/synthetic/data" },
-    expected: "/synthetic/data/emend",
+    expected: "/synthetic/data/recense",
     // The plain default stays protected even when XDG_DATA_HOME points elsewhere.
-    alsoProtected: [join(home, ".local/share/emend")],
+    alsoProtected: [join(home, ".local/share/recense")],
   },
   {
     name: "Linux relative XDG falls back to home",
     platform: "linux",
     env: { XDG_DATA_HOME: "relative" },
-    expected: join(home, ".local/share/emend"),
+    expected: join(home, ".local/share/recense"),
   },
   {
     name: "macOS ignores XDG",
     platform: "darwin",
     env: { XDG_DATA_HOME: "/synthetic/data" },
-    expected: join(home, "Library/Application Support/emend"),
+    expected: join(home, "Library/Application Support/recense"),
   },
 ];
 
@@ -130,40 +130,40 @@ for (const scenario of stateCases) {
   test(`protects real state for ${scenario.name}, including containing and nested paths`, () => {
     const realStateDirs = protectedStateDirs(scenario.env, scenario.platform, home);
     assert.deepEqual(realStateDirs, [scenario.expected, ...(scenario.alsoProtected ?? [])]);
-    for (const emendHome of [scenario.expected, join(scenario.expected, "nested"), resolve(scenario.expected, "..")]) {
+    for (const recenseHome of [scenario.expected, join(scenario.expected, "nested"), resolve(scenario.expected, "..")]) {
       assert.throws(
-        () => assertSealedPaths({ root: "/synthetic", tmpDir: "/", emendHome, realStateDirs }, resolve),
-        /overlaps real emend state/,
+        () => assertSealedPaths({ root: "/synthetic", tmpDir: "/", recenseHome, realStateDirs }, resolve),
+        /overlaps real recense state/,
       );
     }
   });
 }
 
-test("an explicit EMEND_HOME does not hide the default state directory", () => {
+test("an explicit RECENSE_HOME does not hide the default state directory", () => {
   for (const scenario of stateCases) {
-    const dirs = protectedStateDirs({ ...scenario.env, EMEND_HOME: "/synthetic/override" }, scenario.platform, home);
+    const dirs = protectedStateDirs({ ...scenario.env, RECENSE_HOME: "/synthetic/override" }, scenario.platform, home);
     assert.deepEqual(dirs, [scenario.expected, ...(scenario.alsoProtected ?? []), "/synthetic/override"]);
     assert.throws(
-      () => assertSealedPaths({ root: "/synthetic", tmpDir: "/", emendHome: "/synthetic/override", realStateDirs: dirs }, resolve),
-      /overlaps real emend state/,
+      () => assertSealedPaths({ root: "/synthetic", tmpDir: "/", recenseHome: "/synthetic/override", realStateDirs: dirs }, resolve),
+      /overlaps real recense state/,
     );
   }
-  assert.throws(() => protectedStateDirs({ EMEND_HOME: "relative" }, "linux", home), /absolute/);
+  assert.throws(() => protectedStateDirs({ RECENSE_HOME: "relative" }, "linux", home), /absolute/);
 });
 
-test("root and EMEND_HOME guards require strict containment and protect the cleanup root", () => {
+test("root and RECENSE_HOME guards require strict containment and protect the cleanup root", () => {
   const paths = {
-    root: "/tmp/emend-screenshots-synthetic",
+    root: "/tmp/recense-screenshots-synthetic",
     tmpDir: "/tmp",
-    emendHome: "/tmp/emend-screenshots-synthetic/emend",
-    realStateDirs: ["/synthetic/emend"],
+    recenseHome: "/tmp/recense-screenshots-synthetic/recense",
+    realStateDirs: ["/synthetic/recense"],
   };
   assert.doesNotThrow(() => assertSealedPaths(paths, resolve));
   for (const root of ["/tmp", "/tmp-other/demo", "/elsewhere", "/tmp/../elsewhere"]) {
     assert.throws(() => assertSealedPaths({ ...paths, root }, resolve), /inside the temporary directory/);
   }
-  for (const emendHome of [paths.root, `${paths.root}-other/emend`, "/elsewhere/emend"]) {
-    assert.throws(() => assertSealedPaths({ ...paths, emendHome }, resolve), /inside the sealed root/);
+  for (const recenseHome of [paths.root, `${paths.root}-other/recense`, "/elsewhere/recense"]) {
+    assert.throws(() => assertSealedPaths({ ...paths, recenseHome }, resolve), /inside the sealed root/);
   }
   assert.throws(() => assertSealedPaths({ ...paths, root: "relative" }, resolve), /absolute/);
   assert.throws(() => assertSealedPaths({ ...paths, realStateDirs: [] }, resolve), /must be supplied/);
@@ -174,14 +174,14 @@ test("root and EMEND_HOME guards require strict containment and protect the clea
 });
 
 test("filesystem guards resolve symlinks, including ancestors of paths that do not yet exist", (t) => {
-  const fixture = mkdtempSync(join(realpathSync(tmpdir()), "emend-screenshots-guard-"));
+  const fixture = mkdtempSync(join(realpathSync(tmpdir()), "recense-screenshots-guard-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const temporary = join(fixture, "tmp");
   const outside = join(fixture, "outside");
   const root = join(temporary, "demo");
   mkdirSync(root, { recursive: true });
   mkdirSync(outside);
-  const paths = { root, tmpDir: temporary, emendHome: join(root, "emend"), realStateDirs: [join(outside, "real")] };
+  const paths = { root, tmpDir: temporary, recenseHome: join(root, "recense"), realStateDirs: [join(outside, "real")] };
   assert.doesNotThrow(() => assertSealedPaths(paths, canonicalPath));
 
   symlinkSync(outside, join(temporary, "escape"), "dir");
@@ -191,18 +191,18 @@ test("filesystem guards resolve symlinks, including ancestors of paths that do n
   );
   symlinkSync(outside, join(root, "escape"), "dir");
   assert.throws(
-    () => assertSealedPaths({ ...paths, emendHome: join(root, "escape", "missing") }, canonicalPath),
+    () => assertSealedPaths({ ...paths, recenseHome: join(root, "escape", "missing") }, canonicalPath),
     /inside the sealed root/,
   );
 
   // Simulate the real state directory having an alias into the apparently sealed tree.
   symlinkSync(root, join(outside, "alias"), "dir");
   assert.throws(
-    () => assertSealedPaths({ ...paths, realStateDirs: [join(outside, "alias", "emend")] }, canonicalPath),
-    /overlaps real emend state/,
+    () => assertSealedPaths({ ...paths, realStateDirs: [join(outside, "alias", "recense")] }, canonicalPath),
+    /overlaps real recense state/,
   );
   symlinkSync(join(outside, "missing"), join(root, "dangling"), "dir");
-  assert.throws(() => canonicalPath(join(root, "dangling", "emend")), { code: "ENOENT" });
+  assert.throws(() => canonicalPath(join(root, "dangling", "recense")), { code: "ENOENT" });
 });
 
 test("the port guard rejects the default, invalid ports and a port accepting connections", async () => {
@@ -290,37 +290,37 @@ test("the account home's default state directory is protected as well as $HOME's
   const dirs = protectedStateDirs(xdg, "linux", "/synthetic/userdir", "/synthetic/account");
   // The plain defaults stay protected even when XDG_DATA_HOME points elsewhere.
   for (const expected of [
-    "/synthetic/data/emend",
-    "/synthetic/userdir/.local/share/emend",
-    "/synthetic/account/.local/share/emend",
+    "/synthetic/data/recense",
+    "/synthetic/userdir/.local/share/recense",
+    "/synthetic/account/.local/share/recense",
   ]) {
     assert(dirs.includes(expected), expected);
   }
   assert.deepEqual(protectedStateDirs({}, "darwin", "/synthetic/userdir", "/synthetic/account"), [
-    "/synthetic/userdir/Library/Application Support/emend",
-    "/synthetic/account/Library/Application Support/emend",
+    "/synthetic/userdir/Library/Application Support/recense",
+    "/synthetic/account/Library/Application Support/recense",
   ]);
 });
 
 test("a folder named ..x inside the root is inside, not a parent reference", () => {
   const paths = {
-    root: "/tmp/emend-screenshots-synthetic",
+    root: "/tmp/recense-screenshots-synthetic",
     tmpDir: "/tmp",
-    emendHome: "/tmp/emend-screenshots-synthetic/..x",
-    realStateDirs: ["/synthetic/emend"],
+    recenseHome: "/tmp/recense-screenshots-synthetic/..x",
+    realStateDirs: ["/synthetic/recense"],
   };
   assert.doesNotThrow(() => assertSealedPaths(paths, resolve));
 });
 
 test("the output folder may not overlap real state, also through a symlink", (t) => {
-  const fixture = mkdtempSync(join(realpathSync(tmpdir()), "emend-screenshots-out-"));
+  const fixture = mkdtempSync(join(realpathSync(tmpdir()), "recense-screenshots-out-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
-  const state = join(fixture, "state", "emend");
+  const state = join(fixture, "state", "recense");
   mkdirSync(state, { recursive: true });
   assert.doesNotThrow(() => assertOutputFolder(join(fixture, "images"), [state], canonicalPath));
   for (const out of [state, join(state, "images"), join(fixture, "state")]) {
     assert.throws(() => assertOutputFolder(out, [state], canonicalPath), {
-      message: "The screenshot folder overlaps real emend state",
+      message: "The screenshot folder overlaps real recense state",
     });
   }
   symlinkSync(state, join(fixture, "alias"), "dir");
@@ -332,7 +332,7 @@ test("the output folder may not overlap real state, also through a symlink", (t)
 });
 
 test("fixture deletions stay inside the fixture repository", (t) => {
-  const fixture = mkdtempSync(join(realpathSync(tmpdir()), "emend-screenshots-fixture-"));
+  const fixture = mkdtempSync(join(realpathSync(tmpdir()), "recense-screenshots-fixture-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const repo = join(fixture, "repo");
   const outside = join(fixture, "outside.txt");
@@ -413,7 +413,7 @@ test("only a WebSocket to the sealed origin is allowed", () => {
 });
 
 test("the Chromium command line is exactly the sealed list", () => {
-  const profile = "/tmp/emend-screenshots-synthetic/chromium";
+  const profile = "/tmp/recense-screenshots-synthetic/chromium";
   const common = [
     "--headless=new",
     "--remote-debugging-pipe",
@@ -1318,7 +1318,7 @@ test("newPage waits for its target's seal and resume before anything else is sen
 });
 
 test("the images are replaced all or nothing, with no temporary or backup file left", (t) => {
-  const folder = mkdtempSync(join(realpathSync(tmpdir()), "emend-screenshots-images-"));
+  const folder = mkdtempSync(join(realpathSync(tmpdir()), "recense-screenshots-images-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const files = () => readdirSync(folder).sort();
   const read = (name: string) => readFileSync(join(folder, name), "utf8");
@@ -1468,9 +1468,9 @@ test("socket blocking is queued before resume in every controlled session, with 
 });
 
 test("the temporary parent must not overlap real state, and nothing is created for it", () => {
-  const state = ["/synthetic/state/emend"];
+  const state = ["/synthetic/state/recense"];
   assert.doesNotThrow(() => assertTempParent("/synthetic/tmp", state, resolve));
-  for (const tmp of ["/synthetic/state/emend", "/synthetic/state/emend/tmp", "/synthetic/state"])
+  for (const tmp of ["/synthetic/state/recense", "/synthetic/state/recense/tmp", "/synthetic/state"])
     assert.throws(() => assertTempParent(tmp, state, resolve), /temporary directory overlaps/, tmp);
   assert.throws(() => assertTempParent("relative", state, resolve), /absolute/);
   // A missing leaf inside a state directory is refused too, without creating it.

@@ -1,4 +1,4 @@
-import { type DocHeading, LIMITS } from "@emend/contract";
+import { type DocHeading, LIMITS } from "@recense/contract";
 
 /** Ephemeral lookup keys only; declared ids and rendered metadata remain unchanged. */
 export function headingLookups(headings: readonly DocHeading[]): Map<string, string> {

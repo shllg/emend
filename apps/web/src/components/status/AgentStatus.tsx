@@ -1,4 +1,4 @@
-import type { InboxItem } from "@emend/contract";
+import type { InboxItem } from "@recense/contract";
 import { Check } from "lucide-react";
 import { relativeTime } from "../../lib/time.ts";
 import { Icon } from "../ui/Icon.tsx";

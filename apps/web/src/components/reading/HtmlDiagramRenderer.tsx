@@ -6,7 +6,7 @@ import { dedentDiagram, parseDiagramReply } from "./html-diagrams.ts";
 import { DIAGRAM_DRAW_TIMEOUT_MS } from "./MermaidBlock.tsx";
 import { readMermaidColors } from "./mermaid-colors.ts";
 
-type Props = { job: DiagramJob; look?: "emend" | "custom"; post: (message: ParentToFrame) => void };
+type Props = { job: DiagramJob; look?: "recense" | "custom"; post: (message: ParentToFrame) => void };
 
 export function HtmlDiagramRenderer(props: Props) {
   const theme = useResolvedTheme();
@@ -30,7 +30,7 @@ function RenderJob({ job, look, post, theme }: Props & { theme: "light" | "dark"
       finished = true;
       waiting.current = false;
       clearTimeout(timer);
-      post({ ...answer, type: "emend:diagram", request: job.request, index });
+      post({ ...answer, type: "recense:diagram", request: job.request, index });
       if (timedOut) {
         loaded.current = false;
         setGeneration((value) => value + 1);
@@ -45,7 +45,7 @@ function RenderJob({ job, look, post, theme }: Props & { theme: "light" | "dark"
     window.addEventListener("message", receive);
     send.current = () => {
       if (waiting.current || finished) return;
-      const colors = look === "emend" && diagram.mode === theme ? readMermaidColors() : undefined;
+      const colors = look === "recense" && diagram.mode === theme ? readMermaidColors() : undefined;
       waiting.current = true;
       frame.current?.contentWindow?.postMessage(
         {

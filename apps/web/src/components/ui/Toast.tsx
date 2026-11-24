@@ -59,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {createPortal(
         <div
-          data-emend-toast
+          data-recense-toast
           role="status"
           aria-live="polite"
           aria-atomic="true"

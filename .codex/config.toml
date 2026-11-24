@@ -1,4 +1,4 @@
-# Codex writes code in emend; Claude Code orchestrates. See AGENTS.md, "Who does what".
+# Codex writes code in recense; Claude Code orchestrates. See AGENTS.md, "Who does what".
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 

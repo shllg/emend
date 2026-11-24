@@ -1,4 +1,4 @@
-import type { InboxRow } from "@emend/contract";
+import type { InboxRow } from "@recense/contract";
 import { Link } from "@tanstack/react-router";
 import { relativeTime } from "../../lib/time.ts";
 

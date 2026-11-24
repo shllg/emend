@@ -1,4 +1,4 @@
-import type { ReviewView } from "@emend/contract";
+import type { ReviewView } from "@recense/contract";
 import { ChevronDown } from "lucide-react";
 import { relativeTime } from "../../lib/time.ts";
 import { Button } from "../ui/Button.tsx";

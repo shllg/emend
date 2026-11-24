@@ -1,4 +1,4 @@
-import { LIMITS, type RevisionView } from "@emend/contract";
+import { LIMITS, type RevisionView } from "@recense/contract";
 import { expect, test } from "vitest";
 import apiDocs from "../../../../docs/api.md?raw";
 import { downloadBaseIsHtml, downloadBaseLabel, downloadDocChoices, downloadHasComments } from "./download.ts";

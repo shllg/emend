@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { type FileView, OTHER_TOPIC, type RevisionView, type Target, type ThreadView } from "@emend/contract";
 import type { GetHoveredLineResult } from "@pierre/diffs";
+import { type FileView, OTHER_TOPIC, type RevisionView, type Target, type ThreadView } from "@recense/contract";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
@@ -1107,7 +1107,7 @@ test("Split and Unified change renderer options and survive remount; phone keeps
   near("source.ts");
   expect((await screen.findByTestId("rendered-diff")).getAttribute("data-style")).toBe("unified");
   expect(screen.queryByRole("radiogroup", { name: "Diff layout" })).toBeNull();
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").diffStyle).toBe("split");
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").diffStyle).toBe("split");
 });
 
 test("disabled storage still allows layout changes", async () => {
@@ -1135,7 +1135,7 @@ test("Wrap persists across mounts, controls overflow, and follows the preference
   fireEvent.click(screen.getByRole("button", { name: "Wrap" }));
   expect(screen.getByRole("button", { name: "Wrap" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByTestId("rendered-diff").getAttribute("data-overflow")).toBe("wrap");
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").wrap).toBe(true);
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").wrap).toBe(true);
   mounted.unmount();
   mounted = await mount(value);
   near("source.ts");
@@ -1147,9 +1147,9 @@ test("Wrap persists across mounts, controls overflow, and follows the preference
   near("source.ts");
   expect((await screen.findByTestId("rendered-diff")).getAttribute("data-overflow")).toBe("scroll");
   expect(screen.queryByRole("button", { name: "Wrap" })).toBeNull();
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").wrap).toBe(false);
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").wrap).toBe(false);
   mounted.unmount();
-  localStorage.setItem("emend.layout.v1", JSON.stringify({ wrap: true }));
+  localStorage.setItem("recense.layout.v1", JSON.stringify({ wrap: true }));
   await mount(value);
   near("source.ts");
   expect((await screen.findByTestId("rendered-diff")).getAttribute("data-overflow")).toBe("wrap");
@@ -1194,7 +1194,7 @@ test("pane uses border-box width for both initial measurement and resize", async
 test.each(["split", "unified"])("missing ResizeObserver immediately uses stored %s", async (style) => {
   vi.stubGlobal("ResizeObserver", undefined);
   paneWidth = 0;
-  localStorage.setItem("emend.layout.v1", JSON.stringify({ diffStyle: style }));
+  localStorage.setItem("recense.layout.v1", JSON.stringify({ diffStyle: style }));
   await mount(revision([file()]));
   near("source.ts");
   await screen.findByTestId("rendered-diff");
@@ -1203,7 +1203,7 @@ test.each(["split", "unified"])("missing ResizeObserver immediately uses stored 
 });
 
 test("pane width forces Unified below 760px without overwriting Split; disabled Split is skipped by keys", async () => {
-  localStorage.setItem("emend.layout.v1", JSON.stringify({ diffStyle: "split" }));
+  localStorage.setItem("recense.layout.v1", JSON.stringify({ diffStyle: "split" }));
   const mounted = await mount(revision([file()]));
   near("source.ts");
   await screen.findByTestId("rendered-diff");
@@ -1222,7 +1222,7 @@ test("pane width forces Unified below 760px without overwriting Split; disabled 
   unified.focus();
   fireEvent.keyDown(unified, { key: "ArrowLeft" });
   expect(document.activeElement).toBe(unified);
-  expect(JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").diffStyle).toBe("split");
+  expect(JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").diffStyle).toBe("split");
   act(() => resizePane(760));
   split = screen.getByRole<HTMLButtonElement>("radio", { name: "Split" });
   expect(split.disabled).toBe(false);
@@ -1578,7 +1578,7 @@ const detailed = () =>
   });
 const detailsButton = () =>
   within(screen.getByRole("region", { name: /^Topic / })).getByRole("button", { name: "Details" });
-const savedDetails = () => JSON.parse(localStorage.getItem("emend.layout.v1") ?? "{}").details;
+const savedDetails = () => JSON.parse(localStorage.getItem("recense.layout.v1") ?? "{}").details;
 const diffStylesheet = readFileSync(resolve(import.meta.dirname, "../../styles/diff.css"), "utf8");
 
 test.each([

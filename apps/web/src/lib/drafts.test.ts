@@ -18,10 +18,10 @@ test("nothing in flight and nothing typed is no unsaved work", async () => {
 
 test("text that localStorage keeps survives a reload and does not count", async () => {
   const drafts = await load();
-  drafts.saveDraft("emend.draft.review.synthetic", "kept");
-  expect(localStorage.getItem("emend.draft.review.synthetic")).toBe("kept");
+  drafts.saveDraft("recense.draft.review.synthetic", "kept");
+  expect(localStorage.getItem("recense.draft.review.synthetic")).toBe("kept");
   expect(drafts.unsavedWork().unstored).toBe(false);
-  drafts.clearDraft("emend.draft.review.synthetic");
+  drafts.clearDraft("recense.draft.review.synthetic");
   expect(drafts.unsavedWork().unstored).toBe(false);
 });
 
@@ -34,19 +34,19 @@ test("text that only memory holds counts, until it is cleared or blank", async (
     },
     removeItem: () => {},
   });
-  drafts.saveDraft("emend.draft.review.synthetic", "lost on reload");
+  drafts.saveDraft("recense.draft.review.synthetic", "lost on reload");
   expect(drafts.unsavedWork().unstored).toBe(true);
-  drafts.saveDraft("emend.draft.review.synthetic", "  ");
+  drafts.saveDraft("recense.draft.review.synthetic", "  ");
   expect(drafts.unsavedWork().unstored).toBe(false);
-  drafts.saveDraft("emend.draft.review.synthetic", "again");
+  drafts.saveDraft("recense.draft.review.synthetic", "again");
   expect(drafts.unsavedWork().unstored).toBe(true);
-  drafts.clearDraft("emend.draft.review.synthetic");
+  drafts.clearDraft("recense.draft.review.synthetic");
   expect(drafts.unsavedWork().unstored).toBe(false);
 });
 
 test("text counts when storage cannot be read back", async () => {
   const drafts = await load();
-  drafts.saveDraft("emend.draft.review.synthetic", "kept");
+  drafts.saveDraft("recense.draft.review.synthetic", "kept");
   vi.stubGlobal("localStorage", {
     getItem: () => {
       throw new Error("denied");
@@ -57,9 +57,9 @@ test("text counts when storage cannot be read back", async () => {
 
 test("a draft save, a review save and a send in flight each count", async () => {
   const drafts = await load();
-  expect(drafts.beginDraftSave("emend.draft.review.synthetic")).toBe(true);
+  expect(drafts.beginDraftSave("recense.draft.review.synthetic")).toBe(true);
   expect(drafts.unsavedWork()).toMatchObject({ saving: true, sending: false });
-  drafts.finishDraftSave("emend.draft.review.synthetic");
+  drafts.finishDraftSave("recense.draft.review.synthetic");
   expect(drafts.unsavedWork().saving).toBe(false);
   const done = drafts.trackReviewDraftSave("review");
   expect(drafts.unsavedWork().saving).toBe(true);

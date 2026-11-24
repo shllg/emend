@@ -1,4 +1,4 @@
-import { type BlockId, LIMITS } from "@emend/contract";
+import { type BlockId, LIMITS } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { blockHash } from "./hash.ts";
@@ -28,18 +28,18 @@ export type HtmlElement = Extract<HtmlRoot["children"][number], { type: "element
 export type HtmlNode = HtmlRoot | HtmlRoot["children"][number];
 
 type RenderData = NonNullable<HtmlElement["data"]> & {
-  emendDiagram?: string;
-  emendChart?: boolean;
-  emendMixedPre?: boolean;
-  emendClasses?: string[];
-  emendFootnoteMarker?: boolean;
+  recenseDiagram?: string;
+  recenseChart?: boolean;
+  recenseMixedPre?: boolean;
+  recenseClasses?: string[];
+  recenseFootnoteMarker?: boolean;
   /** The doc's glossary list: terms are never marked inside it. */
-  emendGlossary?: boolean;
+  recenseGlossary?: boolean;
   /** A glossary list item, numbered like the entries the doc's glossary yielded. */
-  emendGlossaryItem?: number;
-  emendMedia?: string;
-  emendMediaPath?: string;
-  emendUnlistedMediaPath?: string;
+  recenseGlossaryItem?: number;
+  recenseMedia?: string;
+  recenseMediaPath?: string;
+  recenseUnlistedMediaPath?: string;
 };
 
 export function renderData(element: HtmlElement): RenderData {
@@ -48,7 +48,7 @@ export function renderData(element: HtmlElement): RenderData {
 }
 
 export function fenceCode(node: HtmlNode): HtmlElement | undefined {
-  if (node.type !== "element" || node.tagName !== "pre" || renderData(node).emendMixedPre) return;
+  if (node.type !== "element" || node.tagName !== "pre" || renderData(node).recenseMixedPre) return;
   let code: HtmlElement | undefined;
   for (const child of node.children) {
     if (child.type === "text" && child.value.trim() === "") continue;
@@ -104,7 +104,7 @@ export function hasBlockChildren(node: HtmlNode): boolean {
 const isElement = (node: HtmlRoot["children"][number]): node is HtmlElement => node.type === "element";
 
 function isDiagram(node: HtmlNode): boolean {
-  return node.type === "element" && renderData(node).emendDiagram !== undefined;
+  return node.type === "element" && renderData(node).recenseDiagram !== undefined;
 }
 
 function hasDiagram(node: HtmlNode): boolean {
@@ -139,8 +139,8 @@ function* divideAtDiagrams(node: HtmlElement): Generator<HtmlElement> {
 }
 
 function diagramFragment(node: HtmlElement): Fragment | undefined {
-  const { emendDiagram: source, emendChart } = renderData(node);
-  if (source !== undefined) return { kind: emendChart ? "chart" : "diagram", node, source };
+  const { recenseDiagram: source, recenseChart } = renderData(node);
+  if (source !== undefined) return { kind: recenseChart ? "chart" : "diagram", node, source };
 }
 
 function* atomicBlock(kind: Block["kind"], node: HtmlElement): Generator<Fragment> {
@@ -238,10 +238,10 @@ function* splitBlocks(node: HtmlNode, depth = 0): Generator<Fragment> {
 function identityText(node: HtmlNode): string {
   // GFM reference numbers and back-reference counts change when other footnotes are inserted.
   // Exclude those generated markers only from identity; block.text keeps the full textContent.
-  if (node.type === "element" && renderData(node).emendFootnoteMarker) return "";
+  if (node.type === "element" && renderData(node).recenseFootnoteMarker) return "";
   // A re-shot image at the same path must show as changed.
-  if (node.type === "element" && renderData(node).emendMedia !== undefined)
-    return `\u0000media${renderData(node).emendMedia}`;
+  if (node.type === "element" && renderData(node).recenseMedia !== undefined)
+    return `\u0000media${renderData(node).recenseMedia}`;
   if (node.type === "text") return node.value;
   return "children" in node ? node.children.map(identityText).join("") : "";
 }
@@ -314,8 +314,8 @@ export async function blocksFromTree(
     const id = sectionBlockId(section, `${hash}${count === 1 ? "" : `-${count}`}`) as BlockId;
     if (itemIds && node.type === "element") {
       // A list wrapper holds the item; pieces cut at a diagram keep the item's data.
-      const item = renderData(node).emendGlossaryItem === undefined ? node.children.find(isElement) : node;
-      const number = item ? renderData(item).emendGlossaryItem : undefined;
+      const item = renderData(node).recenseGlossaryItem === undefined ? node.children.find(isElement) : node;
+      const number = item ? renderData(item).recenseGlossaryItem : undefined;
       if (number !== undefined && !itemIds.has(number)) itemIds.set(number, id);
     }
     blocks.push({

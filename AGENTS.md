@@ -1,14 +1,14 @@
-# emend — working rules
+# recense — working rules
 
-emend is an open-source (MIT), local-first review tool for work done by coding agents: plans, docs
+recense is an open-source (MIT), local-first review tool for work done by coding agents: plans, docs
 and code. The reviewer reads the agent's writeup next to its diff, comments on any of it and
-presses Send, and the waiting agent gets the feedback. `VISION.md` says what emend is for and what
+presses Send, and the waiting agent gets the feedback. `VISION.md` says what recense is for and what
 it is not. `docs/architecture.md` describes how it is built.
 
 - Design and plan of record: they live outside this repo, with the owner. Task numbers such as
   "plan task 1.6" refer to the plan. Work in its order and record calls in its build log.
 - Sibling repo: [hunk-review-skill](https://github.com/vendis-ai/hunk-review-skill), the project
-  emend grew out of. Its local path is in `.sync-counterpart-path` (gitignored).
+  recense grew out of. Its local path is in `.sync-counterpart-path` (gitignored).
 - Not a maintainer (see `.github/CODEOWNERS`)? Follow `CONTRIBUTING.md`, keep the non-negotiables,
   and skip the rules on `bin/wt`, the `e-*` skills and `.private-terms`: push with `git push`.
 
@@ -23,8 +23,8 @@ invent work.
 
 ## Layout
 
-- `apps/emend`: the `emend` command (CLI, local server, MCP, headless service), published as
-  `@shllg/emend`. It serves the build of `apps/web`.
+- `apps/recense`: the `recense` command (CLI, local server, MCP, headless service), published as
+  `@shllg/recense`. It serves the build of `apps/web`.
 - `apps/web`: the browser app (React + Vite).
 - `docs/skills/`: skills an agent reads from a link (the theme skill); never installed, and neither
   the plugin nor the npm package ships them.
@@ -62,7 +62,7 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
    comments, `!` lines for allowed phrases; a space in a term also matches a line break, `-`, `_` or
    nothing) and are checked only locally, before anything leaves the machine; CI runs the generic
    rules. Without that file bin/wt refuses to send. Only the owner manages it: agents never read,
-   create, edit or remove it, and never set `EMEND_PRIVATE_TERMS`. Agents push only with
+   create, edit or remove it, and never set `RECENSE_PRIVATE_TERMS`. Agents push only with
    `bin/wt push`. Other text for GitHub (an issue, a comment, a reply) goes out only after
    `node '<main>/scripts/check-public.ts' --root '<main>' --file <file>` (the main checkout's copy)
    passed on the exact file sent. A trailing `// check-public: allow` comment skips the generic
@@ -84,7 +84,7 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
    `/api/v2`.
 7. **Never edit or delete a committed migration.** Add a new one.
 8. **The CLI runs no code from the repo under review.** No repo scripts, no package manager but
-   `emend update`'s, git only for allowlisted read-only lookups. Config never comes from that repo.
+   `recense update`'s, git only for allowlisted read-only lookups. Config never comes from that repo.
 9. **Fixtures are synthetic, and client content never enters the repo.** Real reviews, state
    files and text from reviewed repos never become fixtures, tests or commit messages.
 10. **Never read secrets.** No tokens or `.env` values in output, code or commits. Check a
@@ -95,12 +95,12 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
 
 - Feature work happens on a branch in a `bin/wt` worktree under `.claude/worktrees/`. Claude Code
   sessions start at the root of the main checkout or of such a worktree. Branch names start with
-  `emend-`: `emend-<n>-<slug>` for issue `<n>`.
+  `recense-`: `recense-<n>-<slug>` for issue `<n>`.
 - On its own feature branch an agent commits with plain `git commit` (the git config signs it) and
   pushes that branch. One logical change per commit; the body names the plan task.
 - A merge happens only through `/e-pr-merge` (squash, pinned to the head the owner approved in
-  emend), `/e-merge-local`, or `/e-outside` for a fork PR, after the owner approved that head in
-  emend. Outside those skills, never run `gh pr merge`.
+  recense), `/e-merge-local`, or `/e-outside` for a fork PR, after the owner approved that head in
+  recense. Outside those skills, never run `gh pr merge`.
 - Agents never push `main` or tags, and never force-push without a lease. Direct commits to `main`
   happen only when the owner asks. The Release workflow publishes to npm from `main`; agents never
   start or re-run it.
@@ -115,11 +115,11 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   secret reads and guard, settings or git metadata edits are denied. It runs from main, so
   fast-forward main to a hook change before rebasing worktrees onto it.
 - The work loop (`.claude/loop.md`) keeps up to three workers on pickable issues that do not
-  collide. Each merges only after the owner approved its head in emend; the merge closes its issue.
-- Tests never touch emend's real state directory, which holds client diffs: the Vitest setup
-  sets a temporary `EMEND_HOME`, and every test that needs state uses its own.
+  collide. Each merges only after the owner approved its head in recense; the merge closes its issue.
+- Tests never touch recense's real state directory, which holds client diffs: the Vitest setup
+  sets a temporary `RECENSE_HOME`, and every test that needs state uses its own.
 - Changing `.claude/settings.json`, `.claude/hooks/` or `.codex/` needs the owner's approval
-  and `emend-security-reviewer`.
+  and `recense-security-reviewer`.
 
 ## Who does what
 
@@ -134,14 +134,14 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   blocker.
 - **Codex unavailable** (sandbox, MCP, timeout, any error): a Sonnet sub-agent writes instead.
   Report that the fallback ran and why.
-- **Before "done":** `emend-review-manager` (Opus) runs every review. It picks the reviewers:
-  `emend-reviewer` (Sonnet) and a fresh read-only Codex review through `codex-agent` always;
-  `emend-security-reviewer` (Opus) when the change touches
+- **Before "done":** `recense-review-manager` (Opus) runs every review. It picks the reviewers:
+  `recense-reviewer` (Sonnet) and a fresh read-only Codex review through `codex-agent` always;
+  `recense-security-reviewer` (Opus) when the change touches
   auth, tokens, pairing or attach, owner isolation, rendering of agent content, the content
   frames, hand-off, wait, take or claim, the MCP endpoint, CLI file or git access, a hook or rule
   (`.claude/hooks/`, `.codex/`, CI), a skill an agent follows from a link (`docs/skills/`)
-  or dependencies; `emend-react-reviewer` (Sonnet) when
-  `apps/web/src` changed; `emend-architecture-reviewer` (Opus) when the structure moves. It checks
+  or dependencies; `recense-react-reviewer` (Sonnet) when
+  `apps/web/src` changed; `recense-architecture-reviewer` (Opus) when the structure moves. It checks
   and confirms the findings, records bugs the change did not cause, and returns one list to fix.
   Rounds with a fixed budget:
   `.claude/rules/review-rounds.md`.
@@ -157,10 +157,10 @@ Codex reads only this file. Open the matching rule file before you edit these pa
 |---|---|
 | `packages/core/src/render/`, `apps/web/src/`, `apps/web/public/`, the content path, headers | `.claude/rules/content-isolation.md` |
 | Links between docs, Contents, doc titles, reading positions, frame messages | `.claude/rules/doc-navigation.md` |
-| `apps/emend/src/server/`, `packages/contract/`, `docs/api.md` | `.claude/rules/api-and-auth.md` |
-| `apps/emend/src/db/`, `apps/emend/drizzle/`, `apps/emend/drizzle.config.ts` | `.claude/rules/db.md` |
-| `apps/emend/src/cli.ts`, `apps/emend/src/cli/`, `apps/emend/bin/` | `.claude/rules/cli.md`, `.claude/rules/cli-runtime.md` |
-| `apps/emend/src/cli/commands/look.ts`, `packages/core/src/html-look*.ts` | `.claude/rules/cli-look.md` |
+| `apps/recense/src/server/`, `packages/contract/`, `docs/api.md` | `.claude/rules/api-and-auth.md` |
+| `apps/recense/src/db/`, `apps/recense/drizzle/`, `apps/recense/drizzle.config.ts` | `.claude/rules/db.md` |
+| `apps/recense/src/cli.ts`, `apps/recense/src/cli/`, `apps/recense/bin/` | `.claude/rules/cli.md`, `.claude/rules/cli-runtime.md` |
+| `apps/recense/src/cli/commands/look.ts`, `packages/core/src/html-look*.ts` | `.claude/rules/cli-look.md` |
 | `sync/`, a path in `sync/manifest.json`, review wording, topics, modes, outcomes | "Sync with hunk-review-skill" below |
 
 ## Sync with hunk-review-skill

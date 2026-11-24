@@ -1,7 +1,7 @@
 import { themeSkillPrompt } from "../lib/theme-skill.ts";
 import { CopyPrompt } from "./CopyPrompt.tsx";
 
-const PROMPT = themeSkillPrompt(__EMEND_VERSION__);
+const PROMPT = themeSkillPrompt(__RECENSE_VERSION__);
 
 export function ThemeSkillPrompt() {
   return (

@@ -1,4 +1,4 @@
-import { GlossaryForm, LIMITS, normalizeGlossaryForm } from "@emend/contract";
+import { GlossaryForm, LIMITS, normalizeGlossaryForm } from "@recense/contract";
 import { type HtmlElement, type HtmlRoot, renderData } from "./blocks.ts";
 import { docTermMatcher, longMarkRun } from "./doc-terms.ts";
 import { limitDefinition } from "./glossary-definition.ts";
@@ -112,7 +112,7 @@ export function extractDocGlossary(tree: HtmlRoot): { entries: DocGlossaryEntry[
   if (at < 0) return;
   const list = tree.children.slice(at + 1).find((node) => !blank(node));
   if (list?.type !== "element" || (list.tagName !== "ul" && list.tagName !== "ol")) return;
-  renderData(list).emendGlossary = true;
+  renderData(list).recenseGlossary = true;
   const entries: DocGlossaryEntry[] = [];
   const items: HtmlElement[] = [];
   const seen = new Set<string>();
@@ -135,7 +135,7 @@ export function extractDocGlossary(tree: HtmlRoot): { entries: DocGlossaryEntry[
       seen.add(key(alias));
       aliases.push(alias);
     }
-    renderData(item).emendGlossaryItem = entries.length;
+    renderData(item).recenseGlossaryItem = entries.length;
     entries.push({ ...parsed, term, aliases });
     items.push(item);
   }

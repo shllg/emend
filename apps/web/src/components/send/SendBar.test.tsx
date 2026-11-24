@@ -1,4 +1,4 @@
-import { LIMITS, MODE_LABELS } from "@emend/contract";
+import { LIMITS, MODE_LABELS } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type ComponentProps, type ReactNode, StrictMode } from "react";

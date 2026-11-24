@@ -1,4 +1,4 @@
-import { type DocHeading, type HtmlDocChanges, type HtmlSpanTarget, RepoUrl } from "@emend/contract";
+import { type DocHeading, type HtmlDocChanges, type HtmlSpanTarget, RepoUrl } from "@recense/contract";
 import { TextSelect } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { claimDraft, useDraftClaim } from "../../lib/composer-owner.ts";
@@ -57,7 +57,7 @@ export function HtmlDocFrame({
   repoUrl?: string | null;
   changes?: HtmlDocChanges;
   images?: readonly string[];
-  look?: "emend" | "custom";
+  look?: "recense" | "custom";
   colorScheme?: "light";
   navigation?: HtmlNavigation;
   docNavigation?: DocNavigation;
@@ -77,13 +77,13 @@ export function HtmlDocFrame({
   const phone = useLayout() === "phone";
   const wide = useMedia("(min-width: 768px)");
   const { readingWidth, proseSize, codePx } = useLayoutPreferences();
-  const emendLook = look === "emend";
+  const recenseLook = look === "recense";
   const lightOnly = colorScheme === "light";
   const resolvedTheme = useResolvedTheme();
   const mode = lightOnly ? "light" : resolvedTheme;
   const custom = pickedTheme(useThemeState());
   const colors = JSON.stringify(
-    emendLook && custom && (!lightOnly || custom.base === "light") ? themeColors(custom) : { scales: {}, tokens: {} },
+    recenseLook && custom && (!lightOnly || custom.base === "light") ? themeColors(custom) : { scales: {}, tokens: {} },
   );
   const currentMode = useRef(mode);
   useLayoutEffect(() => {
@@ -91,12 +91,12 @@ export function HtmlDocFrame({
   }, [mode]);
   const frameSrc = useCallback(
     (fragment?: string) =>
-      `${contentUrl}${emendLook && !lightOnly ? `?theme=${currentMode.current}` : ""}${fragment === undefined ? "" : `#${encodeURIComponent(fragment)}`}`,
-    [contentUrl, emendLook, lightOnly],
+      `${contentUrl}${recenseLook && !lightOnly ? `?theme=${currentMode.current}` : ""}${fragment === undefined ? "" : `#${encodeURIComponent(fragment)}`}`,
+    [contentUrl, recenseLook, lightOnly],
   );
-  const width = emendLook ? readingWidth : undefined;
-  const prose = emendLook ? proseSize : undefined;
-  const code = emendLook ? codePx : undefined;
+  const width = recenseLook ? readingWidth : undefined;
+  const prose = recenseLook ? proseSize : undefined;
+  const code = recenseLook ? codePx : undefined;
   const savedDrafts = JSON.parse(
     useSyncExternalStore(subscribeDrafts, () =>
       JSON.stringify(
@@ -202,21 +202,21 @@ export function HtmlDocFrame({
       if (gone.current || !frame.current?.contentWindow || event.source !== frame.current.contentWindow) return;
       const parsed = FrameToParent.safeParse(event.data);
       if (!parsed.success) return;
-      if (parsed.data.type === "emend:ready") {
+      if (parsed.data.type === "recense:ready") {
         if (readyNow.current) {
           markAway();
           return;
         }
         readyNow.current = true;
         setReady((value) => value + 1);
-      } else if (parsed.data.type === "emend:issue") {
+      } else if (parsed.data.type === "recense:issue") {
         if (readyNow.current && checkedRepoUrl)
           window.open(
             String(new URL(`${checkedRepoUrl}/issues/${parsed.data.number}`)),
             "_blank",
             "noopener,noreferrer",
           );
-      } else if (parsed.data.type === "emend:position") {
+      } else if (parsed.data.type === "recense:position") {
         if (!readyNow.current || (parsed.data.heading !== null && !headings[parsed.data.heading])) return;
         const position = { heading: parsed.data.heading, fraction: parsed.data.fraction };
         onPosition?.(position);
@@ -226,9 +226,9 @@ export function HtmlDocFrame({
           reading.entry.positions.set(reading.key, anchor);
           saveReadingPosition(reading.key, anchor);
         }
-      } else if (parsed.data.type === "emend:diagrams") {
+      } else if (parsed.data.type === "recense:diagrams") {
         if (readyNow.current) setDiagramJob(parsed.data);
-      } else if (parsed.data.type === "emend:image") {
+      } else if (parsed.data.type === "recense:image") {
         if (!readyNow.current) return;
         const allowed = new Set(images);
         const clicked = parsed.data.images[parsed.data.index];
@@ -243,7 +243,7 @@ export function HtmlDocFrame({
           })),
           index: kept.indexOf(clicked),
         });
-      } else if (parsed.data.type === "emend:navigate") onNavigate?.(parsed.data);
+      } else if (parsed.data.type === "recense:navigate") onNavigate?.(parsed.data);
       else if (!readOnly && !composing && !composerOpen) {
         const { quote, prefix, suffix } = parsed.data;
         setTarget({ kind: "html-span", path, quote, prefix, suffix });
@@ -268,30 +268,30 @@ export function HtmlDocFrame({
   useEffect(() => {
     if (!ready) return;
     if (width !== undefined && prose !== undefined && code !== undefined)
-      post({ type: "emend:layout", wide, width, prose, code });
-    else post({ type: "emend:layout", wide });
+      post({ type: "recense:layout", wide, width, prose, code });
+    else post({ type: "recense:layout", wide });
   }, [ready, wide, width, prose, code, post]);
   useEffect(() => {
-    if (ready && emendLook) post({ type: "emend:theme", mode, ...JSON.parse(colors) });
-  }, [ready, emendLook, mode, colors, post]);
+    if (ready && recenseLook) post({ type: "recense:theme", mode, ...JSON.parse(colors) });
+  }, [ready, recenseLook, mode, colors, post]);
   useEffect(() => {
     if (!ready || !readyNow.current || gone.current || repoSent.current || !checkedRepoUrl) return;
-    post({ type: "emend:repo", url: checkedRepoUrl });
+    post({ type: "recense:repo", url: checkedRepoUrl });
     repoSent.current = true;
   }, [ready, checkedRepoUrl, post]);
   useEffect(() => {
     if (ready && !gone.current)
-      frame.current?.contentWindow?.postMessage({ type: "emend:highlight", anchors: JSON.parse(anchors) }, "*");
+      frame.current?.contentWindow?.postMessage({ type: "recense:highlight", anchors: JSON.parse(anchors) }, "*");
   }, [ready, anchors]);
   const paths = JSON.stringify(docPaths);
   const changedParts = JSON.stringify(changes);
   useEffect(() => {
     if (ready && !gone.current && changedParts !== undefined)
-      post({ type: "emend:changed", ...JSON.parse(changedParts) });
+      post({ type: "recense:changed", ...JSON.parse(changedParts) });
   }, [ready, changedParts, post]);
   const handledPosition = useRef<{ reading: typeof reading; window: Window | null } | undefined>(undefined);
   useEffect(() => {
-    if (ready && !gone.current) post({ type: "emend:docs", paths: JSON.parse(paths) });
+    if (ready && !gone.current) post({ type: "recense:docs", paths: JSON.parse(paths) });
   }, [ready, paths, post]);
   useEffect(() => {
     if (readOnly || !ready || gone.current || !reading) return;
@@ -322,7 +322,7 @@ export function HtmlDocFrame({
           reading.entry.focus = { id: `h-${index}`, children: [] };
         }
         post({
-          type: "emend:goto",
+          type: "recense:goto",
           heading: index,
           label: heading.text,
           ...(picking ? {} : { fraction: saved.fraction }),
@@ -353,7 +353,7 @@ export function HtmlDocFrame({
       !placed.some((thread) => thread.id === show.threadId)
     )
       return;
-    frame.current?.contentWindow?.postMessage({ type: "emend:scroll", threadId: show.threadId }, "*");
+    frame.current?.contentWindow?.postMessage({ type: "recense:scroll", threadId: show.threadId }, "*");
     lastScroll.current = show;
   }, [ready, show, placed, reading]);
   const close = () => {
@@ -370,7 +370,7 @@ export function HtmlDocFrame({
           src={src}
           title={path}
           referrerPolicy="no-referrer"
-          className={`h-full min-h-0 w-full border-0 ${look === "emend" && colorScheme !== "light" ? "bg-reading" : "bg-[#fff]"}`}
+          className={`h-full min-h-0 w-full border-0 ${look === "recense" && colorScheme !== "light" ? "bg-reading" : "bg-[#fff]"}`}
           onLoad={() => {
             if (++loads.current <= 1) return;
             markAway();
@@ -410,7 +410,7 @@ export function HtmlDocFrame({
               <Button
                 onClick={() => {
                   if (phone) onCommentsOpenChange(false);
-                  if (ready) post({ type: "emend:scroll", threadId: thread.id });
+                  if (ready) post({ type: "recense:scroll", threadId: thread.id });
                   else if (!gone.current) setShow({ threadId: thread.id, intent: {} });
                 }}
               >

@@ -84,7 +84,7 @@ async function fragment(path: string, event: "hashchange" | "popstate") {
 }
 test("startup applies the stored theme without the head script and follows other tabs", async () => {
   window.history.replaceState(null, "", "/");
-  localStorage.setItem("emend.theme", "dark");
+  localStorage.setItem("recense.theme", "dark");
   vi.stubGlobal("fetch", async () =>
     Response.json({
       approvedActiveHours: 12,
@@ -96,8 +96,8 @@ test("startup applies the stored theme without the head script and follows other
   await boot();
   expect(document.documentElement.dataset.theme).toBe("dark");
   act(() => {
-    localStorage.setItem("emend.theme", "light");
-    window.dispatchEvent(new StorageEvent("storage", { key: "emend.theme", storageArea: localStorage }));
+    localStorage.setItem("recense.theme", "light");
+    window.dispatchEvent(new StorageEvent("storage", { key: "recense.theme", storageArea: localStorage }));
   });
   expect(document.documentElement.dataset.theme).toBe("light");
 });

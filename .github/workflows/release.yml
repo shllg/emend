@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   plan:
-    if: github.ref == 'refs/heads/main' && github.repository == 'shllg/emend' && vars.RELEASE_ENABLED == 'true'
+    if: github.ref == 'refs/heads/main' && github.repository == 'shllg/recense' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -79,9 +79,9 @@ jobs:
             echo "No shipped changes to release." >> "$GITHUB_STEP_SUMMARY"
           else
             if [ "$DRY_RUN" = true ]; then
-              echo "Dry run: would release emend $VERSION." >> "$GITHUB_STEP_SUMMARY"
+              echo "Dry run: would release recense $VERSION." >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "Planned release: emend $VERSION." >> "$GITHUB_STEP_SUMMARY"
+              echo "Planned release: recense $VERSION." >> "$GITHUB_STEP_SUMMARY"
             fi
             echo >> "$GITHUB_STEP_SUMMARY"
             cat "$RUNNER_TEMP/notes.md" >> "$GITHUB_STEP_SUMMARY"
@@ -136,7 +136,7 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
       - run: pnpm build
       - run: pnpm pack --pack-destination "$RUNNER_TEMP/pack"
-        working-directory: apps/emend
+        working-directory: apps/recense
 
       - id: pack
         name: Check and fingerprint the packed tarball
@@ -247,7 +247,7 @@ jobs:
           [ "$actual" = "$INTEGRITY" ] || { echo "Tarball integrity mismatch" >&2; exit 1; }
           npm_version=$(npm --version)
           node --input-type=module -e 'const v = process.argv[1]; const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v); if (!m || !(+m[1] > 11 || (+m[1] === 11 && (+m[2] > 5 || (+m[2] === 5 && +m[3] >= 1))))) { console.error("npm >= 11.5.1 is required"); process.exit(1); }' "$npm_version"
-          if existing=$(npm view "@shllg/emend@$VERSION" dist.integrity 2> "$RUNNER_TEMP/npm-error"); then
+          if existing=$(npm view "@shllg/recense@$VERSION" dist.integrity 2> "$RUNNER_TEMP/npm-error"); then
             [ -n "$existing" ] || { echo "npm returned empty integrity for $VERSION" >&2; exit 1; }
             if [ "$existing" = "$INTEGRITY" ]; then
               echo "Matching package is already published."
@@ -272,7 +272,7 @@ jobs:
           deadline=$((SECONDS + 900))
           while (( SECONDS < deadline )); do
             remaining=$((deadline - SECONDS))
-            visible=$(timeout "${remaining}s" npm view "@shllg/emend@$VERSION" version 2>/dev/null) || visible=""
+            visible=$(timeout "${remaining}s" npm view "@shllg/recense@$VERSION" version 2>/dev/null) || visible=""
             if [ "$visible" = "$VERSION" ]; then
               exit 0
             fi
@@ -305,7 +305,7 @@ jobs:
           if gh api "repos/$GH_REPO/releases/tags/v$VERSION" > /dev/null 2> "$RUNNER_TEMP/release-error"; then
             echo "Release v$VERSION already exists."
           elif grep -q 'HTTP 404' "$RUNNER_TEMP/release-error"; then
-            gh release create "v$VERSION" --title "emend $VERSION" --notes-file "$RUNNER_TEMP/notes/notes.md" --verify-tag
+            gh release create "v$VERSION" --title "recense $VERSION" --notes-file "$RUNNER_TEMP/notes/notes.md" --verify-tag
           else
             cat "$RUNNER_TEMP/release-error" >&2
             exit 1
@@ -395,7 +395,7 @@ jobs:
             echo "could not create the stamped tree" >&2
             exit 1
           fi
-          if ! stamp=$(jq -n --arg message "chore: stamp emend $VERSION into the plugin manifests" \
+          if ! stamp=$(jq -n --arg message "chore: stamp recense $VERSION into the plugin manifests" \
             --arg tree "$tree" --argjson parents "$parents" \
             '{message: $message, tree: $tree, parents: $parents}' \
             | gh api --method POST "repos/$GH_REPO/git/commits" --input - --jq .sha); then

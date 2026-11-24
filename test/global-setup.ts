@@ -4,10 +4,10 @@ import { join } from "node:path";
 import type { TestProject } from "vitest/node";
 
 export default async function setup(project: TestProject) {
-  const root = await mkdtemp(join(tmpdir(), "emend-test-"));
+  const root = await mkdtemp(join(tmpdir(), "recense-test-"));
   const home = join(root, "home");
   const env = {
-    EMEND_HOME: join(root, "emend"),
+    RECENSE_HOME: join(root, "recense"),
     HOME: home,
     USERPROFILE: home,
     XDG_DATA_HOME: join(home, ".local", "share"),

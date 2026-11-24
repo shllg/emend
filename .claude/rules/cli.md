@@ -1,21 +1,21 @@
 ---
 paths:
-  - "apps/emend/src/cli/**"
-  - "apps/emend/bin/**"
+  - "apps/recense/src/cli/**"
+  - "apps/recense/bin/**"
 ---
 
-# The emend CLI
+# The recense CLI
 
 The CLI runs in repos under review: treat them as hostile.
 
-- Config comes only from the global config file (`$XDG_CONFIG_HOME/emend/`, else
-  `~/.config/emend/`, also on macOS), the state directory and the environment, never from the
+- Config comes only from the global config file (`$XDG_CONFIG_HOME/recense/`, else
+  `~/.config/recense/`, also on macOS), the state directory and the environment, never from the
   reviewed repo, its git config or package.json.
-- Never run code from the reviewed repo: no scripts, hooks or package managers (`emend update`
+- Never run code from the reviewed repo: no scripts, hooks or package managers (`recense update`
   aside: `cli-runtime.md`). Call git with an
   argv array, never through a shell, by an absolute path resolved from the absolute `PATH`
   entries only, and only in the plumbing forms of the `GitCall` union in
-  `apps/emend/src/cli/git.ts`: `--version`, `rev-parse`, `diff-tree` (tree against tree),
+  `apps/recense/src/cli/git.ts`: `--version`, `rev-parse`, `diff-tree` (tree against tree),
   `ls-tree`, `ls-files`, `cat-file -s` and `cat-file blob` by object id,
   `config --bool --get core.filemode` and `config --get remote.origin.url`. Anything else throws
   `GitNotAllowed`. Porcelain `diff`, `show` and `status`, and `diff-index` and `diff-files`, stay
@@ -42,7 +42,7 @@ The CLI runs in repos under review: treat them as hostile.
   only, skip symlinks that leave the doc's folder, and enforce the size, file-count and revision
   limits. A path behind a symlinked folder is absent, as git sees it, and no read or listing
   lands inside the git folder or the common git folder.
-- `emend publish <path>...` builds that manifest from its arguments: each file argument, and the
+- `recense publish <path>...` builds that manifest from its arguments: each file argument, and the
   text files found by listing each folder argument. Markdown and HTML render; other text files and
   docs under `--source` show as source. `--main` only picks one of those docs. Every source still
   sits in the worktree or a `docRoots` folder.
@@ -67,10 +67,10 @@ The CLI runs in repos under review: treat them as hostile.
   references it, at the preflight and on the opened file. Listing errors name only the caller's
   argument or a fixed reason; skip warnings and the nothing-to-publish error escape listed paths
   and give fixed reasons.
-- stdout is a contract: `emend publish --manifest` prints one JSON line; `emend publish <path>...`
-  prints the review URL alone, escaped, or that JSON line with `--json`; `emend wait` and
-  `emend feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and
-  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1. `emend status --line`
+- stdout is a contract: `recense publish --manifest` prints one JSON line; `recense publish <path>...`
+  prints the review URL alone, escaped, or that JSON line with `--json`; `recense wait` and
+  `recense feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and
+  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1. `recense status --line`
   is the exception: it prints its one line or nothing, never writes stderr, and exits 0 on every
   error.
 - Tokens come from the state directory (`agent.token`, `admin.token`, `hub.token`). Never print a
@@ -78,5 +78,5 @@ The CLI runs in repos under review: treat them as hostile.
 - When the hub is down, or the server or the hub rejects the token, print one line on stderr and
   change nothing. A local server that is down is not an error: `publish`, `wait`, `feedback`,
   `reply` and `mcp` then work on the state directory's database directly and never start a server.
-  Only `emend` with no arguments and the service start one.
-- `emend wait` confirms a delivery only after its stdout has flushed.
+  Only `recense` with no arguments and the service start one.
+- `recense wait` confirms a delivery only after its stdout has flushed.

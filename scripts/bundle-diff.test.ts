@@ -114,7 +114,7 @@ test("cache accepts only the matching schema, sha and measurer with safe non-neg
 });
 
 test("a base without a budget makes every head route new and every ceiling added", (t) => {
-  const folder = mkdtempSync(join(tmpdir(), "emend-bundle-diff-"));
+  const folder = mkdtempSync(join(tmpdir(), "recense-bundle-diff-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   mkdirSync(join(folder, "apps/web"), { recursive: true });
   const base = measureCheckout(folder, true);
@@ -133,7 +133,7 @@ test("a base without a budget makes every head route new and every ceiling added
 });
 
 test("cache round trips sizes and budgets with private permissions and ignores unusable files", (t) => {
-  const folder = mkdtempSync(join(tmpdir(), "emend-bundle-cache-"));
+  const folder = mkdtempSync(join(tmpdir(), "recense-bundle-cache-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const path = join(folder, "cache", `${sha}.json`);
   const cache = { schemaVersion: 2 as const, sha, measurer, ...bundles({ inbox: 12000, review: 18000 }, { inbox: 15000, review: 20000 }) };

@@ -1,4 +1,4 @@
-import { BlockId, LIMITS } from "@emend/contract";
+import { BlockId, LIMITS } from "@recense/contract";
 import { defaultTreeAdapter } from "parse5";
 import { expect, test } from "vitest";
 import { htmlPartHashes, htmlPartTexts } from "./html-parts.ts";

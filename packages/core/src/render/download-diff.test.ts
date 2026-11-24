@@ -1,4 +1,4 @@
-import { OTHER_TOPIC, type TopicMeta } from "@emend/contract";
+import { OTHER_TOPIC, type TopicMeta } from "@recense/contract";
 import { structuredPatch } from "diff";
 import { expect, test } from "vitest";
 import { isLockfile } from "../lockfiles.ts";

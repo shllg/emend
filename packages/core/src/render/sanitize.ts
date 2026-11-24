@@ -73,7 +73,7 @@ export const sanitizeSchema: typeof defaultSchema = {
   strip: [...new Set([...(defaultSchema.strip ?? []), ...forbiddenTags])],
 };
 
-export const FOOTNOTE_NODE = "emendFootnoteMarker";
+export const FOOTNOTE_NODE = "recenseFootnoteMarker";
 type FootnoteNode = { type: typeof FOOTNOTE_NODE; data: { element: HtmlElement } };
 
 function isGfmMarker(element: HtmlElement): boolean {
@@ -99,7 +99,7 @@ export function markFootnotes() {
       if (!("children" in parent)) continue;
       for (const [index, child] of parent.children.entries()) {
         if (child.type === "element" && isGfmMarker(child)) {
-          renderData(child).emendFootnoteMarker = true;
+          renderData(child).recenseFootnoteMarker = true;
           const carrier: FootnoteNode = { type: FOOTNOTE_NODE, data: { element: child } };
           // rehype-raw's documented passThrough supports custom nodes, outside HAST's standard union.
           parent.children[index] = carrier as unknown as HtmlElement;
@@ -120,7 +120,7 @@ export function restoreFootnotes() {
           const element = (child as unknown as FootnoteNode).data.element;
           parent.children[index] = element;
           const link = element.children[0];
-          if (element.tagName === "sup" && link?.type === "element") renderData(link).emendFootnoteMarker = true;
+          if (element.tagName === "sup" && link?.type === "element") renderData(link).recenseFootnoteMarker = true;
         } else pending.push(child);
       }
     }
@@ -132,10 +132,10 @@ export function namespaceClasses() {
   return (tree: HtmlRoot) => {
     visitElements(tree, (element) => {
       // Sanitization may remove a sibling (such as a comment) that made this pre ineligible.
-      if (element.tagName === "pre" && !fenceCode(element)) renderData(element).emendMixedPre = true;
+      if (element.tagName === "pre" && !fenceCode(element)) renderData(element).recenseMixedPre = true;
       const classes = element.properties.className;
       if (!Array.isArray(classes)) return;
-      renderData(element).emendClasses = classes.flatMap((value) =>
+      renderData(element).recenseClasses = classes.flatMap((value) =>
         String(value)
           .split(/\s+/)
           .filter(Boolean)
@@ -202,22 +202,22 @@ function mediaSpan(image: HtmlElement, path: string, sha: string, sized: boolean
     type: "element",
     tagName: "span",
     // The marker tells the client the width and height are the server's reading, not the author's.
-    properties: { className: sized ? ["emend-media", "emend-media-sized"] : ["emend-media"] },
+    properties: { className: sized ? ["recense-media", "recense-media-sized"] : ["recense-media"] },
     children: [
       image,
       {
         type: "element",
         tagName: "span",
-        properties: { className: ["emend-media-caption"] },
+        properties: { className: ["recense-media-caption"] },
         children: [{ type: "text", value: caption }],
       },
     ],
   };
-  renderData(span).emendMedia = JSON.stringify([alt, path, sha]);
+  renderData(span).recenseMedia = JSON.stringify([alt, path, sha]);
   return span;
 }
 
-export const isMediaSpan = (node: HtmlNode) => node.type === "element" && renderData(node).emendMedia !== undefined;
+export const isMediaSpan = (node: HtmlNode) => node.type === "element" && renderData(node).recenseMedia !== undefined;
 
 const isWhitespace = (node: HtmlNode) => node.type === "text" && node.value.trim() === "";
 
@@ -253,7 +253,7 @@ function wrapMediaPair(paragraph: HtmlElement): boolean {
     }
     paragraph.children = [
       ...prefix,
-      { type: "element", tagName: "span", properties: { className: ["emend-media-effect"] }, children: effect },
+      { type: "element", tagName: "span", properties: { className: ["recense-media-effect"] }, children: effect },
     ];
     return true;
   }
@@ -269,7 +269,7 @@ function wrapMedia(
   if (!("children" in node)) return;
   for (const [index, child] of node.children.entries()) {
     if (child.type !== "element") continue;
-    const marked = renderData(child).emendMediaPath;
+    const marked = renderData(child).recenseMediaPath;
     if (child.tagName === "img" && typeof marked === "string") {
       const sha = media.get(marked) ?? "";
       child.properties.src = `${MEDIA_URL_PREFIX}${sha}`;
@@ -295,14 +295,14 @@ function wrapMedia(
       const diff = pair && spans.length === 3 ? spans[2] : undefined;
       if (diff?.type === "element") {
         const classes = Array.isArray(diff.properties.className) ? diff.properties.className : [];
-        diff.properties.className = [...classes, "emend-media-diff"];
+        diff.properties.className = [...classes, "recense-media-diff"];
       }
       const classes = Array.isArray(node.properties.className) ? node.properties.className : [];
       node.properties.className = [
         ...classes,
-        "emend-media-row",
-        ...(pair ? ["emend-media-pair"] : []),
-        ...(diff ? ["emend-media-pair-diff"] : []),
+        "recense-media-row",
+        ...(pair ? ["recense-media-pair"] : []),
+        ...(diff ? ["recense-media-pair-diff"] : []),
       ];
     }
   }
@@ -316,7 +316,7 @@ export function hardenLinks() {
     const docs = file.data.docs as DocLinks | undefined;
     const base = typeof file.data.docBase === "string" ? file.data.docBase : "";
     visitElements(tree, (element) => {
-      const classes = renderData(element).emendClasses;
+      const classes = renderData(element).recenseClasses;
       if (
         Array.isArray(classes) &&
         classes.every(
@@ -340,7 +340,7 @@ export function hardenLinks() {
         if (
           docs &&
           element.tagName === "a" &&
-          !renderData(element).emendFootnoteMarker &&
+          !renderData(element).recenseFootnoteMarker &&
           !hasBlockChildren(element) &&
           typeof href === "string"
         ) {
@@ -366,10 +366,10 @@ export function hardenLinks() {
         // The app CSP allows only same-origin images, and an absolute same-origin URL could show
         // another review's media. An image keeps a source only when it names a declared media path.
         const path = media ? mediaKey(src, media) : null;
-        if (path !== null) renderData(element).emendMediaPath = path;
+        if (path !== null) renderData(element).recenseMediaPath = path;
         else {
           const local = localMediaPath(src);
-          if (local !== null) renderData(element).emendUnlistedMediaPath = local;
+          if (local !== null) renderData(element).recenseUnlistedMediaPath = local;
           delete element.properties.src;
         }
       } else if (!isAbsoluteUrl(src, false)) delete element.properties.src;

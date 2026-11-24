@@ -2,17 +2,17 @@ import { statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, relative, sep } from "node:path";
 import { expect, test } from "vitest";
-import { defaultConfigDir } from "../apps/emend/src/state/paths.ts";
+import { defaultConfigDir } from "../apps/recense/src/state/paths.ts";
 
 test("state and home fallback paths share one private temporary root", () => {
-  const home = process.env.EMEND_HOME;
+  const home = process.env.RECENSE_HOME;
   expect(home).toBeDefined();
-  if (!home) throw new Error("EMEND_HOME must be set before tests run");
+  if (!home) throw new Error("RECENSE_HOME must be set before tests run");
   const root = dirname(home);
   const path = relative(tmpdir(), root);
   expect(isAbsolute(path)).toBe(false);
   expect(path.split(sep)).toHaveLength(1);
-  expect(path).toMatch(/^emend-test-/);
+  expect(path).toMatch(/^recense-test-/);
   for (const directory of [
     home,
     homedir(),

@@ -1,4 +1,4 @@
-import { type LinesTarget, Placement } from "@emend/contract";
+import { type LinesTarget, Placement } from "@recense/contract";
 import { expect, test } from "vitest";
 import { renderDoc, renderMarkdown } from "../render/markdown.ts";
 import { type PlaceContext, placeThread } from "./place.ts";

@@ -8,8 +8,8 @@
 
 ## Evidence
 
-<!-- pnpm verify result. Tests added or changed. Reviewer verdicts: emend-reviewer, Codex review,
-     and emend-security-reviewer when triggered. -->
+<!-- pnpm verify result. Tests added or changed. Reviewer verdicts: recense-reviewer, Codex review,
+     and recense-security-reviewer when triggered. -->
 
 ## Sync
 

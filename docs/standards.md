@@ -1,6 +1,6 @@
 # Standards
 
-Taste rules for emend. `emend-reviewer` checks them. Correctness rules live in `AGENTS.md` and
+Taste rules for recense. `recense-reviewer` checks them. Correctness rules live in `AGENTS.md` and
 `.claude/rules/`.
 
 ## Code
@@ -19,7 +19,7 @@ Taste rules for emend. `emend-reviewer` checks them. Correctness rules live in `
 - Test first for behaviour changes.
 - Name a test after the behaviour: "refuses a send for an older revision".
 - Add hostile-input cases for anything that renders or parses agent-written content.
-- Fixtures are synthetic. State lives in temporary `EMEND_HOME` folders.
+- Fixtures are synthetic. State lives in temporary `RECENSE_HOME` folders.
 
 ## UI text
 

@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeft,

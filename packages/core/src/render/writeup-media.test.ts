@@ -1,4 +1,4 @@
-import type { WriteupInput } from "@emend/contract";
+import type { WriteupInput } from "@recense/contract";
 import { expect, test } from "vitest";
 import { type RenderEffects, renderDoc } from "./markdown.ts";
 import { renderWriteup } from "./writeup.ts";
@@ -46,7 +46,7 @@ test.each([
   const rendered = await renderWriteup(input, [], { media, effects });
   expect([...(effects.unlistedMedia ?? [])]).toEqual([]);
   expect(rendered.sections[0]?.blocks[0]?.html).toBe(
-    '<p>Screenshot: <span class="emend-media"><img src="/api/v1/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" alt="Before" loading="lazy" decoding="async"><span class="emend-media-caption">Before</span></span></p>',
+    '<p>Screenshot: <span class="recense-media"><img src="/api/v1/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" alt="Before" loading="lazy" decoding="async"><span class="recense-media-caption">Before</span></span></p>',
   );
   expect(rendered).toEqual(await renderWriteup(input, [], { media }));
 });
@@ -61,7 +61,7 @@ test("keeps unlisted images in labelled topic example rows", async () => {
   const rendered = await renderWriteup(input, topics, { effects });
   expect([...(effects.unlistedMedia ?? [])]).toEqual(["media/missing.png"]);
   expect(rendered.sections.find((section) => section.key === "t-example-example")?.blocks[0]?.html).toBe(
-    '<p class="emend-example-rows"><span class="emend-example-row"><span class="emend-example-label">Before:</span><span class="emend-example-value"> <img alt="Before"></span></span>\n<span class="emend-example-row"><span class="emend-example-label">After:</span><span class="emend-example-value"> fixed</span></span></p>',
+    '<p class="recense-example-rows"><span class="recense-example-row"><span class="recense-example-label">Before:</span><span class="recense-example-value"> <img alt="Before"></span></span>\n<span class="recense-example-row"><span class="recense-example-label">After:</span><span class="recense-example-value"> fixed</span></span></p>',
   );
   expect(rendered).toEqual(await renderWriteup(input, topics));
 });

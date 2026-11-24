@@ -1,6 +1,6 @@
 {
-  "name": "emend",
-  "short_name": "emend",
+  "name": "recense",
+  "short_name": "recense",
   "display": "standalone",
   "start_url": "/",
   "scope": "/",

@@ -37,10 +37,10 @@ export function WriteupDetails({
       if (details) details.open = true;
       rememberOpen(true);
     };
-    details?.addEventListener("emend:reveal-reading", reveal);
+    details?.addEventListener("recense:reveal-reading", reveal);
     details?.addEventListener("beforematch", reveal);
     return () => {
-      details?.removeEventListener("emend:reveal-reading", reveal);
+      details?.removeEventListener("recense:reveal-reading", reveal);
       details?.removeEventListener("beforematch", reveal);
     };
   }, [rememberOpen]);

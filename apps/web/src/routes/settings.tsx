@@ -7,7 +7,7 @@ import {
   MAX_APPROVED_ACTIVE_HOURS,
   MAX_APPROVED_ACTIVE_LIMIT,
   SettingsView,
-} from "@emend/contract";
+} from "@recense/contract";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
@@ -344,7 +344,7 @@ function AppearanceSettings() {
       )}
       {themes.data?.themes.length === 0 && !themes.data.folderError && (
         <p className="mt-3 text-14 text-fg-3 wrap-anywhere">
-          Create a theme with <code>emend theme copy dark mine</code>.
+          Create a theme with <code>recense theme copy dark mine</code>.
         </p>
       )}
       {(themes.data?.themes.length ?? 0) > 0 && (

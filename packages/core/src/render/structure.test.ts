@@ -146,7 +146,7 @@ test("stops splitting containers at depth 64", async () => {
   expect((await render(64)).map((block) => block.text)).toEqual(["OneTwo"]);
 });
 
-// Production depth is covered through the worker in apps/emend/src/server/publish/render-depth.test.ts.
+// Production depth is covered through the worker in apps/recense/src/server/publish/render-depth.test.ts.
 test("renders 1000 nested divs without overflowing the stack", async () => {
   const blocks = await renderMarkdown(`${"<div>".repeat(1000)}<p>Deep content</p>${"</div>".repeat(1000)}`, "overview");
   expect(blocks).toHaveLength(1);

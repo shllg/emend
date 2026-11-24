@@ -1,4 +1,4 @@
-import type { RenderedBlock } from "@emend/contract";
+import type { RenderedBlock } from "@recense/contract";
 import { MessageSquarePlus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";

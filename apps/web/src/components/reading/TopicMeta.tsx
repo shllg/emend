@@ -1,4 +1,4 @@
-import type { TopicMeta as Topic } from "@emend/contract";
+import type { TopicMeta as Topic } from "@recense/contract";
 import { AttentionChip, undoSentence } from "./TopicChips.tsx";
 
 export function TopicMeta({ topic, note = false, blast = true }: { topic: Topic; note?: boolean; blast?: boolean }) {

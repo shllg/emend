@@ -1,4 +1,4 @@
-import { type FileView, LIMITS, LinesTarget } from "@emend/contract";
+import { type FileView, LIMITS, LinesTarget } from "@recense/contract";
 import { expect, test } from "vitest";
 import { linesTarget } from "./linesTarget.ts";
 

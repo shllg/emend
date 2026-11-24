@@ -1,5 +1,5 @@
 import { ok } from "node:assert/strict";
-import type { RenderedBlock } from "@emend/contract";
+import type { RenderedBlock } from "@recense/contract";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { placeSpan } from "../../../../packages/core/src/place/span.ts";

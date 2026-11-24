@@ -1,4 +1,4 @@
-import type { FileView } from "@emend/contract";
+import type { FileView } from "@recense/contract";
 import { Check } from "lucide-react";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { Icon } from "../ui/Icon.tsx";

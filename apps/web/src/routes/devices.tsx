@@ -1,4 +1,4 @@
-import { DeviceList, type DeviceView } from "@emend/contract";
+import { DeviceList, type DeviceView } from "@recense/contract";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useRouter } from "@tanstack/react-router";
 import { Download, LogOut, MonitorSmartphone, QrCode, RefreshCw, RotateCw, Server } from "lucide-react";
@@ -47,7 +47,7 @@ function AppSection({ now }: { now: number }) {
       </h2>
       <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line-1 bg-surface px-3.5 py-3">
         <div className="min-w-0 flex-1 basis-[15rem]">
-          <p className="text-14 font-semibold">{`emend ${__EMEND_VERSION__}${tag ? ` (${tag})` : ""}`}</p>
+          <p className="text-14 font-semibold">{`recense ${__RECENSE_VERSION__}${tag ? ` (${tag})` : ""}`}</p>
           <p aria-live="polite" className="mt-0.5 text-12 text-fg-3">
             {updateStatus(update)}
           </p>

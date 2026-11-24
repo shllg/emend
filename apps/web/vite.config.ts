@@ -25,7 +25,7 @@ function mermaidFrame(): Plugin {
           minify: true,
           lib: {
             entry: fileURLToPath(new URL("./mermaid-frame.ts", import.meta.url)),
-            name: "EmendMermaidFrame",
+            name: "RecenseMermaidFrame",
             formats: ["iife"],
           },
           rolldownOptions: { output: { codeSplitting: false } },
@@ -78,12 +78,12 @@ function pubFrame(): Plugin {
   };
 }
 
-const emendPackage: { version: string } = JSON.parse(
-  readFileSync(fileURLToPath(new URL("../emend/package.json", import.meta.url)), "utf8"),
+const recensePackage: { version: string } = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../recense/package.json", import.meta.url)), "utf8"),
 );
 
 export default defineConfig({
-  define: { __EMEND_VERSION__: JSON.stringify(emendPackage.version) },
+  define: { __RECENSE_VERSION__: JSON.stringify(recensePackage.version) },
   plugins: [react(), tailwindcss(), mermaidFrame(), pubFrame(), diffBuildPruning(), serviceWorker()],
   worker: { format: "es", plugins: () => [diffBuildPruning(true)] },
   build: {

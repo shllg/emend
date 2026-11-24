@@ -160,7 +160,7 @@ test("import preserves optional, nullable HTML appearance fields and rejects unk
     parentDocId: null,
   };
   expect(ImportBundle.parse({ ...input, files: [file] }).files[0]).toEqual(file);
-  for (const look of ["emend", "custom", null]) {
+  for (const look of ["recense", "custom", null]) {
     const withLook = { ...file, look };
     expect(ImportBundle.parse({ ...input, files: [withLook] }).files[0]).toEqual(withLook);
     for (const colorScheme of ["light", null]) {
@@ -168,13 +168,18 @@ test("import preserves optional, nullable HTML appearance fields and rejects unk
       expect(ImportBundle.parse({ ...input, files: [withBoth] }).files[0]).toEqual(withBoth);
     }
   }
+  // A bundle from an instance before the rename says `emend`; the hub stores `recense`.
+  expect(ImportBundle.parse({ ...input, files: [{ ...file, look: "emend" }] }).files[0]).toEqual({
+    ...file,
+    look: "recense",
+  });
   for (const colorScheme of ["light", null]) {
     const withScheme = { ...file, colorScheme };
     expect(ImportBundle.parse({ ...input, files: [withScheme] }).files[0]).toEqual(withScheme);
   }
   for (const appearance of [
     { look: "other" },
-    { look: "EMEND" },
+    { look: "RECENSE" },
     { look: false },
     { colorScheme: "dark" },
     { colorScheme: "auto" },

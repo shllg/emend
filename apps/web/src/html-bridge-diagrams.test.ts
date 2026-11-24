@@ -13,7 +13,7 @@ import {
   FrameToParent,
 } from "./lib/frame-messages.ts";
 
-const bridgeSource = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+const bridgeSource = readFileSync(new URL("../../recense/src/server/content/bridge.ts", import.meta.url), "utf8");
 const diagramMarkups = [
   { markup: "pre.mermaid", preClass: "mermaid", codeClass: "" },
   { markup: "pre > code.language-mermaid", preClass: "", codeClass: "language-mermaid" },
@@ -109,9 +109,9 @@ function bridge(html: string, prepare?: (window: Window) => void) {
     window.dispatchEvent(new window.MessageEvent("message", { data, source: source as Window }));
     if (errors.length) throw errors[0];
   };
-  const jobs = () => post.mock.calls.filter(([data]) => data.type === "emend:diagrams").map(([data]) => data);
+  const jobs = () => post.mock.calls.filter(([data]) => data.type === "recense:diagrams").map(([data]) => data);
   const result = {
-    type: "emend:diagram",
+    type: "recense:diagram",
     request: 1,
     index: 0,
     svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
@@ -161,7 +161,7 @@ test("scan uses exact HTML pre class tokens, light DOM, source text and document
   );
   expect(b.jobs()).toEqual([
     {
-      type: "emend:diagrams",
+      type: "recense:diagrams",
       request: 1,
       diagrams: [
         { source: "flowchart LR\n A --> B", mode: "light", width: 1 },
@@ -170,7 +170,7 @@ test("scan uses exact HTML pre class tokens, light DOM, source text and document
       ],
     },
   ]);
-  expect(b.post.mock.calls.slice(0, 2).map(([data]) => data.type)).toEqual(["emend:ready", "emend:diagrams"]);
+  expect(b.post.mock.calls.slice(0, 2).map(([data]) => data.type)).toEqual(["recense:ready", "recense:diagrams"]);
 });
 
 test("scan accepts exact Mermaid fences, light DOM, source text and document order", () => {
@@ -216,7 +216,7 @@ test("scan accepts exact Mermaid fences, light DOM, source text and document ord
   );
   expect(b.jobs()).toEqual([
     {
-      type: "emend:diagrams",
+      type: "recense:diagrams",
       request: 1,
       diagrams: [
         { source: "flowchart LR\n A --> B", mode: "light", width: 1 },
@@ -227,7 +227,7 @@ test("scan accepts exact Mermaid fences, light DOM, source text and document ord
       ],
     },
   ]);
-  expect(b.post.mock.calls.slice(0, 2).map(([data]) => data.type)).toEqual(["emend:ready", "emend:diagrams"]);
+  expect(b.post.mock.calls.slice(0, 2).map(([data]) => data.type)).toEqual(["recense:ready", "recense:diagrams"]);
 });
 
 test.each([
@@ -253,7 +253,7 @@ test.each(diagramMarkups)(
       `<div style="color: rgb(255, 255, 255)"><pre class="${preClass}" style="color: rgb(0, 0, 255)"><code class="${codeClass}">graph LR</code></pre></div>`,
     );
     expect(b.pixels.color).toBe("rgb(255, 255, 255)");
-    const theme = { type: "emend:theme", mode: "dark", scales: {}, tokens: {} };
+    const theme = { type: "recense:theme", mode: "dark", scales: {}, tokens: {} };
     b.pixels.rgb = [255, 255, 255, 128];
     b.message({ ...theme, mode: "invalid" });
     b.message({ ...theme, tokens: { bad: "url(x)" } });
@@ -291,7 +291,7 @@ test.each(
   const outside = b.window.document.querySelector("aside");
   if (!ancestor || !outside) throw new Error("Missing event targets");
   expect(b.jobs()[0]).toMatchObject({ request: 1, diagrams: [{ mode: "light" }] });
-  if (trigger === "theme") b.message({ type: "emend:theme", mode: "dark", scales: {}, tokens: {} });
+  if (trigger === "theme") b.message({ type: "recense:theme", mode: "dark", scales: {}, tokens: {} });
   else b.media.dispatchEvent(new b.window.Event("change"));
   expect(b.jobs()).toHaveLength(1);
   b.pixels.rgb = [255, 255, 255, 255];
@@ -316,7 +316,7 @@ test.each([0, 450.6, 10001])("width %s is rounded and clamped; width alone never
 test.each([0, 720.6, 10001])("redraws measure the placed host's width %s", (width) => {
   const b = bridge('<pre class="mermaid">graph LR</pre>', (window) => {
     vi.spyOn(window.Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
-      const measured = this.hasAttribute("data-emend-diagram")
+      const measured = this.hasAttribute("data-recense-diagram")
         ? width
         : window.getComputedStyle(this).display === "none"
           ? 0
@@ -328,7 +328,7 @@ test.each([0, 720.6, 10001])("redraws measure the placed host's width %s", (widt
   b.message(b.result);
   expect(b.window.document.querySelector("pre")?.style.display).toBe("none");
   b.pixels.rgb = [255, 255, 255, 255];
-  b.message({ type: "emend:theme", mode: "dark", scales: {}, tokens: {} });
+  b.message({ type: "recense:theme", mode: "dark", scales: {}, tokens: {} });
   expect(b.jobs()[1].diagrams[0].width).toBe(Math.max(1, Math.min(10000, Math.round(width))));
   b.pixels.rgb = [0, 0, 0, 255];
   b.media.dispatchEvent(new b.window.Event("change"));
@@ -347,13 +347,13 @@ test.each(diagramDisplays)(
     const nodes = [...pre.childNodes];
     const text = b.window.document.body.textContent;
     b.message({
-      type: "emend:highlight",
+      type: "recense:highlight",
       anchors: [{ threadId: "t", quote: "graph LR", prefix: "Heading", suffix: "After" }],
     });
-    const range = b.highlights.get("emend-quotes").range;
+    const range = b.highlights.get("recense-quotes").range;
     b.message(b.result);
     const host = pre.previousElementSibling;
-    expect(host?.getAttribute("data-emend-diagram")).toBe("");
+    expect(host?.getAttribute("data-recense-diagram")).toBe("");
     expect(host?.tagName).toBe("DIV");
     expect(host?.shadowRoot).toBeNull();
     expect(host?.childNodes).toHaveLength(0);
@@ -373,8 +373,8 @@ test.each(diagramDisplays)(
     expect([...pre.childNodes]).toEqual(nodes);
     expect(range.toString()).toBe("graph LR");
     img?.dispatchEvent(new b.window.MouseEvent("click", { bubbles: true, composed: true }));
-    expect(b.post.mock.calls.some(([data]) => data.type === "emend:image")).toBe(false);
-    b.message({ type: "emend:diagram", request: 1, index: 0, svg: null });
+    expect(b.post.mock.calls.some(([data]) => data.type === "recense:image")).toBe(false);
+    b.message({ type: "recense:diagram", request: 1, index: 0, svg: null });
     expect(host?.isConnected).toBe(false);
     expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
     expect(range.toString()).toBe("graph LR");
@@ -392,12 +392,12 @@ test.each(diagramDisplays)(
     const original = [pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")];
     b.message(b.result);
     const host = pre.previousElementSibling;
-    expect(host?.getAttribute("data-emend-diagram")).toBe("");
+    expect(host?.getAttribute("data-recense-diagram")).toBe("");
     expect(pre.style.getPropertyValue("display")).toBe("none");
     expect(pre.style.getPropertyPriority("display")).toBe("important");
     const outside = { threadId: "outside", quote: "After", prefix: "", suffix: "" };
     b.message({
-      type: "emend:highlight",
+      type: "recense:highlight",
       anchors: [outside, { threadId: "source", quote: "graph LR", prefix: "", suffix: "" }],
     });
     expect(pre.previousElementSibling).toBe(host);
@@ -406,13 +406,13 @@ test.each(diagramDisplays)(
       expect(this).toBe(pre.querySelector("code"));
       expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
     });
-    b.message({ type: "emend:scroll", threadId: "source" });
+    b.message({ type: "recense:scroll", threadId: "source" });
     expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: "center" });
-    b.message({ type: "emend:highlight", anchors: [outside] });
+    b.message({ type: "recense:highlight", anchors: [outside] });
     expect(pre.previousElementSibling).toBe(host);
     expect(pre.style.getPropertyValue("display")).toBe("none");
     expect(pre.style.getPropertyPriority("display")).toBe("important");
-    b.message({ type: "emend:diagram", request: 1, index: 0, svg: null });
+    b.message({ type: "recense:diagram", request: 1, index: 0, svg: null });
     expect(host?.isConnected).toBe(false);
     expect([pre.style.getPropertyValue("display"), pre.style.getPropertyPriority("display")]).toEqual(original);
   },
@@ -431,7 +431,7 @@ test.each(["no diagrams", "unplaced diagrams", "hidden sources", "shown sources"
       const root = b.window.document.scrollingElement;
       const headings = [...b.window.document.querySelectorAll("h2,h3")];
       Object.defineProperty(b.window, "innerHeight", { configurable: true, value: 400 });
-      const scale = () => (root.getAttribute("data-emend-prose") === "18" ? 2 : 1);
+      const scale = () => (root.getAttribute("data-recense-prose") === "18" ? 2 : 1);
       const offset = (element: Element) => ([300, 350, 900][headings.indexOf(element)] ?? 0) * scale();
       const clamp = (top: number) => Math.max(0, Math.min(1100 * scale() - 400, Math.round(top)));
       vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(true);
@@ -457,15 +457,15 @@ test.each(["no diagrams", "unplaced diagrams", "hidden sources", "shown sources"
       }
       const shown = state === "shown sources" ? 2 : state === "mixed sources" ? 1 : 0;
       const anchors = sources.slice(0, shown).map((quote) => ({ threadId: quote, quote, prefix: "", suffix: "" }));
-      b.message({ type: "emend:highlight", anchors });
-      b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+      b.message({ type: "recense:highlight", anchors });
+      b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0.25 });
       expect(root.scrollTop).toBe(213); // Rounded landing is 0.26; the pin must keep 0.25.
       vi.runAllTimers();
       for (const spy of [scroll, scrollTo, windowScroll, b.post]) spy.mockClear();
       const timer = vi.spyOn(b.window, "setTimeout");
 
       b.message({
-        type: "emend:highlight",
+        type: "recense:highlight",
         anchors: [...anchors, { threadId: "outside", quote: "Last", prefix: "", suffix: "" }],
       });
       expect(timer).not.toHaveBeenCalled();
@@ -478,7 +478,7 @@ test.each(["no diagrams", "unplaced diagrams", "hidden sources", "shown sources"
       );
 
       // A later layout change still restores the original pin, without rounding drift.
-      b.message({ type: "emend:layout", wide: true, width: "comfortable", prose: 18, code: 13 });
+      b.message({ type: "recense:layout", wide: true, width: "comfortable", prose: 18, code: 13 });
       expect(scroll.mock.instances).toEqual([headings[0]]);
       expect(root.scrollTop).toBe(525);
     } finally {
@@ -561,7 +561,7 @@ test.each(diagramMarkups)(
       b.media.dispatchEvent(new b.window.Event("change"));
       b.message(b.result);
       expect(b.jobs()).toEqual([
-        { type: "emend:diagrams", request: 1, diagrams: [{ source, mode: "light", width: 1 }] },
+        { type: "recense:diagrams", request: 1, diagrams: [{ source, mode: "light", width: 1 }] },
       ]);
       expect(clobbered).not.toHaveBeenCalled();
     } finally {
@@ -570,8 +570,8 @@ test.each(diagramMarkups)(
     }
     expect(sourceNodes.map((node) => node.getAttribute("onclick"))).toEqual(["alert(1)", "alert(1)"]);
     expect(sourceNodes.map((node) => node.textContent)).toEqual([source, source]);
-    const host = b.window.document.querySelector("[data-emend-diagram]");
-    expect(host?.getAttributeNames()).toEqual(["data-emend-diagram"]);
+    const host = b.window.document.querySelector("[data-recense-diagram]");
+    expect(host?.getAttributeNames()).toEqual(["data-recense-diagram"]);
     expect(b.shadows[0]?.querySelector("img")?.getAttributeNames().sort()).toEqual([
       "alt",
       "height",

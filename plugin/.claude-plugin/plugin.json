@@ -1,8 +1,8 @@
 {
-  "name": "emend",
+  "name": "recense",
   "description": "Local-first review for work done by coding agents: plans, docs and code.",
   "author": { "name": "shllg" },
-  "repository": "https://github.com/shllg/emend",
+  "repository": "https://github.com/shllg/recense",
   "license": "MIT",
   "keywords": ["review", "plans", "docs", "code", "feedback"]
 }

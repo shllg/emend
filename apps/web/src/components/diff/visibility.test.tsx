@@ -1,5 +1,5 @@
-import type { FileView, RevisionView, Target, ThreadView } from "@emend/contract";
 import type { FileDiffProps } from "@pierre/diffs/react";
+import type { FileView, RevisionView, Target, ThreadView } from "@recense/contract";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -279,7 +279,7 @@ test.each([
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       return this.classList.contains("em-diff-pane") ? new DOMRect(0, 0, 1200, 600) : bounds.call(this);
     });
-    localStorage.setItem("emend.layout.v1", JSON.stringify({ diffStyle: style }));
+    localStorage.setItem("recense.layout.v1", JSON.stringify({ diffStyle: style }));
     fetchMock.mockImplementation(
       async (path: string) =>
         new Response(

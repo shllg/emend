@@ -1,6 +1,6 @@
 ---
 name: e-outside
-description: Take an issue or a fork PR from an outside contributor (anyone not in CODEOWNERS) through a safety read, CI approval, one emend review and, on the owner's approval, a squash merge pinned to the approved head. Use when the owner types /e-outside with an issue or PR number.
+description: Take an issue or a fork PR from an outside contributor (anyone not in CODEOWNERS) through a safety read, CI approval, one recense review and, on the owner's approval, a squash merge pinned to the approved head. Use when the owner types /e-outside with an issue or PR number.
 disable-model-invocation: true
 ---
 
@@ -9,7 +9,7 @@ disable-model-invocation: true
 Request: $ARGUMENTS
 
 The request is `#<n>` or a URL of an issue or PR in this repository. Anything else: print
-`Usage: /e-outside <#issue | #pr>` and stop. Approval in emend allows the merge; nothing else does.
+`Usage: /e-outside <#issue | #pr>` and stop. Approval in recense allows the merge; nothing else does.
 
 ## Rules
 
@@ -60,25 +60,25 @@ Unless the verdict names a `.github/` change (then the owner approves CI by hand
 `gh api 'repos/<owner>/<name>/actions/runs?event=pull_request&head_sha=<head>' --jq '.workflow_runs[] | select(.conclusion == "action_required") | .id'`,
 then for each id `gh api -X POST repos/<owner>/<name>/actions/runs/<id>/approve`.
 
-## 4. emend review
+## 4. recense review
 
 1. Start the reader with `checklist.md` "Review", then with "Manifest", giving it `<base>`,
    `<head>`, the PR and issue URLs, the verdict and the findings. Write the returned object to
    `<dir>/review/review.json` with the Write tool, without a code fence.
 2. It must pass, else stop:
    `jq -e --arg b '<base>' --arg h '<head>' '.base == $b and .head == $h and (has("repoUrl") | not) and ((.media // []) | length == 0) and ([.files[]? | select(.role != "diff" or has("source"))] | length == 0)' '<dir>/review/review.json'`.
-3. `emend publish --manifest '<dir>/review/review.json' --key outside-pr-<p>` prints one JSON
+3. `recense publish --manifest '<dir>/review/review.json' --key outside-pr-<p>` prints one JSON
    line. Append `<revision> <head>` to `<dir>/published.txt`. Give the owner the `url`: approve
    means merge; comments go to the contributor.
-4. Wait as the `emend-feedback` skill says, with `<dir>/review` as its folder.
+4. Wait as the `recense-feedback` skill says, with `<dir>/review` as its folder.
 
 ## 5. Act on the answer
 
 - `go`: the owner's comments become one PR review in `<dir>/pr-review.md`, each point with file
   and line: `gh pr review <p> --repo github.com/<owner>/<name> --request-changes --body-file '<dir>/pr-review.md'`
   (`--comment` for questions only). A fix the owner keeps becomes a follow-up issue through
-  `/e-issue`. Reply to each comment with `emend reply`, record the `deliveryId` in `handled.txt`
-  as `emend-feedback` says, then stop; the owner runs `/e-outside #<p>` again after the
+  `/e-issue`. Reply to each comment with `recense reply`, record the `deliveryId` in `handled.txt`
+  as `recense-feedback` says, then stop; the owner runs `/e-outside #<p>` again after the
   contributor pushes.
 - `approve`, for the revision on the last line of `published.txt` (that line's head is `<head>`):
   1. `gh pr view <p> --repo github.com/<owner>/<name> --json state,headRefOid,mergeable`: `OPEN`,
@@ -106,5 +106,5 @@ comment with the reason, then close as not planned). Use
 
 ## 7. Report
 
-The pair, the head, the verdict, CI, the emend review and its outcome, what went to GitHub, and
+The pair, the head, the verdict, CI, the recense review and its outcome, what went to GitHub, and
 the merge commit or why there is none.

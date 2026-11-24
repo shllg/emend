@@ -6,7 +6,7 @@ import { shouldPrecacheAsset } from "../src/lib/built-in-fonts.ts";
 
 export function serviceWorker(): Plugin {
   return {
-    name: "emend-service-worker",
+    name: "recense-service-worker",
     apply: "build",
     generateBundle: {
       order: "post",
@@ -40,15 +40,15 @@ export function serviceWorker(): Plugin {
           configFile: false,
           logLevel: "silent",
           define: {
-            __EMEND_SHELL__: JSON.stringify(shell),
-            __EMEND_BUILD_ID__: JSON.stringify(hash.digest("hex").slice(0, 16)),
+            __RECENSE_SHELL__: JSON.stringify(shell),
+            __RECENSE_BUILD_ID__: JSON.stringify(hash.digest("hex").slice(0, 16)),
           },
           build: {
             write: false,
             minify: true,
             lib: {
               entry: fileURLToPath(new URL("../src/sw.ts", import.meta.url)),
-              name: "EmendServiceWorker",
+              name: "RecenseServiceWorker",
               formats: ["iife"],
             },
             rolldownOptions: { output: { codeSplitting: false } },

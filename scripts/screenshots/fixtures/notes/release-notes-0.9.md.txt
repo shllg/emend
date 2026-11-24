@@ -13,4 +13,4 @@
 
 ## Upgrading
 
-Run `emend update` on every machine. The database migrates on the first start, and old reviews open as before.
+Run `recense update` on every machine. The database migrates on the first start, and old reviews open as before.

@@ -126,13 +126,13 @@ test("CI jobs run exactly the local verify chain, with only a frozen install bef
 });
 
 test("bench is opt-in and stays outside verification and every CI job", () => {
-  assert.equal(scripts.bench, "EMEND_BENCH=1 vitest run --project bench");
+  assert.equal(scripts.bench, "RECENSE_BENCH=1 vitest run --project bench");
   for (const [name, command] of Object.entries(scripts)) {
-    if (name !== "bench") assert.doesNotMatch(command, /\bbench\b|EMEND_BENCH/, name);
+    if (name !== "bench") assert.doesNotMatch(command, /\bbench\b|RECENSE_BENCH/, name);
   }
   const visited = new Set<string>();
   function outsideBench(command: string): void {
-    assert.doesNotMatch(command, /\bbench\b|EMEND_BENCH/);
+    assert.doesNotMatch(command, /\bbench\b|RECENSE_BENCH/);
     for (const [, name] of command.matchAll(/\bpnpm\s+(?:run\s+)?([\w:-]+)/g)) {
       if (!scripts[name] || visited.has(name)) continue;
       visited.add(name);
@@ -143,9 +143,9 @@ test("bench is opt-in and stays outside verification and every CI job", () => {
   for (const file of readdirSync(new URL("../.github/workflows/", import.meta.url))) {
     if (!/\.ya?ml$/.test(file)) continue;
     const source = readFileSync(new URL(`../.github/workflows/${file}`, import.meta.url), "utf8");
-    assert.doesNotMatch(source, /\bbench\b|EMEND_BENCH/, file);
+    assert.doesNotMatch(source, /\bbench\b|RECENSE_BENCH/, file);
     for (const [name, body] of jobs(withoutYamlComments(source))) {
-      assert.doesNotMatch(body, /\bbench\b|EMEND_BENCH/, `${file}: ${name}`);
+      assert.doesNotMatch(body, /\bbench\b|RECENSE_BENCH/, `${file}: ${name}`);
       for (const command of runScripts(body)) outsideBench(command);
     }
   }
@@ -156,10 +156,10 @@ function checkVitestConfig(source: string): void {
   assert.equal(source.split("\n").filter((line) => line === execArgv).length, 1, "pin the Node 24 execArgv expression");
   assert.equal([...source.matchAll(/^ +execArgv,$/gm)].length, 3, "exactly three project execArgv shorthands");
   assert.equal([...source.matchAll(/\bexecArgv\b/g)].length, 4, "one definition and three project shorthands only");
-  const parallelism = '    fileParallelism: process.env.EMEND_BENCH !== "1",';
+  const parallelism = '    fileParallelism: process.env.RECENSE_BENCH !== "1",';
   assert.equal(source.split(parallelism).length - 1, 1);
   assert.equal([...source.matchAll(/\bfileParallelism\s*:/g)].length, 1, "no parallelism override");
-  assert.match(source, /^    fileParallelism: process\.env\.EMEND_BENCH !== "1",$/m);
+  assert.match(source, /^    fileParallelism: process\.env\.RECENSE_BENCH !== "1",$/m);
   const workerComment =
     "    // Local runs leave half the cores for git, Vite and server processes tests start; CI keeps Vitest's default.";
   const maxWorkers = '    maxWorkers: process.env.CI ? undefined : "50%",';
@@ -177,9 +177,9 @@ function checkVitestConfig(source: string): void {
   );
   assert.equal([...source.matchAll(/\bmaxWorkers\b/g)].length, 1, "one root maxWorkers key only");
   const bench = source.match(
-    /^      \.\.\.\(process\.env\.EMEND_BENCH === "1"\n        \? \[\n([\s\S]*?)^          \]\n        : \[\]\),$/m,
+    /^      \.\.\.\(process\.env\.RECENSE_BENCH === "1"\n        \? \[\n([\s\S]*?)^          \]\n        : \[\]\),$/m,
   );
-  assert(bench, "the bench project must exist only in the EMEND_BENCH opt-in branch");
+  assert(bench, "the bench project must exist only in the RECENSE_BENCH opt-in branch");
   assert.match(bench[1], /^                name: "bench",$/m);
   const benchTest = bench[1].match(/^              test: \{\n([\s\S]*?)^              \},$/m);
   assert(benchTest, "expected the bench test block");
@@ -189,10 +189,10 @@ function checkVitestConfig(source: string): void {
     .replace(workerComment, "")
     .replace(maxWorkers, "")
     .replace(bench[0], "");
-  assert.doesNotMatch(remaining, /process\s*\.\s*env|EMEND_BENCH|\bCI\b/);
+  assert.doesNotMatch(remaining, /process\s*\.\s*env|RECENSE_BENCH|\bCI\b/);
   assert.deepEqual(
     source.match(/process\s*\.\s*env[^\n]*/g),
-    ['process.env.EMEND_BENCH !== "1",', 'process.env.CI ? undefined : "50%",', 'process.env.EMEND_BENCH === "1"'],
+    ['process.env.RECENSE_BENCH !== "1",', 'process.env.CI ? undefined : "50%",', 'process.env.RECENSE_BENCH === "1"'],
     "only the two bench conditions and local worker cap may read the environment",
   );
   assert.deepEqual(
@@ -201,7 +201,7 @@ function checkVitestConfig(source: string): void {
   );
   assert.match(
     remaining,
-    /^      \.\.\.\["packages\/contract", "packages\/core", "apps\/emend"\]\.map\(\(root\) => \(\{$/m,
+    /^      \.\.\.\["packages\/contract", "packages\/core", "apps\/recense"\]\.map\(\(root\) => \(\{$/m,
   );
   const projects = [...remaining.matchAll(/^        test: \{\n([\s\S]*?)^        \},$/gm)];
   assert.equal(projects.length, 2, "one mapped Node project definition and one web project definition");
@@ -224,12 +224,12 @@ function checkVitestConfig(source: string): void {
     [
       "      // Only pnpm bench opts in; ordinary and sharded runs never discover this project.",
       bench[0],
-      '      ...["packages/contract", "packages/core", "apps/emend"].map((root) => ({',
+      '      ...["packages/contract", "packages/core", "apps/recense"].map((root) => ({',
       projects[0][0],
       "      })),",
       "      {",
       '        oxc: { jsx: { runtime: "automatic" } },',
-      '        define: { __EMEND_VERSION__: JSON.stringify("0.0.0-test") },',
+      '        define: { __RECENSE_VERSION__: JSON.stringify("0.0.0-test") },',
       projects[1][0],
       "      },",
       "",
@@ -238,7 +238,7 @@ function checkVitestConfig(source: string): void {
   );
 }
 
-test("Vitest only opts into benches through EMEND_BENCH and excludes them from every ordinary project", () => {
+test("Vitest only opts into benches through RECENSE_BENCH and excludes them from every ordinary project", () => {
   checkVitestConfig(readFileSync(new URL("../vitest.config.ts", import.meta.url), "utf8"));
 });
 
@@ -322,7 +322,7 @@ test("local Vitest runs use half the cores as workers and CI keeps Vitest's defa
     assert.equal(actual.root, expected);
     assert.deepEqual(
       actual.projects,
-      ["packages/contract", "packages/core", "apps/emend", "apps/web"].map((name) => [name, expected]),
+      ["packages/contract", "packages/core", "apps/recense", "apps/web"].map((name) => [name, expected]),
     );
   }
 });

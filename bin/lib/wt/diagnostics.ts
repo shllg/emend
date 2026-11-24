@@ -37,9 +37,9 @@ function maskObjectIds(text: string): string {
 
 /** Complete repository refs cannot fuse with the next diagnostic line into a token. */
 function maskBranches(text: string): string {
-  // A lower-case secret inside an emend-<n>-<slug> branch prints, within the accidental-leak scope.
+  // A lower-case secret inside a recense-<n>-<slug> branch prints, within the accidental-leak scope.
   return text.replace(/[A-Za-z0-9+/=_-]+/g, (value) =>
-    /^(?:(?:refs\/heads|refs\/remotes\/origin|origin)\/)?emend-(?:task-)?[0-9]+-[a-z0-9-]+$/.test(value)
+    /^(?:(?:refs\/heads|refs\/remotes\/origin|origin)\/)?recense-(?:task-)?[0-9]+-[a-z0-9-]+$/.test(value)
       ? " ".repeat(value.length)
       : value,
   );

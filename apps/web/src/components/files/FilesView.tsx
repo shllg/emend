@@ -1,4 +1,4 @@
-import { type FileView, OTHER_TOPIC, type RevisionView } from "@emend/contract";
+import { type FileView, OTHER_TOPIC, type RevisionView } from "@recense/contract";
 import { useMemo, useRef } from "react";
 import { diffGroups, pathOrder } from "../../lib/diff-groups.ts";
 import { lineTotals } from "../../lib/diff-totals.ts";

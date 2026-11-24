@@ -1,4 +1,4 @@
-import { LIMITS, normalizeGlossaryForm, WriteupInput } from "@emend/contract";
+import { LIMITS, normalizeGlossaryForm, WriteupInput } from "@recense/contract";
 import { expect, test } from "vitest";
 import { renderCommentHtml, renderDoc, renderMarkdownWithBudget, renderMetadataBlocks } from "./markdown.ts";
 import { sanitizeSchema } from "./sanitize.ts";
@@ -25,7 +25,7 @@ async function html(
   );
   return blocks.map((block) => block.html).join("");
 }
-const mark = (text: string, index = 0) => `<span class="emend-term" data-emend-term="${index}">${text}</span>`;
+const mark = (text: string, index = 0) => `<span class="recense-term" data-recense-term="${index}">${text}</span>`;
 
 test.each([
   ["budgeting _budget budget2 ébudget budgeté budget\u0301 BUDGET budget", "BUDGET"],
@@ -34,7 +34,7 @@ test.each([
 ])("marks whole words and simple plurals once: %s", async (source, match) => {
   const rendered = await html(source, [{ term: "budget" }]);
   expect(rendered).toContain(mark(match));
-  expect(rendered.match(/data-emend-term=/g)).toHaveLength(1);
+  expect(rendered.match(/data-recense-term=/g)).toHaveLength(1);
 });
 
 test.each([
@@ -81,7 +81,7 @@ test.each(["[x](https://example.com)budget budget", "budget[x](https://example.c
   async (source) => {
     const rendered = await html(source, [{ term: "budget" }]);
     expect(rendered).toContain(` ${mark("budget")}</p>`);
-    expect(rendered.match(/data-emend-term=/g)).toHaveLength(1);
+    expect(rendered.match(/data-recense-term=/g)).toHaveLength(1);
   },
 );
 
@@ -196,7 +196,7 @@ test("inline-edge fallback charges the weight once for all forms tried at that p
 test("the longest form wins and matches never cross text nodes", async () => {
   const rendered = await html("retry budget budget retry budget", [{ term: "budget" }, { term: "retry budget" }]);
   expect(rendered).toContain(`${mark("retry budget", 1)} ${mark("budget")} retry budget`);
-  expect(await html("retry **budget**", [{ term: "retry budget" }])).not.toContain("emend-term");
+  expect(await html("retry **budget**", [{ term: "retry budget" }])).not.toContain("recense-term");
 });
 
 test("skips headings, code, links, generated issue links, media and diagrams", async () => {
@@ -215,23 +215,23 @@ test("skips headings, code, links, generated issue links, media and diagrams", a
     [{ term: "Budget" }, { term: "123" }],
   );
   expect(rendered).toContain(`${mark("Budget")} ${mark("123", 1)}`);
-  expect(rendered.match(/data-emend-term=/g)).toHaveLength(2);
-  expect(rendered).toContain('class="emend-media-caption">Budget');
+  expect(rendered.match(/data-recense-term=/g)).toHaveLength(2);
+  expect(rendered).toContain('class="recense-media-caption">Budget');
 });
 
 test("a callout marks the first visible glossary mention instead of its hidden marker", async () => {
   const source = "> [!NOTE]\n> A note about parcels.";
   const rendered = await html(source, [{ term: "note" }]);
-  expect(rendered).toContain('<span class="emend-callout-marker">[!NOTE]</span>');
+  expect(rendered).toContain('<span class="recense-callout-marker">[!NOTE]</span>');
   expect(rendered).toContain(`A ${mark("note")} about parcels.`);
-  expect(rendered.match(/data-emend-term=/g)).toHaveLength(1);
+  expect(rendered.match(/data-recense-term=/g)).toHaveLength(1);
   expect(rendered.replace(mark("note"), "note")).toBe(await html(source, []));
 });
 
 test("docs, comments and metadata never gain marks", async () => {
-  expect(JSON.stringify(await renderDoc("Budget", "guide.md"))).not.toContain("emend-term");
-  expect(await renderCommentHtml("Budget")).not.toContain("emend-term");
-  expect(JSON.stringify(await renderMetadataBlocks("Budget"))).not.toContain("emend-term");
+  expect(JSON.stringify(await renderDoc("Budget", "guide.md"))).not.toContain("recense-term");
+  expect(await renderCommentHtml("Budget")).not.toContain("recense-term");
+  expect(JSON.stringify(await renderMetadataBlocks("Budget"))).not.toContain("recense-term");
 });
 
 test("a shared work budget stops at the first oversized node and preserves later sections byte for byte", async () => {

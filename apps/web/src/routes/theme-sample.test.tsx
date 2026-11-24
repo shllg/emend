@@ -1,4 +1,4 @@
-import { type SampleView, THEME_TOKENS, type ThemeList } from "@emend/contract";
+import { type SampleView, THEME_TOKENS, type ThemeList } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -291,12 +291,12 @@ test("the open sample and its diagram frames update after the custom theme chang
   const post = vi.fn();
   Object.defineProperty(html, "contentWindow", { value: { postMessage: post } });
   act(() => {
-    window.dispatchEvent(new MessageEvent("message", { source: html.contentWindow, data: { type: "emend:ready" } }));
+    window.dispatchEvent(new MessageEvent("message", { source: html.contentWindow, data: { type: "recense:ready" } }));
   });
   await waitFor(() =>
     expect(post).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "emend:theme",
+        type: "recense:theme",
         scales: { "n-950": "#112233" },
       }),
       "*",
@@ -311,7 +311,7 @@ test("the open sample and its diagram frames update after the custom theme chang
   await waitFor(() =>
     expect(post).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "emend:theme",
+        type: "recense:theme",
         scales: { "n-950": "#223344" },
       }),
       "*",
@@ -345,11 +345,11 @@ test.each([390, 834, 1440])("renders real content and stays read-only at %ipx", 
   if (!frame) throw new Error("Missing HTML document frame");
   Object.defineProperty(frame, "contentWindow", { value: { postMessage: vi.fn() } });
   act(() => {
-    window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "emend:ready" } }));
+    window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "recense:ready" } }));
     window.dispatchEvent(
       new MessageEvent("message", {
         source: frame.contentWindow,
-        data: { type: "emend:anchor", quote: "parcel", prefix: "", suffix: "" },
+        data: { type: "recense:anchor", quote: "parcel", prefix: "", suffix: "" },
       }),
     );
   });
@@ -375,7 +375,7 @@ test.each([390, 834, 1440])("renders real content and stays read-only at %ipx", 
   expect(Object.keys(localStorage).some((key) => key.includes("theme-sample"))).toBe(false);
 });
 
-test("every theme token is carried by a rendered emend element", async () => {
+test("every theme token is carried by a rendered recense element", async () => {
   await setup();
   await waitFor(() =>
     expect(
@@ -427,7 +427,7 @@ ${context}`,
   expect(used.has("diff-del-word")).toBe(true);
 });
 
-test.each(TOKENS_NO_ELEMENT_USES)("%s is a theme token no emend element uses", (token) => {
+test.each(TOKENS_NO_ELEMENT_USES)("%s is a theme token no recense element uses", (token) => {
   expect(THEME_TOKENS).toContain(token);
   expect(
     findWebTokenReferences(token),

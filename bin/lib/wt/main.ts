@@ -41,9 +41,9 @@ const HELP = `bin/wt: worktrees and the pull request lifecycle
 
 Local:
   setup [<branch>] [--from <ref>] [--issue <n>]
-                                               create a worktree with a port and an EMEND_HOME;
+                                               create a worktree with a port and an RECENSE_HOME;
                                                    copies the gitignored files .worktreeinclude lists
-  approval [--head <sha>]                          emend's approval on this worktree's branch
+  approval [--head <sha>]                          recense's approval on this worktree's branch
   approval --branch <name> --head <sha>            check a branch and head from the main checkout
   list [--json]  (alias: status)                   one row per worktree
                                                    JSON pr: {number,state}, "?" (lookup skipped), or null (no PR)
@@ -83,7 +83,7 @@ History:
   land --match-head <sha> [--approved-head <sha>] (--subject <text> | --subject-file <path>)
        (--body <text> | --body-file <path>)
 
-pr merge, land and approval ask emend for the approval: emend on PATH, or the absolute path in EMEND_BIN.
+pr merge, land and approval ask recense for the approval: recense on PATH, or the absolute path in RECENSE_BIN.
 
 No arguments: an action menu on a terminal with fzf, otherwise "list".
 Exit codes: 0 done, 1 failed or unconfirmed, 2 invalid input, 3 already exists,

@@ -1,4 +1,4 @@
-import { LIMITS } from "@emend/contract";
+import { LIMITS } from "@recense/contract";
 import { createContext, useCallback, useContext, useLayoutEffect } from "react";
 import { refreshCommentCards, trackCommentCard } from "../../lib/comment-highlights.ts";
 import type { DiffPostRender } from "./FileDiff.tsx";

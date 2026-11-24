@@ -1,4 +1,4 @@
-import { Outcome, type RevisionView, SampleView, type ThreadState, type ThreadView } from "@emend/contract";
+import { Outcome, type RevisionView, SampleView, type ThreadState, type ThreadView } from "@recense/contract";
 import { DIFF_COUNT_TIMEOUT_MS, diffLineCounts } from "../diff-counts.ts";
 import { htmlHeadingsFromTree, markdownHeadings } from "../doc-headings.ts";
 import { inferDocTitle, markdownTitle } from "../doc-title.ts";

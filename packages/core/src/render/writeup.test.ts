@@ -1,4 +1,4 @@
-import { BlockId, type WriteupInput } from "@emend/contract";
+import { BlockId, type WriteupInput } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { expect, test, vi } from "vitest";
 import { blockText, visitElements } from "./blocks.ts";
@@ -260,7 +260,7 @@ test("list glossaries emit item blocks and plain text terms, without marking glo
   expect(blocks).toHaveLength(2);
   expect(blocks.every((block) => block.kind === "item")).toBe(true);
   expect(blocks[0]?.html).toContain("<strong>Budget:</strong> The <strong>attempts</strong> allowed.");
-  expect(blocks.map((block) => block.html).join("")).not.toContain("emend-term");
+  expect(blocks.map((block) => block.html).join("")).not.toContain("recense-term");
   expect(rendered.terms).toEqual([
     { term: "Budget", definition: "The attempts allowed.", blockId: blocks[0]?.id },
     { term: "Retry", definition: "Try again. Keep the budget.", blockId: blocks[1]?.id },
@@ -292,7 +292,7 @@ test("list glossary marks reset in every section without changing block text or 
       section.blocks
         .map((block) => block.html)
         .join("")
-        .match(/data-emend-term="0"/g),
+        .match(/data-recense-term="0"/g),
     ).toHaveLength(1);
   }
 });
@@ -325,10 +325,10 @@ test.each([false, true])(
       const marks: { index: number; text: string }[] = [];
       for (const block of rendered.sections[0]?.blocks ?? []) {
         visitElements(fromHtml(block.html, { fragment: true }), (element) => {
-          if (element.properties.dataEmendTerm === undefined) return;
+          if (element.properties.dataRecenseTerm === undefined) return;
           const child = element.children[0];
           marks.push({
-            index: Number(element.properties.dataEmendTerm),
+            index: Number(element.properties.dataRecenseTerm),
             text: child?.type === "text" ? child.value : "",
           });
         });
@@ -405,7 +405,7 @@ test("Markdown glossary output is identical to independently rendered sections",
       })),
     ),
   });
-  expect(JSON.stringify(rendered)).not.toContain("emend-term");
+  expect(JSON.stringify(rendered)).not.toContain("recense-term");
   expect(rendered).not.toHaveProperty("terms");
   const empty = await renderWriteup({ ...source, glossary: [] }, []);
   expect(empty.sections.at(-1)?.blocks).toEqual([]);
@@ -444,7 +444,7 @@ test("hostile glossary forms stay text and definitions use sanitized blocks", as
     definition:
       '<script>bad()</script>\n\n<img src=x onerror="bad()">\n\n[Unsafe](javascript:bad())\n\n<div class="raw" onclick="bad()">Raw HTML</div>\n\n<svg onload="bad()"></svg>\n\n```mermaid\ngraph TD; A-->B; click A callback\n```',
   }));
-  const overview = `${glossary.map((entry) => entry.aliases[0]?.replace(/[!-/:-@[-`{-~]/g, "\\$&")).join(" ")}\n\n<span class="emend-term" data-emend-term="0">x</span>`;
+  const overview = `${glossary.map((entry) => entry.aliases[0]?.replace(/[!-/:-@[-`{-~]/g, "\\$&")).join(" ")}\n\n<span class="recense-term" data-recense-term="0">x</span>`;
   const rendered = await renderWriteup({ overview, tldr: "", decisions: "", topics: {}, glossary }, []);
   const blocks = rendered.sections.find((section) => section.key === "glossary")?.blocks ?? [];
   const html = blocks.map((block) => block.html).join("");
@@ -459,22 +459,22 @@ test("hostile glossary forms stay text and definitions use sanitized blocks", as
     });
   };
   assertSanitized(html);
-  expect(html).not.toContain("data-emend-term");
+  expect(html).not.toContain("data-recense-term");
   expect(html).toContain("user-content-raw");
   expect(rendered.terms?.map((entry) => entry.term)).toEqual(glossary.map((entry) => entry.term));
   expect(rendered.terms?.map((entry) => entry.definition)).toEqual(glossary.map(() => "Unsafe Raw HTML"));
   expect(blocks.filter((block) => block.kind === "diagram")).toHaveLength(4);
   const prose = rendered.sections[0]?.blocks.map((block) => block.html).join("") ?? "";
-  expect(prose).toContain('<span class="user-content-emend-term">x</span>');
-  expect(prose.match(/data-emend-term=/g)).toHaveLength(4);
+  expect(prose).toContain('<span class="user-content-recense-term">x</span>');
+  expect(prose.match(/data-recense-term=/g)).toHaveLength(4);
   for (const section of rendered.sections) {
     if (section.key === "glossary") continue;
     for (const block of section.blocks) {
-      if (block.html.includes("data-emend-term=")) assertSanitized(block.html);
+      if (block.html.includes("data-recense-term=")) assertSanitized(block.html);
     }
   }
   expect(prose).toContain(
-    '<span class="emend-term" data-emend-term="0">Alias 0 &#x3C;script>bad()&#x3C;/script></span>',
+    '<span class="recense-term" data-recense-term="0">Alias 0 &#x3C;script>bad()&#x3C;/script></span>',
   );
   expect(prose).not.toContain("<script");
 });
@@ -586,7 +586,7 @@ test("needsYou repeats get unique ids and glossary marks through the Markdown pi
   expect(blocks).toHaveLength(3);
   expect(blocks.map((block) => block.id)).toEqual([blocks[0]?.id, `${blocks[0]?.id}-2`, `${blocks[0]?.id}-3`]);
   expect(rendered.needsYou?.map((item) => item.blockIds)).toEqual(blocks.map((block) => [block.id]));
-  for (const block of blocks) expect(block.html).toContain('data-emend-term="0"');
+  for (const block of blocks) expect(block.html).toContain('data-recense-term="0"');
 });
 
 test.each([
@@ -665,7 +665,7 @@ test("newInRevision repeats get unique ids and glossary marks through the Markdo
   expect(blocks).toHaveLength(3);
   expect(blocks.map((block) => block.id)).toEqual([blocks[0]?.id, `${blocks[0]?.id}-2`, `${blocks[0]?.id}-3`]);
   expect(rendered.newInRevision?.map((item) => item.blockIds)).toEqual(blocks.map((block) => [block.id]));
-  for (const block of blocks) expect(block.html).toContain('data-emend-term="0"');
+  for (const block of blocks) expect(block.html).toContain('data-recense-term="0"');
 });
 
 test.each([
@@ -990,7 +990,7 @@ test("chart source stays out of glossary hints, term marks and issue links", asy
   ]);
   expect(rendered.terms?.[0]?.definition).toBe("Time allowed.");
   const prose = rendered.sections.find(({ key }) => key === "overview")?.blocks[1]?.html;
-  expect(prose).toContain("emend-term");
+  expect(prose).toContain("recense-term");
   expect(prose).toContain("issues/123");
 });
 

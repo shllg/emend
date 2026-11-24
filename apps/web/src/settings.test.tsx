@@ -6,7 +6,7 @@ import {
   type SettingsView,
   SHORTCUT_DEFAULTS,
   type ThemeList,
-} from "@emend/contract";
+} from "@recense/contract";
 import { type InfiniteData, QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -167,13 +167,13 @@ test("Appearance shows the theme skill prompt and copies its exact text", async 
   vi.spyOn(navigator, "clipboard", "get").mockReturnValue({ writeText } as unknown as Clipboard);
   setup();
   const appearance = within(await screen.findByRole("region", { name: "Appearance" }));
-  const prompt = appearance.getByText(/Make me a custom theme for emend/);
-  expect(prompt.textContent).toBe(themeSkillPrompt(__EMEND_VERSION__));
+  const prompt = appearance.getByText(/Make me a custom theme for recense/);
+  expect(prompt.textContent).toBe(themeSkillPrompt(__RECENSE_VERSION__));
   expect(prompt.textContent).toContain(
-    "https://raw.githubusercontent.com/shllg/emend/refs/heads/main/docs/skills/emend-theme/SKILL.md",
+    "https://raw.githubusercontent.com/shllg/recense/refs/heads/main/docs/skills/recense-theme/SKILL.md",
   );
   fireEvent.click(appearance.getByRole("button", { name: "Copy" }));
-  expect(writeText).toHaveBeenCalledExactlyOnceWith(themeSkillPrompt(__EMEND_VERSION__));
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(themeSkillPrompt(__RECENSE_VERSION__));
   expect(await appearance.findByRole("button", { name: "Copied" })).toBeTruthy();
   expect(appearance.getByText("Text copied").closest('[role="status"]')).toBeTruthy();
 });
@@ -185,7 +185,7 @@ test("a failed prompt copy selects the text and announces how to copy it", async
   const appearance = within(await screen.findByRole("region", { name: "Appearance" }));
   fireEvent.click(appearance.getByRole("button", { name: "Copy" }));
   expect((await appearance.findByText("Select and copy the text")).closest('[role="status"]')).toBeTruthy();
-  expect(window.getSelection()?.toString()).toBe(themeSkillPrompt(__EMEND_VERSION__));
+  expect(window.getSelection()?.toString()).toBe(themeSkillPrompt(__RECENSE_VERSION__));
 });
 
 test("Appearance is first, defaults to System and applies every choice immediately", async () => {
@@ -719,7 +719,9 @@ test("Appearance shows the empty hint, folder error, loading and retry states", 
   const { client } = setup();
   expect(await screen.findByText("Loading themes…")).toBeTruthy();
   const expectPrompt = () => {
-    expect(screen.getByText(/Make me a custom theme for emend/).textContent).toBe(themeSkillPrompt(__EMEND_VERSION__));
+    expect(screen.getByText(/Make me a custom theme for recense/).textContent).toBe(
+      themeSkillPrompt(__RECENSE_VERSION__),
+    );
     expect(
       within(screen.getByRole("region", { name: "Appearance" })).getByRole("button", { name: "Copy" }),
     ).toBeTruthy();
@@ -732,7 +734,7 @@ test("Appearance shows the empty hint, folder error, loading and retry states", 
   expectPrompt();
   themeResponse = { themes: [], folderError: false };
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  expect(await screen.findByText("emend theme copy dark mine")).toBeTruthy();
+  expect(await screen.findByText("recense theme copy dark mine")).toBeTruthy();
   expectPrompt();
   themeResponse = { themes: [], folderError: true };
   await act(async () => {
@@ -740,7 +742,7 @@ test("Appearance shows the empty hint, folder error, loading and retry states", 
   });
   expect(await screen.findByText("The themes folder could not be read.")).toBeTruthy();
   expectPrompt();
-  expect(screen.queryByText("emend theme copy dark mine")).toBeNull();
+  expect(screen.queryByText("recense theme copy dark mine")).toBeNull();
 });
 
 function DownloadTheme() {

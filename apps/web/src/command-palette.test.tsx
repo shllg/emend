@@ -1,4 +1,10 @@
-import { type InboxItem, KeysSetting, type RevisionView, type SettingsView, SHORTCUT_DEFAULTS } from "@emend/contract";
+import {
+  type InboxItem,
+  KeysSetting,
+  type RevisionView,
+  type SettingsView,
+  SHORTCUT_DEFAULTS,
+} from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -944,7 +950,7 @@ test.each([
     ...(inbox[1] as InboxItem),
     title: "Performance harness results",
     project: "Toolkit",
-    branch: "emend-175-a-perf-harness",
+    branch: "recense-175-a-perf-harness",
     newestRevision: 3,
     kind,
   };
@@ -959,7 +965,7 @@ test.each([
   const group = await screen.findByRole("group", { name: "Reviews and pubs" });
   const row = within(group).getByRole("option", { name: /^Performance harness results/ });
   expect(row.textContent).toBe(
-    `Performance harness results${kind === "review" ? "Review" : "Pub"} · Workshop · Toolkit · emend-175-a-perf-harness`,
+    `Performance harness results${kind === "review" ? "Review" : "Pub"} · Workshop · Toolkit · recense-175-a-perf-harness`,
   );
   expect(within(row).getByText("Performance harness results").getAttribute("dir")).toBe("auto");
   expect(selected()).toBe(row);
@@ -1029,14 +1035,14 @@ test("command groups win score ties and arrows and pointer move between commands
 });
 
 test("an issue number selects the branch carrying it before decoys", async () => {
-  inbox[0] = { ...(inbox[0] as InboxItem), branch: "emend-157-foo" };
-  inbox[1] = { ...(inbox[1] as InboxItem), branch: "emend-175-a-perf-harness" };
+  inbox[0] = { ...(inbox[0] as InboxItem), branch: "recense-157-foo" };
+  inbox[1] = { ...(inbox[1] as InboxItem), branch: "recense-175-a-perf-harness" };
   inbox[2] = { ...(inbox[2] as InboxItem), title: "1 thing, 7 tasks, 5 results" };
   inbox.unshift({
     ...(inbox[0] as InboxItem),
     id: "44444444-4444-4444-8444-444444444444",
     title: "Longer issue number",
-    branch: "emend-1750-other",
+    branch: "recense-1750-other",
   });
   mount();
   await ready();
@@ -1068,7 +1074,7 @@ test("Done follows active matches and its higher score determines the item group
 });
 
 test("Done stays outside the truncating metadata when the branch is long", async () => {
-  const branch = `emend-175-${"long-branch-name-".repeat(100)}`;
+  const branch = `recense-175-${"long-branch-name-".repeat(100)}`;
   inbox[1] = { ...(inbox[1] as InboxItem), branch, list: "done" };
   mount();
   await ready();
@@ -1092,7 +1098,7 @@ test.each(["review", "publish"] as const)("isolates remote metadata from %s and 
   const override = String.fromCharCode(0x202e);
   const machine = `${popIsolate}${override}Workshop`;
   const project = `${popIsolate}${override}Toolkit`;
-  const branch = `${popIsolate}${override}emend-175-harness`;
+  const branch = `${popIsolate}${override}recense-175-harness`;
   inbox[1] = {
     ...(inbox[1] as InboxItem),
     kind,
@@ -1108,11 +1114,11 @@ test.each(["review", "publish"] as const)("isolates remote metadata from %s and 
   const row = option("Review 2");
   expect(row.textContent).not.toContain(popIsolate);
   expect(row.textContent).not.toContain(override);
-  for (const value of ["Workshop", "Toolkit", "emend-175-harness"]) {
+  for (const value of ["Workshop", "Toolkit", "recense-175-harness"]) {
     const isolated = within(row).getByText(value).closest("bdi");
     expect(isolated?.textContent).toBe(value);
   }
-  expect(within(row).getByText("emend-175-harness").classList.contains("font-mono")).toBe(true);
+  expect(within(row).getByText("recense-175-harness").classList.contains("font-mono")).toBe(true);
   const label = kind === "review" ? "Review" : "Pub";
   expect(
     within(row)

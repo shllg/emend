@@ -37,8 +37,14 @@ export const DownloadDocIds = z
 
 export const MIN_CLIENT_VERSION = "0.1.0";
 
-export const SERVER_CHALLENGE_HEADER = "X-Emend-Challenge";
-export const SERVER_PROOF_HEADER = "X-Emend-Proof";
+export const SERVER_CHALLENGE_HEADER = "X-Recense-Challenge";
+export const SERVER_PROOF_HEADER = "X-Recense-Proof";
+export const CLIENT_HEADER = "X-Recense-Client";
+// Before the rename the headers carried the old product name. Both names travel together, so a new CLI
+// reaches an old server and an old CLI reaches a new one. The old names go away with the old `emend` command.
+export const LEGACY_SERVER_CHALLENGE_HEADER = "X-Emend-Challenge";
+export const LEGACY_SERVER_PROOF_HEADER = "X-Emend-Proof";
+export const LEGACY_CLIENT_HEADER = "X-Emend-Client";
 // Exactly 32 bytes, including the canonical zero padding bits in the final character.
 export const ServerChallenge = z
   .string()

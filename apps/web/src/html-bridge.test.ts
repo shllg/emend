@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
-import { ThemeColor } from "@emend/contract";
+import { ThemeColor } from "@recense/contract";
 import { type Element, Window } from "happy-dom";
 import { expect, test, vi } from "vitest";
 import { docText, placeHtmlSpan } from "../../../packages/core/src/place/html.ts";
@@ -29,7 +29,7 @@ function bridge(html: string, customHighlights = true, prepare?: (window: Window
   const post = vi.fn();
   const parent = { postMessage: post };
   Object.defineProperty(window, "parent", { value: parent });
-  const source = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../recense/src/server/content/bridge.ts", import.meta.url), "utf8");
   const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
   const highlights = new Map();
   Object.defineProperty(window, "HighlightRegistry", { value: Map });
@@ -61,10 +61,10 @@ function bridge(html: string, customHighlights = true, prepare?: (window: Window
     selection?.removeAllRanges();
     selection?.addRange(range);
     window.document.dispatchEvent(new window.Event("mouseup"));
-    return post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0];
+    return post.mock.calls.findLast(([data]) => data.type === "recense:anchor")?.[0];
   };
   message({
-    type: "emend:docs",
+    type: "recense:docs",
     paths: ["docs/seed.html", "docs/other.html", "docs/a #é.html", "docs/plan.md", "docs/plan.markdown"],
   });
   return { window, post, highlights, message, select, replaceSync };
@@ -78,10 +78,10 @@ test.each(corpus)("bridge text equals server docText for corpus $name", async (e
       const anchor = b.select(range);
       const expected = docText(html);
       if (expected) {
-        expect(anchor).toEqual({ type: "emend:anchor", quote: expected, prefix: "", suffix: "" });
+        expect(anchor).toEqual({ type: "recense:anchor", quote: expected, prefix: "", suffix: "" });
         expect(placeHtmlSpan(expected, { kind: "html-span", path: "doc.html", ...anchor }).status).toBe("placed");
       } else expect(anchor).toBeUndefined();
-      expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+      expect(b.post).toHaveBeenCalledWith({ type: "recense:ready" }, "*");
     } finally {
       await b.window.happyDOM.close();
     }
@@ -105,14 +105,14 @@ test("theme messages replace one layered sheet, set only the root mode, and neve
   b.post.mockClear();
   try {
     b.message({
-      type: "emend:theme",
+      type: "recense:theme",
       mode: "dark",
       scales: { "n-950": "#112233" },
       tokens: { "fg-1": "#eeeeee", "bg-app": "n-950" },
     });
     expect(root.getAttribute("data-theme")).toBe("dark");
     expect(b.replaceSync).toHaveBeenCalledExactlyOnceWith(
-      "@layer emend{:root:root:root{--n-950:#112233;--fg-1:#eeeeee;--bg-app:var(--n-950);}}",
+      "@layer recense{:root:root:root{--n-950:#112233;--fg-1:#eeeeee;--bg-app:var(--n-950);}}",
     );
     const sheets = b.window.document.adoptedStyleSheets;
     expect(sheets).toHaveLength(1);
@@ -125,16 +125,16 @@ test("theme messages replace one layered sheet, set only the root mode, and neve
       set: clobbered,
     });
     b.message({
-      type: "emend:theme",
+      type: "recense:theme",
       mode: "light",
       scales: { "n-25": "oklch(0.98 0.01 260 / 0.5)" },
       tokens: { "fg-1": "#112233ff" },
     });
     expect(root.getAttribute("data-theme")).toBe("light");
     expect(b.replaceSync).toHaveBeenLastCalledWith(
-      "@layer emend{:root:root:root{--n-25:oklch(0.98 0.01 260 / 0.5);--fg-1:#112233ff;}}",
+      "@layer recense{:root:root:root{--n-25:oklch(0.98 0.01 260 / 0.5);--fg-1:#112233ff;}}",
     );
-    b.message({ type: "emend:theme", mode: "dark", scales: {}, tokens: {} });
+    b.message({ type: "recense:theme", mode: "dark", scales: {}, tokens: {} });
     expect(b.replaceSync).toHaveBeenLastCalledWith("");
     expect(b.replaceSync.mock.instances).toEqual([sheet, sheet, sheet]);
     expect(adopt).toHaveBeenCalledExactlyOnceWith([sheet]);
@@ -168,10 +168,10 @@ test.each([
   expect(ThemeColor.parse(color)).toBe(color);
   const b = bridge("<p>Seed</p>");
   try {
-    b.message({ type: "emend:theme", mode: "dark", scales: { "n-950": color }, tokens: { "bg-app": color } });
+    b.message({ type: "recense:theme", mode: "dark", scales: { "n-950": color }, tokens: { "bg-app": color } });
     expect(b.window.document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(b.replaceSync).toHaveBeenCalledExactlyOnceWith(
-      `@layer emend{:root:root:root{--n-950:${color};--bg-app:${color};}}`,
+      `@layer recense{:root:root:root{--n-950:${color};--bg-app:${color};}}`,
     );
   } finally {
     vi.restoreAllMocks();
@@ -191,7 +191,12 @@ test.each(
   expect(ThemeColor.safeParse(color).success).toBe(false);
   const b = bridge("<p>Seed</p>");
   try {
-    const valid = { type: "emend:theme", mode: "light", scales: { "n-950": "#112233" }, tokens: { "bg-app": "n-950" } };
+    const valid = {
+      type: "recense:theme",
+      mode: "light",
+      scales: { "n-950": "#112233" },
+      tokens: { "bg-app": "n-950" },
+    };
     b.message(valid);
     b.replaceSync.mockClear();
     for (const field of ["scales", "tokens"]) {
@@ -207,7 +212,7 @@ test.each(
 
 test("theme messages reject invalid entries and foreign sources without changing any state", async () => {
   const b = bridge("<h2>Part</h2>");
-  const valid = { type: "emend:theme", mode: "dark", scales: { "n-950": "#112233" }, tokens: { "bg-app": "n-950" } };
+  const valid = { type: "recense:theme", mode: "dark", scales: { "n-950": "#112233" }, tokens: { "bg-app": "n-950" } };
   b.message({ ...valid, mode: "light" });
   const root = b.window.document.documentElement;
   const sheets = [...b.window.document.adoptedStyleSheets];
@@ -256,10 +261,10 @@ test("theme maps accept the entry and key length boundaries", async () => {
   const b = bridge("<p>Seed</p>");
   try {
     const scales = Object.fromEntries(Array.from({ length: 256 }, (_, i) => [`n-${i}`, "#112233"]));
-    b.message({ type: "emend:theme", mode: "dark", scales, tokens: { ["a".repeat(40)]: "oklch(1 0 0)" } });
+    b.message({ type: "recense:theme", mode: "dark", scales, tokens: { ["a".repeat(40)]: "oklch(1 0 0)" } });
     expect(b.window.document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(b.replaceSync).toHaveBeenCalledExactlyOnceWith(
-      `@layer emend{:root:root:root{${Object.keys(scales)
+      `@layer recense{:root:root:root{${Object.keys(scales)
         .map((name) => `--${name}:#112233;`)
         .join("")}--${"a".repeat(40)}:oklch(1 0 0);}}`,
     );
@@ -274,7 +279,7 @@ test("theme mode applies without constructed stylesheets", async () => {
     Object.defineProperty(window, "CSSStyleSheet", { value: undefined });
   });
   try {
-    b.message({ type: "emend:theme", mode: "dark", scales: { "n-950": "#112233" }, tokens: {} });
+    b.message({ type: "recense:theme", mode: "dark", scales: { "n-950": "#112233" }, tokens: {} });
     expect(b.window.document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(b.window.document.adoptedStyleSheets).toEqual([]);
     expect(b.replaceSync).not.toHaveBeenCalled();
@@ -298,14 +303,14 @@ test("bridge applies parent layout preferences through prototype DOM calls", asy
       configurable: true,
       value: b.window.document.createElement("form"),
     });
-    expect(root.hasAttribute("data-emend-layout")).toBe(false);
-    b.message({ type: "emend:layout", wide: true });
-    expect(attribute("data-emend-layout")).toBe("wide");
-    b.message({ type: "emend:layout", wide: false, width: "narrow", prose: 18, code: 15 });
-    expect(attribute("data-emend-layout")).toBe("narrow");
-    expect(attribute("data-emend-width")).toBe("narrow");
-    expect(attribute("data-emend-prose")).toBe("18");
-    expect(attribute("data-emend-code")).toBe("15");
+    expect(root.hasAttribute("data-recense-layout")).toBe(false);
+    b.message({ type: "recense:layout", wide: true });
+    expect(attribute("data-recense-layout")).toBe("wide");
+    b.message({ type: "recense:layout", wide: false, width: "narrow", prose: 18, code: 15 });
+    expect(attribute("data-recense-layout")).toBe("narrow");
+    expect(attribute("data-recense-width")).toBe("narrow");
+    expect(attribute("data-recense-prose")).toBe("18");
+    expect(attribute("data-recense-code")).toBe("15");
     expect(clobbered).not.toHaveBeenCalled();
   } finally {
     visible.mockRestore();
@@ -325,24 +330,24 @@ test("bridge sets each allowed preference and legacy layout leaves preferences a
         for (const prose of [15, 16, 17, 18])
           for (const code of [12, 13, 14, 15]) {
             set.mockClear();
-            b.message({ type: "emend:layout", wide, width, prose, code });
+            b.message({ type: "recense:layout", wide, width, prose, code });
             expect(set.mock.calls).toEqual([
-              ["data-emend-layout", wide ? "wide" : "narrow"],
-              ["data-emend-width", width],
-              ["data-emend-prose", String(prose)],
-              ["data-emend-code", String(code)],
+              ["data-recense-layout", wide ? "wide" : "narrow"],
+              ["data-recense-width", width],
+              ["data-recense-prose", String(prose)],
+              ["data-recense-code", String(code)],
             ]);
             expect(set.mock.instances.every((element) => element === root)).toBe(true);
-            expect(root.getAttribute("data-emend-width")).toBe(width);
-            expect(root.getAttribute("data-emend-prose")).toBe(String(prose));
-            expect(root.getAttribute("data-emend-code")).toBe(String(code));
+            expect(root.getAttribute("data-recense-width")).toBe(width);
+            expect(root.getAttribute("data-recense-prose")).toBe(String(prose));
+            expect(root.getAttribute("data-recense-code")).toBe(String(code));
           }
     set.mockClear();
-    b.message({ type: "emend:layout", wide: true });
-    expect(set.mock.calls).toEqual([["data-emend-layout", "wide"]]);
-    expect(root.getAttribute("data-emend-width")).toBe("narrow");
-    expect(root.getAttribute("data-emend-prose")).toBe("18");
-    expect(root.getAttribute("data-emend-code")).toBe("15");
+    b.message({ type: "recense:layout", wide: true });
+    expect(set.mock.calls).toEqual([["data-recense-layout", "wide"]]);
+    expect(root.getAttribute("data-recense-width")).toBe("narrow");
+    expect(root.getAttribute("data-recense-prose")).toBe("18");
+    expect(root.getAttribute("data-recense-code")).toBe("15");
   } finally {
     set.mockRestore();
     visible.mockRestore();
@@ -354,11 +359,11 @@ test("bridge ignores invalid or partial preferences and messages from anyone but
   const b = bridge("<h2>Part</h2>");
   const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(false);
   const root = b.window.document.documentElement;
-  b.message({ type: "emend:layout", wide: false, width: "narrow", prose: 15, code: 12 });
+  b.message({ type: "recense:layout", wide: false, width: "narrow", prose: 15, code: 12 });
   const before = [...root.attributes].map(({ name, value }) => [name, value]);
   const set = vi.spyOn(b.window.Element.prototype, "setAttribute");
   try {
-    const full = { type: "emend:layout", wide: true, width: "wide", prose: 17, code: 14 };
+    const full = { type: "recense:layout", wide: true, width: "wide", prose: 17, code: 14 };
     const invalid = [
       ...[undefined, null, "true", 1, {}, []].map((wide) => ({ ...full, wide })),
       ...[undefined, null, "unknown", "68ch", 0, {}, []].map((width) => ({ ...full, width })),
@@ -371,7 +376,7 @@ test("bridge ignores invalid or partial preferences and messages from anyone but
         { width: "wide", prose: 17 },
         { width: "wide", code: 14 },
         { prose: 17, code: 14 },
-      ].map((partial) => ({ type: "emend:layout", wide: true, ...partial })),
+      ].map((partial) => ({ type: "recense:layout", wide: true, ...partial })),
     ];
     for (const data of invalid) b.message(data);
     for (const source of [null, b.window, {}]) b.message(full, source);
@@ -384,7 +389,7 @@ test("bridge ignores invalid or partial preferences and messages from anyone but
   }
 });
 
-const initialLayout = { type: "emend:layout", wide: true, width: "comfortable", prose: 16, code: 13 };
+const initialLayout = { type: "recense:layout", wide: true, width: "comfortable", prose: 16, code: 13 };
 
 function layoutBridge(
   html = "<h2>First</h2><h3>Second</h3><h2>Last</h2>",
@@ -418,14 +423,14 @@ function layoutBridge(
   if (!assignedSlot)
     Object.defineProperty(b.window.Element.prototype, "assignedSlot", { configurable: true, get: () => null });
   const scale = () => {
-    if (attribute("data-emend-width") === "wide") return wideScale;
-    return attribute("data-emend-prose") === "18" ||
-      attribute("data-emend-code") === "15" ||
-      attribute("data-emend-layout") === "narrow"
+    if (attribute("data-recense-width") === "wide") return wideScale;
+    return attribute("data-recense-prose") === "18" ||
+      attribute("data-recense-code") === "15" ||
+      attribute("data-recense-layout") === "narrow"
       ? 2
       : 1;
   };
-  const diagramHeight = () => (b.window.document.querySelector("[data-emend-diagram]") ? 200 : 0);
+  const diagramHeight = () => (b.window.document.querySelector("[data-recense-diagram]") ? 200 : 0);
   const limit = () => Math.max(0, 1100 * scale() + diagramHeight() - 400);
   const offset = (element: Element) =>
     (offsets[headings.indexOf(element)] ?? 0) * scale() + diagramHeight() - (reverse ? limit() : 0);
@@ -482,7 +487,7 @@ test.each([{ prose: 18 }, { code: 15 }, { width: "wide" }, { wide: false }])(
 test.each([false, true])("layout change preserves only a pin that still holds (moved=%s)", async (moved) => {
   const b = layoutBridge();
   try {
-    b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+    b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0.25 });
     expect(b.root.scrollTop).toBe(213); // Rounded landing is 0.26; the pin holds 0.25.
     if (moved) b.root.scrollTop = 225; // The reader moved to fraction 0.5 before the next sample.
     b.scroll.mockClear();
@@ -502,7 +507,7 @@ test("layout keeps a pin clamped to zero when Wide fits and restores it on retur
     const narrow = { ...initialLayout, width: "narrow" };
     b.message(narrow);
     b.root.scrollTop = 500;
-    const held = { type: "emend:position", heading: 1, fraction: 5 / 11 };
+    const held = { type: "recense:position", heading: 1, fraction: 5 / 11 };
     b.message({ ...initialLayout, width: "wide" });
     expect(b.scroll.mock.instances).toEqual([b.headings[1]]);
     expect(b.root.scrollTop).toBe(0);
@@ -588,7 +593,7 @@ test("layout holds through prototype calls despite clobbered root and container 
     expect(b.readTop(b.container)).toBe(1100);
     expect((100 - (700 - b.readTop(b.container))) / 1100).toBeCloseTo(5 / 11);
     expect(b.readTop(b.root)).toBe(0);
-    expect(b.window.Element.prototype.getAttribute.call(b.root, "data-emend-prose")).toBe("18");
+    expect(b.window.Element.prototype.getAttribute.call(b.root, "data-recense-prose")).toBe("18");
     expect(clobbered).not.toHaveBeenCalled();
   } finally {
     for (const { element, name, descriptor } of members) {
@@ -620,9 +625,9 @@ test.each([false, true])(
     vi.useFakeTimers();
     const b = layoutBridge(nested ? nestedLayoutHtml : undefined, { nested });
     try {
-      expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
-      const held = { type: "emend:position", heading: 0, fraction: 0.25 };
-      b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+      expect(b.post).toHaveBeenCalledWith({ type: "recense:ready" }, "*");
+      const held = { type: "recense:position", heading: 0, fraction: 0.25 };
+      b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0.25 });
       expect(b.container.scrollTop).toBe(213);
       expect(vi.getTimerCount()).toBeGreaterThan(0);
       vi.runAllTimers();
@@ -639,7 +644,7 @@ test.each([false, true])(
       b.container.dispatchEvent(new b.window.Event("scroll"));
       expect(vi.getTimerCount()).toBeGreaterThan(0);
       vi.runAllTimers();
-      expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "emend:position", heading: 1, fraction: 3 / 11 }, "*");
+      expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "recense:position", heading: 1, fraction: 3 / 11 }, "*");
       if (nested) expect(b.root.scrollTop).toBe(0);
     } finally {
       b.restore();
@@ -660,7 +665,7 @@ test.each(["top", "unchanged", "hidden", "no headings", "before headings"])(
       b.message(kind === "unchanged" ? initialLayout : { ...initialLayout, prose: 18 });
       expect(b.scroll).not.toHaveBeenCalled();
       expect(b.scrollTo).not.toHaveBeenCalled();
-      expect(b.root.getAttribute("data-emend-prose")).toBe(kind === "unchanged" ? "16" : "18");
+      expect(b.root.getAttribute("data-recense-prose")).toBe(kind === "unchanged" ? "16" : "18");
     } finally {
       b.restore();
       await b.window.happyDOM.close();
@@ -673,10 +678,10 @@ test("bridge ignores non-boolean layouts and layouts from anyone but the parent"
   const visible = vi.spyOn(b.window.Element.prototype, "checkVisibility").mockReturnValue(false);
   try {
     const root = b.window.document.documentElement;
-    b.message({ type: "emend:layout", wide: false });
-    for (const wide of [undefined, null, "wide", "true", 0, 1, {}, []]) b.message({ type: "emend:layout", wide });
-    for (const source of [null, b.window, {}]) b.message({ type: "emend:layout", wide: true }, source);
-    expect(root.getAttribute("data-emend-layout")).toBe("narrow");
+    b.message({ type: "recense:layout", wide: false });
+    for (const wide of [undefined, null, "wide", "true", 0, 1, {}, []]) b.message({ type: "recense:layout", wide });
+    for (const source of [null, b.window, {}]) b.message({ type: "recense:layout", wide: true }, source);
+    expect(root.getAttribute("data-recense-layout")).toBe("narrow");
   } finally {
     visible.mockRestore();
     await b.window.happyDOM.close();
@@ -688,8 +693,8 @@ test("bridge ignores layout when the document has no root", async () => {
   try {
     const root = b.window.document.documentElement;
     b.window.document.removeChild(root);
-    expect(() => b.message({ type: "emend:layout", wide: true })).not.toThrow();
-    expect(root.hasAttribute("data-emend-layout")).toBe(false);
+    expect(() => b.message({ type: "recense:layout", wide: true })).not.toThrow();
+    expect(root.hasAttribute("data-recense-layout")).toBe(false);
   } finally {
     await b.window.happyDOM.close();
   }
@@ -712,11 +717,11 @@ test("bridge posts a touch selection from a debounced selectionchange and keeps 
     selection?.addRange(range);
     b.window.document.dispatchEvent(new b.window.Event("selectionchange"));
     b.window.document.dispatchEvent(new b.window.Event("selectionchange"));
-    expect(b.post.mock.calls.some(([data]) => data.type === "emend:anchor")).toBe(false);
+    expect(b.post.mock.calls.some(([data]) => data.type === "recense:anchor")).toBe(false);
     vi.advanceTimersByTime(199);
-    expect(b.post.mock.calls.some(([data]) => data.type === "emend:anchor")).toBe(false);
+    expect(b.post.mock.calls.some(([data]) => data.type === "recense:anchor")).toBe(false);
     vi.advanceTimersByTime(1);
-    const anchors = b.post.mock.calls.filter(([data]) => data.type === "emend:anchor");
+    const anchors = b.post.mock.calls.filter(([data]) => data.type === "recense:anchor");
     expect(anchors).toHaveLength(1);
     expect(anchors[0]?.[0]).toMatchObject({ quote: "beta", prefix: "Alpha ", suffix: ` gamma${"x".repeat(26)}` });
     const tooLong = b.window.document.createRange();
@@ -725,7 +730,7 @@ test("bridge posts a touch selection from a debounced selectionchange and keeps 
     selection?.addRange(tooLong);
     b.window.document.dispatchEvent(new b.window.Event("selectionchange"));
     vi.advanceTimersByTime(300);
-    expect(b.post.mock.calls.filter(([data]) => data.type === "emend:anchor")).toHaveLength(1);
+    expect(b.post.mock.calls.filter(([data]) => data.type === "recense:anchor")).toHaveLength(1);
   } finally {
     vi.useRealTimers();
     await b.window.happyDOM.close();
@@ -754,7 +759,7 @@ test.each([
       span.dispatchEvent(click);
       expect(captured).toEqual([true]);
       expect(click.defaultPrevented).toBe(true);
-      expect(b.post).toHaveBeenCalledWith({ type: "emend:navigate", path, fragment }, "*");
+      expect(b.post).toHaveBeenCalledWith({ type: "recense:navigate", path, fragment }, "*");
     } finally {
       await b.window.happyDOM.close();
     }
@@ -788,7 +793,7 @@ test.each([
     });
     link.dispatchEvent(new b.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0, ...options }));
     expect(captured).toEqual([false]);
-    expect(b.post.mock.calls.filter(([message]) => message.type === "emend:navigate")).toEqual([]);
+    expect(b.post.mock.calls.filter(([message]) => message.type === "recense:navigate")).toEqual([]);
   } finally {
     await b.window.happyDOM.close();
   }
@@ -805,7 +810,7 @@ test("selection normalizes across nodes, skips omitted subtrees, and supplies 32
     range.setEnd(end, 5);
     const anchor = b.select(range);
     expect(anchor).toEqual({
-      type: "emend:anchor",
+      type: "recense:anchor",
       quote: "Café seeds",
       prefix: `${"a".repeat(31)} `,
       suffix: ` ${"z".repeat(31)}`,
@@ -834,11 +839,11 @@ test("selection and highlights span coloured tokens without changing the anchor 
     range.setEnd(end, (end.textContent ?? "").indexOf("42") + 1);
     const quote = text.slice(1, text.indexOf("42") + 1);
     const anchor = b.select(range);
-    expect(anchor).toMatchObject({ type: "emend:anchor", quote });
+    expect(anchor).toMatchObject({ type: "recense:anchor", quote });
     expect(placeHtmlSpan(docText(originalHtml), { kind: "html-span", path: "doc.html", ...anchor })).toMatchObject({
       status: "placed",
     });
-    b.message({ type: "emend:highlight", anchors: [{ threadId: "one", ...anchor }] });
+    b.message({ type: "recense:highlight", anchors: [{ threadId: "one", ...anchor }] });
     expect(b.highlights.size).toBe(1);
     expect([...b.highlights.values()][0].range.toString()).toBe(quote);
   } finally {
@@ -855,7 +860,7 @@ test("highlight registry methods are called through their prototype", async () =
   b.highlights.set = shadow;
   b.highlights.delete = shadow;
   try {
-    b.message({ type: "emend:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
+    b.message({ type: "recense:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
     expect(shadow).not.toHaveBeenCalled();
     expect(b.highlights.size).toBe(1);
   } finally {
@@ -873,16 +878,19 @@ test("overlong selections post nothing and highlights require unique exact conte
     expect(b.select(range)).toBeUndefined();
     const before = b.window.document.body.textContent;
     const anchors = [{ threadId: "one", quote: "seed", prefix: "red ", suffix: " blue" }];
-    b.message({ type: "emend:highlight", anchors }, null);
+    b.message({ type: "recense:highlight", anchors }, null);
     expect(b.highlights.size).toBe(0);
-    b.message({ type: "emend:highlight", anchors });
+    b.message({ type: "recense:highlight", anchors });
     expect(b.highlights.size).toBe(1);
-    expect(b.replaceSync).toHaveBeenCalledWith(expect.stringContaining("::highlight(emend-quotes)"));
+    expect(b.replaceSync).toHaveBeenCalledWith(expect.stringContaining("::highlight(recense-quotes)"));
     expect(b.window.document.adoptedStyleSheets).toHaveLength(1);
     expect([...b.highlights.values()][0].range.toString()).toBe("seed");
-    b.message({ type: "emend:highlight", anchors: [{ threadId: "one", quote: "aa", prefix: "", suffix: "" }] });
+    b.message({ type: "recense:highlight", anchors: [{ threadId: "one", quote: "aa", prefix: "", suffix: "" }] });
     expect(b.highlights.size).toBe(0);
-    b.message({ type: "emend:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "wrong", suffix: "" }] });
+    b.message({
+      type: "recense:highlight",
+      anchors: [{ threadId: "one", quote: "seed", prefix: "wrong", suffix: "" }],
+    });
     expect(b.highlights.size).toBe(0);
     expect(b.window.document.body.textContent).toBe(before);
   } finally {
@@ -897,11 +905,11 @@ test("without Custom Highlights, no DOM fallback is used and matching quotes sti
     if (!paragraph) throw new Error("Missing paragraph");
     const scroll = vi.spyOn(b.window.Element.prototype, "scrollIntoView").mockImplementation(() => {});
     const children = [...b.window.document.body.childNodes];
-    b.message({ type: "emend:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
+    b.message({ type: "recense:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
     expect(b.highlights.size).toBe(0);
-    b.message({ type: "emend:scroll", threadId: "one" }, null);
+    b.message({ type: "recense:scroll", threadId: "one" }, null);
     expect(scroll).not.toHaveBeenCalled();
-    b.message({ type: "emend:scroll", threadId: "one" });
+    b.message({ type: "recense:scroll", threadId: "one" });
     expect(scroll).toHaveBeenCalledWith({ block: "center" });
     expect([...b.window.document.body.childNodes]).toEqual(children);
   } finally {
@@ -925,7 +933,7 @@ test.each([
   }
 });
 
-const FALLBACK_CSS = "@layer emend-fallback { pre { overflow-x: auto; } }";
+const FALLBACK_CSS = "@layer recense-fallback { pre { overflow-x: auto; } }";
 
 test("the bridge inserts a layered layout fallback first in the head", async () => {
   const b = bridge(
@@ -963,13 +971,13 @@ test.each(["pin", "root", "nested", "top"])(
     const html = '<main><pre class="mermaid">graph LR</pre><h2>First</h2><h3>Second</h3><h2>Last</h2></main>';
     const b = layoutBridge(html, { nested: kind === "nested" });
     try {
-      if (kind === "pin") b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+      if (kind === "pin") b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0.25 });
       else if (kind !== "top") b.container.scrollTop = 500;
       const before = b.container.scrollTop;
-      b.message({ type: "emend:diagram", request: 1, index: 0, svg: "<svg/>", width: 300, height: 200 });
-      expect(b.window.document.querySelector("[data-emend-diagram]")).not.toBeNull();
+      b.message({ type: "recense:diagram", request: 1, index: 0, svg: "<svg/>", width: 300, height: 200 });
+      expect(b.window.document.querySelector("[data-recense-diagram]")).not.toBeNull();
       expect(b.container.scrollTop).toBe(kind === "top" ? 0 : before + 200);
-      b.message({ type: "emend:diagram", request: 1, index: 0, svg: null });
+      b.message({ type: "recense:diagram", request: 1, index: 0, svg: null });
       expect(b.container.scrollTop).toBe(before);
     } finally {
       b.restore();

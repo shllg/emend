@@ -1,4 +1,4 @@
-import { Outcome, SampleView, ThreadState } from "@emend/contract";
+import { Outcome, SampleView, ThreadState } from "@recense/contract";
 import { describe, expect, it } from "vitest";
 import { buildSampleView } from "./build.ts";
 import { SAMPLE_IMAGE_HASH, sampleImageHash } from "./content.ts";
@@ -50,7 +50,7 @@ describe("theme sample", () => {
       expect(thread.comments.every((comment) => comment.html?.includes("<"))).toBe(true);
     }
     expect(sample.revision.docs.map((doc) => doc.kind)).toEqual(["markdown", "source", "html"]);
-    expect(sample.revision.docs[2]).toMatchObject({ look: "emend" });
+    expect(sample.revision.docs[2]).toMatchObject({ look: "recense" });
     expect(sample.revision.files.filter((file) => file.role === "diff").map((file) => file.status)).toEqual([
       "modified",
       "modified",

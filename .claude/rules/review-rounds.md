@@ -9,7 +9,7 @@ paths:
 A review exists to ship a correct change, not a perfect one. `/e-work` and `/e-pr-finalize` review
 in rounds with a fixed budget. Never polish in an open loop.
 
-Dispatch `emend-review-manager` with `model: "opus"`. It picks and runs the reviewers and
+Dispatch `recense-review-manager` with `model: "opus"`. It picks and runs the reviewers and
 classifies their findings. The orchestrator fixes, commits and logs. Each call gets the round,
 the range (`origin/main...HEAD` for a full round, the fix commits for a check round), the task
 file `.wt/issue.md` (or task text), and, for a check round, `.wt/review-findings.json`.
@@ -30,13 +30,13 @@ range, or the change altered what reaches them. An old bug that stops "Done when
 caused. What the change did not cause is **recorded** (a bug or defect, written to the local
 findings registry with `bin/wt findings add`), a **follow-up** (an idea, listed under
 "Follow-ups"), or dropped (code style or cleanup no written rule asks for). A finding a reviewer
-calls a bug or a security issue is blocking, and every `emend-security-reviewer` finding is at
+calls a bug or a security issue is blocking, and every `recense-security-reviewer` finding is at
 least a defect.
 
 For `private`, run `<main>/bin/wt notify question` and say there are private findings. List them
-in the final report to the owner and the local emend hand-off writeup, never in a PR body, issue
+in the final report to the owner and the local recense hand-off writeup, never in a PR body, issue
 or commit (`SECURITY.md`). Send dropped findings a reviewer called blocking, a bug or a security
-issue, or from `emend-security-reviewer`, to the owner the same way; other `dropped` stay local.
+issue, or from `recense-security-reviewer`, to the owner the same way; other `dropped` stay local.
 
 To dispute a blocking finding, send the argument to the manager in a new call, in dispute mode.
 It has a fresh Codex thread try to refute the finding. Only a confirmed false positive leaves `fix`.
@@ -53,7 +53,7 @@ It has a fresh Codex thread try to refute the finding. Only a confirmed false po
   or REGRESSED, plus anything the fixes broke. A check round does not review the rest of the change.
 - Stop at a round with nothing to fix, or at the budget.
 
-When `unavailable` holds only `codex` and `stand-in: emend-reviewer` and the stand-in reviewed,
+When `unavailable` holds only `codex` and `stand-in: recense-reviewer` and the stand-in reviewed,
 the round counts; name the missing Codex review under Evidence in the PR body. Otherwise, any
 entry leaves the round incomplete: dispatch the manager once more for the same round; if that
 reviewer is still missing, run `<main>/bin/wt notify blocked`, name it, and wait for the owner.
@@ -68,7 +68,7 @@ or with counts that do not match its lists is no round; dispatch the manager onc
 - `/e-pr-finalize`: one `final` round over the whole change, then at most one `final-check`. Skip
   the final round, and log `final-skipped`, when `/e-work`'s round 1 found no blocking finding or
   defect at the current head.
-- Each batch of owner feedback from emend: one `owner-check` over its fixes, outside the finalize
+- Each batch of owner feedback from recense: one `owner-check` over its fixes, outside the finalize
   budget.
 - A rebase alone needs no round.
 

@@ -11,13 +11,13 @@ class UsageError extends Error {}
 
 export const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?![\s\S])/;
 const VERSION_VALUE = /("version"\s*:\s*")([^"]*)(")/;
-const VERSION_SOURCE = "apps/emend/src/version.ts";
+const VERSION_SOURCE = "apps/recense/src/version.ts";
 const PLUGIN_MANIFEST = "plugin/.claude-plugin/plugin.json";
 const MARKETPLACE_MANIFEST = ".claude-plugin/marketplace.json";
 
 // Directories include everything below them; the other entries name exact root-relative files.
 export const SHIPPED_PATHS = [
-  "apps/emend/",
+  "apps/recense/",
   "apps/web/",
   "packages/",
   "plugin/",
@@ -226,9 +226,9 @@ export function changelogSection(version: string, date: string, commits: Commit[
 export function stampVersion(root: string, version: string): void {
   if (!VERSION_PATTERN.test(version)) throw new ReleaseError("release: version must be plain x.y.z");
   // Validate both replacements before writing either file.
-  const manifest = bumpedVersionText(root, "apps/emend/package.json", version);
+  const manifest = bumpedVersionText(root, "apps/recense/package.json", version);
   const source = bumpedSourceText(root, VERSION_SOURCE, version);
-  writeFileSync(join(root, "apps/emend/package.json"), manifest);
+  writeFileSync(join(root, "apps/recense/package.json"), manifest);
   writeFileSync(join(root, VERSION_SOURCE), source);
 }
 
@@ -247,17 +247,17 @@ interface PlanOptions {
 export async function isPublished(version: string): Promise<boolean> {
   let response: Response;
   try {
-    response = await fetch(`https://registry.npmjs.org/@shllg%2Femend/${encodeURIComponent(version)}`, {
+    response = await fetch(`https://registry.npmjs.org/@shllg%2Frecense/${encodeURIComponent(version)}`, {
       redirect: "manual",
       signal: AbortSignal.timeout(30_000),
     });
     await response.body?.cancel();
   } catch {
-    throw new ReleaseError(`release: could not check npm for @shllg/emend@${version}`);
+    throw new ReleaseError(`release: could not check npm for @shllg/recense@${version}`);
   }
   if (response.status === 200) return true;
   if (response.status === 404) return false;
-  throw new ReleaseError(`release: npm returned HTTP ${response.status} for @shllg/emend@${version}`);
+  throw new ReleaseError(`release: npm returned HTTP ${response.status} for @shllg/recense@${version}`);
 }
 
 function releaseCommit(root: string, ref: string): string {
@@ -327,7 +327,7 @@ export async function plan(options: PlanOptions) {
       return await (options.isPublished ?? isPublished)(version);
     } catch (error) {
       if (error instanceof ReleaseError) throw error;
-      throw new ReleaseError(`release: could not check npm for @shllg/emend@${version}`);
+      throw new ReleaseError(`release: could not check npm for @shllg/recense@${version}`);
     }
   };
   const published = await checkPublished(newest.slice(1));

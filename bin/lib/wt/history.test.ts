@@ -11,7 +11,7 @@ import {
   commitFile,
   type Fixture,
   gitIn,
-  installFakeEmend,
+  installFakeRecense,
   makeFixture,
   makeTestEnv,
   type TestEnv,
@@ -509,7 +509,7 @@ test("a restack writes nothing through a symlinked restack folder", () =>
     advanceOrigin(env, fx, "c.txt", "main\n");
     const elsewhere = join(env.root, "elsewhere");
     mkdirSync(elsewhere);
-    const dir = join(fx.main, ".git", "emend-wt");
+    const dir = join(fx.main, ".git", "recense-wt");
     rmSync(dir, { recursive: true, force: true });
     symlinkSync(elsewhere, dir);
 
@@ -524,7 +524,7 @@ test("a restack ignores a planted file at the old patch path", () =>
     const wt = worktree(repo, "feat-a");
     commitFile(wt, "a.txt", "a\n");
     advanceOrigin(env, fx, "other.txt", "other\n");
-    const dir = join(fx.main, ".git", "emend-wt");
+    const dir = join(fx.main, ".git", "recense-wt");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const target = join(env.root, "kept.txt");
     writeFileSync(target, "keep\n");
@@ -882,7 +882,7 @@ test("land makes one signed commit on main", () =>
     commitFile(wt, "a.txt", "a\n");
     commitFile(wt, "b.txt", "b\n");
     const head = commitFile(wt, "a.txt", "a2\n");
-    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
+    installFakeRecense(env, head, [approvedReview("feat-a", head)]);
     const wtRepo = resolveRepo(wt);
     const oldMain = gitIn(fx.main, "rev-parse", "main");
     const originMain = gitIn(fx.origin, "rev-parse", "main");
@@ -909,10 +909,10 @@ test("land refuses an unapproved head before writing backup refs or a commit", (
     const head = commitFile(wt, "a.txt", "review me\n");
     const main = gitIn(fx.main, "rev-parse", "main");
     const objects = gitIn(wt, "count-objects", "-v");
-    installFakeEmend(env, head, []);
+    installFakeRecense(env, head, []);
     assert.throws(() => land(resolveRepo(wt), wt, "feat: a", "", head), {
       code: 1,
-      message: `emend shows no approval of ${head} on feat-a: no review of this commit.`,
+      message: `recense shows no approval of ${head} on feat-a: no review of this commit.`,
     });
     assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
     assert.equal(gitIn(wt, "count-objects", "-v"), objects);
@@ -926,7 +926,7 @@ for (const override of ["refs/replace", "info/grafts"]) {
       scenario(async ({ env, fx, repo }) => {
         const wt = worktree(repo, "feat-a");
         const approved = commitFile(wt, "feature.txt", "reviewed\n");
-        installFakeEmend(env, approved, [approvedReview("feat-a", approved)]);
+        installFakeRecense(env, approved, [approvedReview("feat-a", approved)]);
         const main = commitFile(fx.main, "other.txt", "main advanced\n");
         gitIn(wt, "rebase", "main");
         const replay = gitIn(wt, "rev-parse", "HEAD");
@@ -965,7 +965,7 @@ for (const override of ["refs/replace", "info/grafts"]) {
 
 test("land refuses issue branches before creating a commit, even without closing text or metadata", () =>
   scenario(({ env, fx, repo }) => {
-    const branch = "emend-42-x";
+    const branch = "recense-42-x";
     // Model a pre-existing, unregistered worktree; setup now requires --issue for this name.
     const wt = join(env.root, "unregistered-issue");
     gitIn(fx.main, "worktree", "add", "--quiet", "-b", branch, wt, "main");
@@ -1030,7 +1030,7 @@ test("land refuses when the main checkout has overlapping uncommitted work", () 
   scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const head = commitFile(wt, "README.md", "from branch\n");
-    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
+    installFakeRecense(env, head, [approvedReview("feat-a", head)]);
     writeFileSync(join(fx.main, "README.md"), "mine\n");
     const main = gitIn(fx.main, "rev-parse", "main");
     assert.throws(
@@ -1088,7 +1088,7 @@ test("land lands a change to former trusted paths without any prompt", () =>
     const wt = worktree(repo, "feat-a");
     commitFile(wt, "bin/x", "x\n");
     const tip = commitFile(wt, ".claude/skills/y/SKILL.md", "y\n");
-    installFakeEmend(env, tip, [approvedReview("feat-a", tip)]);
+    installFakeRecense(env, tip, [approvedReview("feat-a", tip)]);
     const { commit } = land(resolveRepo(wt), wt, "feat: a", "", tip);
     assert.equal(gitIn(fx.main, "rev-parse", "main"), commit);
   }));
@@ -1198,7 +1198,7 @@ test("land lands only the approved head and refuses any other HEAD", () =>
     assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
     assert.equal(readRegistry(repo).worktrees["feat-a"]?.landedAs, undefined);
     // With the right head, the landed tree is that commit's tree.
-    installFakeEmend(env, current, [approvedReview("feat-a", current)]);
+    installFakeRecense(env, current, [approvedReview("feat-a", current)]);
     const { commit } = land(wtRepo, wt, "feat: a", "", current);
     assert.equal(gitIn(fx.main, "rev-parse", `${commit}^{tree}`), gitIn(wt, "rev-parse", "HEAD^{tree}"));
   }));
@@ -1234,7 +1234,7 @@ test("a failed signature in land names the backups and changes nothing", () =>
   scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const head = commitFile(wt, "a.txt", "a\n");
-    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
+    installFakeRecense(env, head, [approvedReview("feat-a", head)]);
     gitIn(wt, "config", "user.signingkey", join(env.root, "no-such-key"));
     const main = gitIn(fx.main, "rev-parse", "main");
     assert.throws(
@@ -1298,7 +1298,7 @@ test("land prints its backups, then landed <sha> as the last line", () =>
   scenario(async ({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const head = commitFile(wt, "a.txt", "a\n");
-    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
+    installFakeRecense(env, head, [approvedReview("feat-a", head)]);
     const bodyFile = join(env.root, "body.md");
     writeFileSync(bodyFile, "Body.\n");
     const wtRepo = resolveRepo(wt);
@@ -1434,7 +1434,7 @@ test("land accepts prose mentioning an issue without a closing instruction", () 
   scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const head = commitFile(wt, "a.txt", "a\n");
-    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
+    installFakeRecense(env, head, [approvedReview("feat-a", head)]);
     const { commit } = land(resolveRepo(wt), wt, "Fixes see #9", "Body", head);
     assert.equal(gitIn(fx.main, "rev-parse", "main"), commit);
     assert.equal(gitIn(fx.main, "log", "-1", "--format=%s", commit), "Fixes see #9");

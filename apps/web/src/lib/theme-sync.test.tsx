@@ -1,4 +1,4 @@
-import type { ThemeList } from "@emend/contract";
+import type { ThemeList } from "@recense/contract";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";

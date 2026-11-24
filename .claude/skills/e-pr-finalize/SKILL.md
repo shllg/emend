@@ -1,6 +1,6 @@
 ---
 name: e-pr-finalize
-description: Drive this branch's open PR to mergeable (CI green, conflicts gone, title and body right, every review thread handled, a fresh final review), then hand it to the owner for review in emend and merge on approval. Use after /e-pr or when the owner types /e-pr-finalize.
+description: Drive this branch's open PR to mergeable (CI green, conflicts gone, title and body right, every review thread handled, a fresh final review), then hand it to the owner for review in recense and merge on approval. Use after /e-pr or when the owner types /e-pr-finalize.
 ---
 
 # /e-pr-finalize
@@ -25,7 +25,7 @@ repeats after every push until every item below holds.
 - `bin/wt push`, `pr` and `land` check names, text and content for private data first. On a hit,
   fix what it names, never the check. When it refuses for lack of a terms list, stop and ask the
   owner to create `<main>/.private-terms`. Never read, create, edit or remove `.private-terms`, and
-  never set `EMEND_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
+  never set `RECENSE_PRIVATE_TERMS`: a hit names the place to fix. When `bin/wt push` refuses a new
   `check-public: allow` marker, remove the marker, or run `<main>/bin/wt notify blocked` and ask the
   owner to push; never pass `--accept-new-markers` yourself.
 - `gh` and `bin/wt` must use origin on github.com; `bin/wt` ignores `GH_REPO` and `GH_HOST`.
@@ -89,7 +89,7 @@ is the owner's step, never this skill's.
 ## 2. Conflicts
 
 Read `mergeable` and the merge state. On `CONFLICTING` or `DIRTY`, run `/e-rebase`. A PR that is only
-`BEHIND` is left alone: `/e-pr-merge` rebases it under its own rule. During an open emend review, a
+`BEHIND` is left alone: `/e-pr-merge` rebases it under its own rule. During an open recense review, a
 rebase waits (see step 7).
 
 ## 3. Title and body
@@ -272,7 +272,7 @@ referenced code and tests before you act.
   Send `resolveReviewThread` for the same thread as a checked JSON request in the same way.
   Neither mutation takes owner or name variables. A review-body item with no thread gets a PR
   comment through `gh pr comment --repo github.com/<owner>/<name> <n> --body-file <top>/.wt/reply-<n>.md` that links the original.
-- Disagree: before you reject, dispatch `emend-review-manager` (`model: "opus"`) in dispute mode
+- Disagree: before you reject, dispatch `recense-review-manager` (`model: "opus"`) in dispute mode
   with the file path, line, claim, your argument, the round from the last line in
   `.wt/review-log.md` that is not `final-skipped` (or `final` when there is none), the range
   `origin/main...HEAD` and the task file `.wt/issue.md`. It has a fresh Codex thread try to refute
@@ -295,12 +295,12 @@ incomplete comment page. Threads you disagreed with stay open by design.
 
 ## 7. Final review
 
-Review in rounds as `.claude/rules/review-rounds.md` says. Dispatch `emend-review-manager`
+Review in rounds as `.claude/rules/review-rounds.md` says. Dispatch `recense-review-manager`
 (`model: "opus"`) with the round, the range (`origin/main...HEAD` for a full round, the fix
 commits for a check round), the task file `.wt/issue.md` (or task text), `.wt/bundle-diff.json`,
 `.wt/bundle-reason.md` when it exists, and, for `final-check` and `owner-check`,
 `.wt/review-findings.json`. The bundle files follow "Bundle growth" in
-`.claude/agents/emend-review-manager.md`. It picks and runs the reviewers. Do not hand it your
+`.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Do not hand it your
 summary. Fixes go to Codex. Read `.wt/review-log.md` first to pick the round:
 
 1. No `final` or `final-skipped` line: run the `final` round over the whole change,
@@ -315,13 +315,13 @@ Append each manager JSON to `.wt/review-findings.json` and log each round as the
 After each round, update the PR body as step 3 says. If a fix changed content, return to step 1
 for CI and threads; back here, the list above picks the next round.
 
-## 8. Hand-off in emend
+## 8. Hand-off in recense
 
 1. Check once more: tree clean, `git rev-parse HEAD` equals `headRefOid`, CI green.
 2. Make the review folder: `<top>/.wt/review`, where `<top>` is `git rev-parse --show-toplevel`.
    Create it with `mkdir -p -m 700 <top>/.wt/review`, written out literally. It is per worktree
    and gitignored, and only this worktree's session writes it.
-3. Start `emend-review` in a fresh subagent and tell it "publish only". Give it the target
+3. Start `recense-review` in a fresh subagent and tell it "publish only". Give it the target
    `origin/main`, with `head` set to the full PR head commit, and the PR URL for `links`. Tell it to use `<top>/.wt/review` as the review folder, in place of a new temporary one.
    Also give it the `summary` from `<top>/.wt/bundle-diff.json` (its `head` equals the PR head)
    and each reason from `.wt/bundle-reason.md`. Tell it to list the summary under `checked`.
@@ -331,12 +331,12 @@ for CI and threads; back here, the list above picks the next round.
    published from and the wait command.
 4. A subagent cannot wait, so this session waits. The subagent set `decisions` to `null`. If this
    session holds the conversation in which the owner asked for the change, write `decisions` into
-   `review.json` in that folder from that conversation, as `emend-review` says, then run its
+   `review.json` in that folder from that conversation, as `recense-review` says, then run its
    republish command from the directory it named. Otherwise leave it `null`. Never infer intent from
    commits or the diff.
 5. Run `<main>/bin/wt notify review-ready`. Give the owner the review URL on its own line and say how
-   to answer: comments, then Send with a mode, or approve. The page opens only while emend runs.
-6. Wait as the `emend-review` skill, "Wait for the reviewer", and the `emend-feedback` skill say:
+   to answer: comments, then Send with a mode, or approve. The page opens only while recense runs.
+6. Wait as the `recense-review` skill, "Wait for the reviewer", and the `recense-feedback` skill say:
    folder checks, saved results, the handled record. Do not restate them here.
 
 While the loop is open there is no rebase of this branch (the review is pinned to its base). If a
@@ -345,7 +345,7 @@ stop the loop.
 
 ## 9. Act on the answer
 
-- `go`: handle it with `emend-feedback`. Fixes go back through steps 1 to 7 (commit, push, CI,
+- `go`: handle it with `recense-feedback`. Fixes go back through steps 1 to 7 (commit, push, CI,
   threads, and one `owner-check` round over these fixes in step 7). Then publish the next revision
   with `head` at the new head commit, carrying the bundle summary and reasons for that head as
   step 8.3 says, from a `.wt/bundle-diff.json` whose `head` equals that commit. Run
@@ -360,7 +360,7 @@ stop the loop.
     Carry the bundle summary and reasons for that head as step 8.3 says, from a
     `.wt/bundle-diff.json` whose `head` equals that head.
   - Exit 2 or 69: run `<main>/bin/wt notify blocked`, report the message and stop.
-- `closed` or a non-zero exit: report as `emend-feedback` says and stop. Silence is not approval.
+- `closed` or a non-zero exit: report as `recense-feedback` says and stop. Silence is not approval.
 
 Mode `local` in `.wt/worktree.json` does not belong in this skill; use `/e-merge-local`.
 

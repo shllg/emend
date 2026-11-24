@@ -1,4 +1,4 @@
-import { type FileView, LinesTarget } from "@emend/contract";
+import { type FileView, LinesTarget } from "@recense/contract";
 import { splitLines } from "../../../../../packages/core/src/place/linemap.ts";
 import { type LinesError, lineContext } from "../../lib/line-context.ts";
 

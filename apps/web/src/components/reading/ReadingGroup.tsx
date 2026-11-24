@@ -84,10 +84,10 @@ export function ReadingGroup({
       }
       rememberOpen(true);
     };
-    section?.addEventListener("emend:reveal-reading", reveal);
+    section?.addEventListener("recense:reveal-reading", reveal);
     section?.addEventListener("beforematch", reveal);
     return () => {
-      section?.removeEventListener("emend:reveal-reading", reveal);
+      section?.removeEventListener("recense:reveal-reading", reveal);
       section?.removeEventListener("beforematch", reveal);
     };
   }, [group.presentation, rememberOpen]);

@@ -1,6 +1,6 @@
 ---
 paths:
-  - "apps/emend/src/server/**"
+  - "apps/recense/src/server/**"
   - "packages/contract/**"
   - "docs/api.md"
 ---
@@ -9,7 +9,7 @@ paths:
 
 The values below are binding. Limits and ids are in `docs/api.md` once it exists.
 
-- Session cookie: `emend_session`, `HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS, `Path=/`,
+- Session cookie: `recense_session`, `HttpOnly`, `SameSite=Strict`, `Secure` on HTTPS, `Path=/`,
   `Max-Age=2592000` (30 days), renewed at most daily.
 - Host allowlist: `127.0.0.1:<port>`, `localhost:<port>`, `[::1]:<port>`, plus the tailnet name
   only when `--tailscale` configured it, or the host of an https `--public-url` origin. Anything
@@ -18,14 +18,14 @@ The values below are binding. Limits and ids are in `docs/api.md` once it exists
   log. A pairing is one-time and expires after 10 minutes. Its code is `XXXX-XXXX` in Crockford
   base32; five wrong codes lock code entry for 10 minutes (`429 rate_limited`).
 - The state directory is `0700`, its files `0600`.
-- The CLI sends `X-Emend-Client: cli/<semver>`; below the minimum version the server answers
+- The CLI sends `X-Recense-Client: cli/<semver>`; below the minimum version the server answers
   `426 client_outdated`.
 
 - Contract first: a new endpoint or field goes into `packages/contract` and `docs/api.md` before a
   route uses it. Routes parse every body with the contract's zod schemas and enforce size limits
   before they parse.
 - Every request carries a credential, on loopback too, except `GET /api/v1/capabilities`,
-  `POST /api/v1/session` and `POST /api/v1/machines`. Browsers use the `emend_session` cookie; the
+  `POST /api/v1/session` and `POST /api/v1/machines`. Browsers use the `recense_session` cookie; the
   CLI and MCP use `Authorization: Bearer <token>`. A reviewer credential is accepted only from the
   cookie, never as a bearer.
 - Host header allowlist on every request; an Origin check on every non-GET request that carries
@@ -55,4 +55,4 @@ The values below are binding. Limits and ids are in `docs/api.md` once it exists
   hash to every session; every other hash keeps the owner-filtered lookup.
 - Serve stored content with a server-chosen `Content-Type` and `X-Content-Type-Options: nosniff`.
 - Errors use one shape: `{"error":{"code","message"}}`. No stack traces and no other owner's ids.
-- Every change here needs `emend-security-reviewer`.
+- Every change here needs `recense-security-reviewer`.

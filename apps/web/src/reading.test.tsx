@@ -1,6 +1,6 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { ok } from "node:assert/strict";
-import type { RenderedBlock, RevisionView, Target, ThreadView } from "@emend/contract";
+import type { RenderedBlock, RevisionView, Target, ThreadView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -1003,7 +1003,7 @@ test.each([
     {
       ...block,
       text: "Seed image",
-      html: `<p class="emend-media-row"><span class="emend-media"><img src="${image}" alt="Seed image"><span class="emend-media-caption">Seed image</span></span></p>`,
+      html: `<p class="recense-media-row"><span class="recense-media"><img src="${image}" alt="Seed image"><span class="recense-media-caption">Seed image</span></span></p>`,
     },
   ];
   const doc = {
@@ -1031,7 +1031,7 @@ test.each([
   const text = screen.getByText("Theme preview");
   const code = required(view.container.querySelector("pre.shiki"));
   const table = screen.getByRole("table");
-  const media = required(screen.getByAltText("Seed image").closest(".emend-media"));
+  const media = required(screen.getByAltText("Seed image").closest(".recense-media"));
   for (const element of [text, code, table, media]) {
     expect(element.closest(".em-prose")).not.toBeNull();
     expect(element.closest("[data-theme]")).toBe(pick === "system" ? null : document.documentElement);
@@ -1075,7 +1075,7 @@ test("a Markdown image in the docs tab opens the lightbox on click", async () =>
         id: "doc-12345678-12345678",
         section: "doc-12345678",
         text: "Before",
-        html: `<p class="emend-media-row"><span class="emend-media"><img src="${src}" alt="Before"><span class="emend-media-caption">Before</span></span></p>`,
+        html: `<p class="recense-media-row"><span class="recense-media"><img src="${src}" alt="Before"><span class="recense-media-caption">Before</span></span></p>`,
       },
     ],
   };

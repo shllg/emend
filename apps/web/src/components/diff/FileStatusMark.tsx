@@ -1,4 +1,4 @@
-import type { FileView } from "@emend/contract";
+import type { FileView } from "@recense/contract";
 
 const statuses = {
   added: { letter: "A", color: "text-success-fg" },

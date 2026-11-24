@@ -1,4 +1,4 @@
-import type { ThemeBase } from "@emend/contract";
+import type { ThemeBase } from "@recense/contract";
 import { resolveTheme, type ThemeSource } from "./theme.ts";
 
 export type DownloadLook = {

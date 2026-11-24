@@ -1,4 +1,4 @@
-import type { Target } from "@emend/contract";
+import type { Target } from "@recense/contract";
 import { createContext } from "react";
 
 export type DiffDestination = { elementId?: string; element?: HTMLElement; target?: Target; commentId?: string };

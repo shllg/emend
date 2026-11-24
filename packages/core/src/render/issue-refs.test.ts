@@ -5,7 +5,7 @@ const repo = "https://github.com/owner/name";
 const html = async (markdown: string, repoUrl: string | undefined = repo) =>
   (await renderMarkdown(markdown, "overview", repoUrl)).map((block) => block.html).join("\n");
 const anchor = (n: number) =>
-  `<a href="${repo}/issues/${n}" data-emend-issue="${n}" rel="noopener noreferrer nofollow" target="_blank">#${n}</a>`;
+  `<a href="${repo}/issues/${n}" data-recense-issue="${n}" rel="noopener noreferrer nofollow" target="_blank">#${n}</a>`;
 
 describe("issue references", () => {
   test("link in plain text, lists, headings and emphasis", async () => {
@@ -104,17 +104,17 @@ describe("external links open in a new tab", () => {
 });
 
 describe("issue anchors carry the number marker", () => {
-  test("only the server-made anchor has data-emend-issue; an author's is dropped", async () => {
+  test("only the server-made anchor has data-recense-issue; an author's is dropped", async () => {
     const out = await html(
-      'See #12 <a href="https://example.test" data-emend-issue="99">x</a> [y](https://example.test/y)',
+      'See #12 <a href="https://example.test" data-recense-issue="99">x</a> [y](https://example.test/y)',
     );
-    expect(out).toContain('data-emend-issue="12"');
-    expect(out).not.toContain('data-emend-issue="99"');
-    expect(out.match(/data-emend-issue/g)).toHaveLength(1);
-    const raw = await html('<span data-emend-issue="5">five</span> and #6');
-    expect(raw).not.toContain('data-emend-issue="5"');
-    expect(raw.match(/data-emend-issue/g)).toHaveLength(1);
-    expect(raw).toContain('data-emend-issue="6"');
+    expect(out).toContain('data-recense-issue="12"');
+    expect(out).not.toContain('data-recense-issue="99"');
+    expect(out.match(/data-recense-issue/g)).toHaveLength(1);
+    const raw = await html('<span data-recense-issue="5">five</span> and #6');
+    expect(raw).not.toContain('data-recense-issue="5"');
+    expect(raw.match(/data-recense-issue/g)).toHaveLength(1);
+    expect(raw).toContain('data-recense-issue="6"');
   });
 
   test("hostile input beside a number stays neutralised", async () => {

@@ -1,4 +1,4 @@
-import type { Placement, PlacementLocation, Target, TopicPart } from "@emend/contract";
+import type { Placement, PlacementLocation, Target, TopicPart } from "@recense/contract";
 import type { Block } from "../render/blocks.ts";
 import { normalizeText } from "../render/normalize.ts";
 import { placeHtmlSpan } from "./html.ts";

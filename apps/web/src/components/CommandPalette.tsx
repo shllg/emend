@@ -1,5 +1,5 @@
-import type { InboxItem, ShortcutCommand } from "@emend/contract";
 import * as Primitive from "@radix-ui/react-dialog";
+import type { InboxItem, ShortcutCommand } from "@recense/contract";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { X } from "lucide-react";

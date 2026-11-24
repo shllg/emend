@@ -1,4 +1,4 @@
-import type { InboxItem, ReviewPinPlaceRequest } from "@emend/contract";
+import type { InboxItem, ReviewPinPlaceRequest } from "@recense/contract";
 import { useIsFetching, useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, use, useRef, useState } from "react";
 import { mutationMessage, usePlacePin } from "../../api/mutations.ts";

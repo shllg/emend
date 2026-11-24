@@ -44,7 +44,7 @@ export interface TestEnv {
   cleanup(): void;
 }
 
-const APPROVAL_ENV = ["EMEND_BIN", "EMEND_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"] as const;
+const APPROVAL_ENV = ["RECENSE_BIN", "RECENSE_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME"] as const;
 const PATCHED = ["HOME", "PATH", "TERM", ...APPROVAL_ENV] as const;
 const SCRUBBED_PREFIXES = [
   "GIT_",
@@ -55,7 +55,7 @@ const SCRUBBED_PREFIXES = [
   "CLAUDECODE",
   "NODE_OPTIONS",
   "WT_",
-  "EMEND_PRIVATE_TERMS",
+  "RECENSE_PRIVATE_TERMS",
 ];
 
 function findOnPath(name: string, pathValue: string): string | null {
@@ -312,8 +312,8 @@ export function approvedReview(branch: string, head: string) {
   };
 }
 
-export function installFakeEmend(env: TestEnv, sha: string, items: unknown[]): void {
-  installFake(env, "emend", [{ match: ["ls", "--json", "--head", sha], stdout: JSON.stringify({ items }) }]);
+export function installFakeRecense(env: TestEnv, sha: string, items: unknown[]): void {
+  installFake(env, "recense", [{ match: ["ls", "--json", "--head", sha], stdout: JSON.stringify({ items }) }]);
 }
 
 /** Replaces the canned rules of an installed fake and resets its use counts. */
@@ -368,7 +368,7 @@ export function readyIssue(number: number, extra: Record<string, unknown> = {}):
   const newest = edits?.nodes?.[0];
   return {
     number,
-    title: "Fix the review pane",
+    title: "Fix review pane",
     body: "Approved task.\n",
     state: "OPEN",
     author: { login: "owner" },

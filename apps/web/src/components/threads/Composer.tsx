@@ -1,4 +1,4 @@
-import { LIMITS, type Target, type TopicMeta } from "@emend/contract";
+import { LIMITS, type Target, type TopicMeta } from "@recense/contract";
 import { Lock } from "lucide-react";
 import { type ReactNode, type RefObject, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { mutationMessage, useReviewMutation } from "../../api/mutations.ts";

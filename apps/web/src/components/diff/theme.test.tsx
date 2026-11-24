@@ -225,7 +225,7 @@ test.each(["light", "dark"])("real diff host uses the verified token overrides i
 });
 
 test("one registered CSS theme maps every syntax variable to light and both dark token sets", () => {
-  expect(diffTheme.name).toBe("emend");
+  expect(diffTheme.name).toBe("recense");
   expect(diffTheme.cssVariables?.variableDefaults).toEqual(syntaxVariables);
   const colors = readFileSync(resolve(import.meta.dirname, "../../styles/colors.css"), "utf8");
   const [light, automaticDark, explicitDark] = colors.split(

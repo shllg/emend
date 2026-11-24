@@ -6,7 +6,7 @@ import {
   type SettingsView,
   SHORTCUT_DEFAULTS,
   type ShortcutCommand,
-} from "@emend/contract";
+} from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -266,7 +266,7 @@ test.each([false, true])("j/k navigate the rendered inbox sequence (collapsed=%s
   expect(press("k").defaultPrevented).toBe(false);
 });
 test.each(["j", "k"])("%s starts at the edge when the current review is outside the stored Kind", async (key) => {
-  localStorage.setItem("emend:inbox-kind", "publish");
+  localStorage.setItem("recense:inbox-kind", "publish");
   layoutStore.update({ inboxCollapsed: true });
   mount();
   await ready();
@@ -298,7 +298,7 @@ test("inbox j/k focus row links, skip moved rows and scroll; f cycles and persis
   ]) {
     press("f");
     expect(kind.getByRole("radio", { name: label ?? "" }).getAttribute("aria-checked")).toBe("true");
-    expect(localStorage.getItem("emend:inbox-kind")).toBe(value);
+    expect(localStorage.getItem("recense:inbox-kind")).toBe(value);
   }
 });
 test("mounted inbox j follows its text filter into the Done section", async () => {

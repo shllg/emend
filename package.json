@@ -1,5 +1,5 @@
 {
-  "name": "emend-monorepo",
+  "name": "recense-monorepo",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.20.0+sha512.9a6f330a95b66446ea088faf1521405a8a01f07fde7124cc9958dfed52d4bb436737e65b08f85f37b46fcba375092558ac51262b816844b22f63406ed166bfee",
@@ -10,8 +10,8 @@
     "lint": "biome check .",
     "typecheck": "tsc -b && tsc -p bin/tsconfig.json",
     "test": "pnpm verify:test",
-    "bench": "EMEND_BENCH=1 vitest run --project bench",
-    "build": "pnpm --dir apps/web build && pnpm --dir apps/emend build",
+    "bench": "RECENSE_BENCH=1 vitest run --project bench",
+    "build": "pnpm --dir apps/web build && pnpm --dir apps/recense build",
     "install:local": "node scripts/install-local.ts",
     "check:package": "node scripts/check-package.ts",
     "screenshots": "pnpm build && node scripts/screenshots.ts",

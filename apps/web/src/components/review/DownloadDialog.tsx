@@ -1,4 +1,4 @@
-import { LIMITS, type RevisionView, reviewDownloadPath } from "@emend/contract";
+import { LIMITS, type RevisionView, reviewDownloadPath } from "@recense/contract";
 import { type RefObject, useEffect, useState } from "react";
 import {
   downloadBaseIsHtml,

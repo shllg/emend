@@ -1,4 +1,4 @@
-import { type InboxGroup, LIMITS, type ReviewState } from "@emend/contract";
+import { type InboxGroup, LIMITS, type ReviewState } from "@recense/contract";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlarmClock,

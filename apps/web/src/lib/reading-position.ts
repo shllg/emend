@@ -1,8 +1,8 @@
-import { z } from "@emend/contract/browser";
+import { z } from "@recense/contract/browser";
 import { appElementId, docHeading, type HeadingDoc } from "./doc-navigation.ts";
 import { revealReadingTarget } from "./reading-reveal.ts";
 
-export const readingKey = "emend.reading.v1";
+export const readingKey = "recense.reading.v1";
 export const readingCap = 200;
 /** A gap fraction spans two anchors, the start to the first (fraction 0), or the last to the end (fraction 1). */
 export type ReadingAnchor = { id: string; fraction: number; gap?: number };

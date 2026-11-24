@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 export type Exit = 0 | 1 | 2 | 3 | 69 | 124;
 
-export const BRANCH_PREFIX = "emend-";
+export const BRANCH_PREFIX = "recense-";
 
 /** A failure with an exit code. The message never contains a refused argument. */
 export class WtError extends Error {
@@ -119,16 +119,16 @@ export function readTextFile(file: string, max = MAX_TEXT_FILE_BYTES): string {
 }
 
 export function issueFromBranch(branch: string): number | null {
-  const n = /^emend-([1-9][0-9]*)-/.exec(branch)?.[1];
+  const n = /^recense-([1-9][0-9]*)-/.exec(branch)?.[1];
   // A name discovered among claims is data, not an explicit issue-number argument.
   // Keep user input strict while treating unparseable branch numbers as no inferred issue.
   return n !== undefined && Number.isSafeInteger(Number(n)) ? Number(n) : null;
 }
 
-/** Numeric emend names are reserved for explicitly registered issues, including padded numbers. */
+/** Numeric recense names are reserved for explicitly registered issues, including padded numbers. */
 export function requireIssueBranch(branch: string, issue?: number): void {
-  if (/^emend-[0-9]+-/u.test(branch) && issue === undefined)
-    throw new WtError(2, "Numeric emend branch names require --issue.");
+  if (/^recense-[0-9]+-/u.test(branch) && issue === undefined)
+    throw new WtError(2, "Numeric recense branch names require --issue.");
   if (issue !== undefined && issueFromBranch(branch) !== issue)
     throw new WtError(2, "The branch number must match --issue.");
 }

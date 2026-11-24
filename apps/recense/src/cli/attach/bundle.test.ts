@@ -1,0 +1,208 @@
+import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { and, eq } from "drizzle-orm";
+import { expect, test } from "vitest";
+import { files, repos, reviews } from "../../db/schema.ts";
+import { directFixture } from "../direct-test-support.ts";
+import { snapshot } from "./bundle.ts";
+
+test.each([false, true])("a hub without a bin never receives a binned snapshot (resend: %s)", async (resend) => {
+  const fixture = await directFixture();
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  const movedToUrl = `https://hub.example/r/${result.reviewId}`;
+  const where = and(eq(reviews.ownerId, server.ownerId), eq(reviews.id, result.reviewId));
+  await server.db.query((q) =>
+    q
+      .update(reviews)
+      .set({ binnedAt: Date.now(), movedToUrl: resend ? movedToUrl : null })
+      .where(where),
+  );
+  const before = await server.db.read((q) => q.select().from(reviews).where(where).get());
+  const exported = await server.db.transaction((q) =>
+    snapshot(q, server.ownerId, server.instance.id, result.reviewId, movedToUrl, Date.now(), false),
+  );
+  expect(exported).toEqual({ kind: "skipped" });
+  expect(await server.db.read((q) => q.select().from(reviews).where(where).get())).toEqual(before);
+});
+
+test.each(["Orchard", ".git", null])(
+  "export preserves the review's project %s separately from its repo",
+  async (project) => {
+    const fixture = await directFixture();
+    const { result } = await fixture.publish();
+    const server = await fixture.reviewer();
+    await server.db.query(async (q) => {
+      const repo = await q
+        .insert(repos)
+        .values({ ownerId: server.ownerId, key: "b".repeat(64), name: "Original" })
+        .returning()
+        .get();
+      if (!repo) throw new Error("missing repo");
+      await q
+        .update(reviews)
+        .set({ project, repoId: repo.id })
+        .where(and(eq(reviews.ownerId, server.ownerId), eq(reviews.id, result.reviewId)));
+    });
+    const exported = await server.db.transaction((q) =>
+      snapshot(
+        q,
+        server.ownerId,
+        server.instance.id,
+        result.reviewId,
+        `https://hub.example/r/${result.reviewId}`,
+        Date.now(),
+        false,
+      ),
+    );
+    if (exported.kind !== "bundle") throw new Error("missing bundle");
+    expect(exported.bundle.review).toMatchObject({ project, repo: { name: "Original" } });
+    expect(JSON.parse(exported.json).review.project).toBe(project);
+  },
+);
+
+test("export rows keep doc titles but omit recomputable headings", async () => {
+  const fixture = await directFixture();
+  await writeFile(join(fixture.source, "plan.md"), "# Named\n\n## Part\n\n## Glossary\n\n- **Part:** A piece.\n");
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  expect(
+    (await server.request(`/reviews/${result.reviewId}/sends`, { kind: "approve", revision: result.revision })).status,
+  ).toBe(201);
+  const exported = await server.db.transaction((q) =>
+    snapshot(
+      q,
+      server.ownerId,
+      server.instance.id,
+      result.reviewId,
+      `https://hub.example/r/${result.reviewId}`,
+      Date.now(),
+      false,
+    ),
+  );
+  if (exported.kind !== "bundle") throw new Error("missing bundle");
+  expect(exported.bundle.review).not.toHaveProperty("approvedAt");
+  expect(JSON.parse(exported.json).review).not.toHaveProperty("approvedAt");
+  expect(exported.bundle.files[0]?.title).toBe("Named");
+  expect(exported.bundle.files[0]).not.toHaveProperty("headings");
+  expect(JSON.parse(exported.json).files[0]).not.toHaveProperty("headings");
+  // Glossary terms are recomputed on import too, so they never travel in the bundle.
+  expect(exported.bundle.files[0]).not.toHaveProperty("terms");
+  expect(JSON.parse(exported.json).files[0]).not.toHaveProperty("terms");
+});
+
+test("export carries stored HTML appearance and explicit nulls for every other file row", async () => {
+  const fixture = await directFixture();
+  const appearances = [
+    { path: "custom.html", look: "custom", colorScheme: null },
+    { path: "unclassified.html", look: null, colorScheme: null },
+    { path: "light.html", look: "recense", colorScheme: "light" },
+    { path: "auto.html", look: "recense", colorScheme: null },
+    { path: "plan.md", look: null, colorScheme: null },
+    { path: "source.html", look: null, colorScheme: null },
+  ] as const;
+  for (const { path } of appearances)
+    await writeFile(join(fixture.source, path), "<style>p{color:#222}</style><p>Synthetic plan</p>");
+  await writeFile(
+    fixture.manifest,
+    JSON.stringify({
+      version: 1,
+      title: "Synthetic appearance export",
+      topics: [],
+      files: appearances.map(({ path }) => ({
+        path,
+        role: "doc",
+        ...(path === "source.html" ? { view: "source" } : {}),
+      })),
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+    }),
+  );
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  // Simulate stored looks from before the default changed, without marks in the source.
+  for (const { path, look, colorScheme } of appearances)
+    if (path !== "plan.md" && path !== "source.html")
+      await server.db.query((q) =>
+        q
+          .update(files)
+          .set({ look, colorScheme })
+          .where(and(eq(files.ownerId, server.ownerId), eq(files.path, path))),
+      );
+  const exported = await server.db.transaction((q) =>
+    snapshot(
+      q,
+      server.ownerId,
+      server.instance.id,
+      result.reviewId,
+      `https://hub.example/r/${result.reviewId}`,
+      Date.now(),
+      false,
+    ),
+  );
+  if (exported.kind !== "bundle") throw new Error("missing bundle");
+  const appearance = ({ path, look, colorScheme }: (typeof exported.bundle.files)[number]) => ({
+    path,
+    look,
+    colorScheme,
+  });
+  expect(exported.bundle.files.map(appearance)).toEqual(appearances);
+  expect(JSON.parse(exported.json).files.map(appearance)).toEqual(appearances);
+});
+
+test.each([
+  [false, null],
+  [true, "2026-11-04T10:00:00.000Z"],
+])("export carries binnedAt of a binned review (binned: %s)", async (binned, expected) => {
+  const fixture = await directFixture();
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  if (binned)
+    await server.db.query((q) =>
+      q
+        .update(reviews)
+        .set({ binnedAt: Date.parse("2026-11-04T10:00:00.000Z") })
+        .where(and(eq(reviews.ownerId, server.ownerId), eq(reviews.id, result.reviewId))),
+    );
+  const exported = await server.db.transaction((q) =>
+    snapshot(
+      q,
+      server.ownerId,
+      server.instance.id,
+      result.reviewId,
+      `https://hub.example/r/${result.reviewId}`,
+      Date.now(),
+      true,
+    ),
+  );
+  if (exported.kind !== "bundle") throw new Error("missing bundle");
+  expect(exported.bundle.review.binnedAt).toBe(expected);
+  expect(JSON.parse(exported.json).review.binnedAt).toBe(expected);
+});
+
+test("attach carries the stored intent review id even before the intent review is copied", async () => {
+  const fixture = await directFixture();
+  const { result } = await fixture.publish();
+  const server = await fixture.reviewer();
+  const intentReviewId = randomUUID();
+  await server.db.query((q) =>
+    q
+      .update(reviews)
+      .set({ intentReviewId })
+      .where(and(eq(reviews.ownerId, server.ownerId), eq(reviews.id, result.reviewId))),
+  );
+  const exported = await server.db.transaction((q) =>
+    snapshot(
+      q,
+      server.ownerId,
+      server.instance.id,
+      result.reviewId,
+      `https://hub.example/r/${result.reviewId}`,
+      Date.now(),
+      false,
+    ),
+  );
+  if (exported.kind !== "bundle") throw new Error("missing bundle");
+  expect(exported.bundle.review.intentReviewId).toBe(intentReviewId);
+  expect(JSON.parse(exported.json).review.intentReviewId).toBe(intentReviewId);
+});

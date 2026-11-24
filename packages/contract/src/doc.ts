@@ -88,3 +88,12 @@ export const SourceContent = z.object({
   lines: z.array(z.array(SourceToken).max(LIMITS.markdownDocBytes)).max(LIMITS.markdownDocBytes),
 });
 export type SourceContent = z.infer<typeof SourceContent>;
+
+/**
+ * The look an HTML doc was published with. Input from before the rename may still say `"emend"`;
+ * it is accepted and read as `"recense"`, so every parsed value is one of the two current names.
+ */
+export const HtmlLookValue = z
+  .enum(["recense", "custom", "emend"])
+  .transform((look) => (look === "emend" ? "recense" : look));
+export type HtmlLookValue = z.output<typeof HtmlLookValue>;

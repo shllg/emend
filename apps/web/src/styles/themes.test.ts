@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { readFileSync } from "node:fs";
-import { DEFAULT_THEME_FONTS, THEME_SCALE_STEPS, THEME_TOKENS } from "@emend/contract";
+import { DEFAULT_THEME_FONTS, THEME_SCALE_STEPS, THEME_TOKENS } from "@recense/contract";
 import { expect, test } from "vitest";
 import { DARK_THEME, LIGHT_THEME } from "../../../../packages/core/src/theme/bases.ts";
 import { parseThemeColor, themeColorHex } from "../../../../packages/core/src/theme/color.ts";

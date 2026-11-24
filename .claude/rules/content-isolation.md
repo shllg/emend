@@ -4,8 +4,8 @@ paths:
   - "apps/web/src/**"
   - "apps/web/public/**"
   - "apps/web/mermaid-frame.*"
-  - "apps/emend/src/server/content/**"
-  - "apps/emend/src/server/http/headers.ts"
+  - "apps/recense/src/server/content/**"
+  - "apps/recense/src/server/http/headers.ts"
 ---
 
 # Content isolation
@@ -19,7 +19,7 @@ with the reviewer's session can send instructions to the waiting agent in the re
   runs after sanitize and is the only source of `style` attributes. Comments add only two steps
   before remark-rehype: a size check that rejects a body whose references expand too far, and a
   line-break step that emits only `text` and `break` nodes. Any other step before sanitize needs
-  `emend-security-reviewer`.
+  `recense-security-reviewer`.
 - Never widen the sanitize schema to allow `script`, `style`, `iframe`, `object`, `embed`, `form`,
   `svg`, `on*` attributes, author `style` attributes, or `javascript:`, `data:` or `vbscript:`
   URLs. Author `id`, `class` and `name` get the `user-content-` prefix; `data-*` is dropped.
@@ -39,12 +39,12 @@ with the reviewer's session can send instructions to the waiting agent in the re
 - Frame messages: the parent accepts a message only when `event.source` is that frame's
   `contentWindow` and it parses with the contract's limits. A proposed anchor is shown to the
   reviewer and saved only by the reviewer. The parent posts only that doc's quotes into the
-  frame, never comment bodies. A link to another doc arrives as `emend:navigate`; the parent opens
-  only a doc of the same revision, in that doc's own section. No doc script runs, so only emend's
+  frame, never comment bodies. A link to another doc arrives as `recense:navigate`; the parent opens
+  only a doc of the same revision, in that doc's own section. No doc script runs, so only recense's
   own code can send. After a load the parent did not cause, the parent accepts nothing from the
-  frame until it reloads it. `doc-navigation.md` adds `emend:goto` and `emend:position`.
+  frame until it reloads it. `doc-navigation.md` adds `recense:goto` and `recense:position`.
 - A doc's own scripts never run: no inline script, event handler, `javascript:` URL or script
-  file. Only emend's bridge runs, allowed by its hash. WebRTC reaches the network and no CSP stops
+  file. Only recense's bridge runs, allowed by its hash. WebRTC reaches the network and no CSP stops
   it, so never allow a doc's own script.
 - Links: only `http:`, `https:` and `mailto:`, with `rel="noopener noreferrer nofollow"`. Relative
   links keep no `href`, except links between docs as `doc-navigation.md` defines them.
@@ -70,11 +70,11 @@ with the reviewer's session can send instructions to the waiting agent in the re
   `Access-Control-Allow-Origin: *`, because the frame's opaque origin makes every asset load
   cross-origin and every font a CORS request. `sandbox allow-scripts` is there for the bridge
   alone; `connect-src 'none'` keeps the bridge off the network.
-- Look `emend` injects emend's `pub-frame.css`: no `</`, `\` or non-`data:` URL.
+- Look `recense` injects recense's `pub-frame.css`: no `</`, `\` or non-`data:` URL.
 - Mermaid frame: `default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src
   data:`, plus `X-Frame-Options: SAMEORIGIN` on that path only, so the app page can frame it.
 - Never weaken the app CSP, `X-Frame-Options: DENY`, the content path's CSP or the frame
   sandbox. Any change to headers, sandbox attributes, the bridge, the pub style or the sanitize
-  schema needs `emend-security-reviewer`.
+  schema needs `recense-security-reviewer`.
 - Each renderer change adds hostile-input tests: `<script>`, `<img onerror>`, `javascript:`
   links, raw HTML in Markdown and the glossary, SVG, a Mermaid `click` directive.

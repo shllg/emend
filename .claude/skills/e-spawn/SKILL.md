@@ -58,7 +58,7 @@ is blocked, or is already taken, and creates nothing; relay its message.
    land locally or to skip GitHub, say so and stop; `<main>/bin/wt setup` makes a worktree for that.
 5. Pass a model or an effort only when the request names one.
 
-**Security stop.** When the request describes a way to break emend's security, create nothing
+**Security stop.** When the request describes a way to break recense's security, create nothing
 public. Examples: reading another owner's data, running code from a reviewed repository, agent HTML
 on the app origin, a token leak, a way past a guard. Stop here, before step 3, and write no draft
 file. Tell the owner, and offer the private routes: a private security advisory on GitHub, a note in
@@ -78,7 +78,7 @@ without a further question. It covers no other issue.
 2. Run `node '<main>/scripts/check-public.ts' --root '<main>' --file '<main>/.wt/spawn-<slug>-title.txt' --file '<main>/.wt/spawn-<slug>.md'`.
    Fix every hit and run it again until it exits 0. When it refuses for lack of a terms list, stop
    and ask the owner to create `<main>/.private-terms`. Never read, create, edit or remove that file,
-   and never set `EMEND_PRIVATE_TERMS`.
+   and never set `RECENSE_PRIVATE_TERMS`.
 3. Show the owner the title and the body as raw Markdown, each in its own fenced block, exactly as
    the files hold them. The worker gets exactly that text.
 4. Run

@@ -1,4 +1,4 @@
-import { RenderedWriteup, type WriteupInput } from "@emend/contract";
+import { RenderedWriteup, type WriteupInput } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useRef } from "react";
@@ -55,7 +55,7 @@ async function mount(glossary: WriteupInput["glossary"] = entries) {
       </ToastProvider>
     </QueryClientProvider>,
   );
-  const marks = [...view.container.querySelectorAll<HTMLElement>("span.emend-term")];
+  const marks = [...view.container.querySelectorAll<HTMLElement>("span.recense-term")];
   const first = marks[0];
   return { ...view, writeup, marks, first: first as HTMLElement };
 }
@@ -71,28 +71,28 @@ function TermFixture({ terms, label = "Budget" }: { terms?: RenderedWriteup["ter
     <>
       <div ref={root}>
         <div data-block-id="overview-12345678">
-          <span key={label} className="emend-term" data-emend-term="0">
+          <span key={label} className="recense-term" data-recense-term="0">
             {label}
           </span>
           {["-1", "1.5", "1e0", " 0", "2", "NaN"].map((value) => (
-            <span key={value} className="emend-term" data-emend-term={value}>
+            <span key={value} className="recense-term" data-recense-term={value}>
               {value}
             </span>
           ))}
-          <span className="user-content-emend-term" data-emend-term="0">
+          <span className="user-content-recense-term" data-recense-term="0">
             Namespaced
           </span>
         </div>
         <div data-block-id="glossary-12345678">
-          <span className="emend-term" data-emend-term="0">
+          <span className="recense-term" data-recense-term="0">
             Glossary term
           </span>
         </div>
-        <span className="emend-term" data-emend-term="0">
+        <span className="recense-term" data-recense-term="0">
           No block
         </span>
       </div>
-      <span className="emend-term" data-emend-term="0">
+      <span className="recense-term" data-recense-term="0">
         Outside
       </span>
       <GlossaryTerms root={root} terms={terms} href={(id) => `#block-${id}`} />

@@ -164,7 +164,7 @@ describe("hostile author content", () => {
 
   test("drops alternate URL attributes and ignores forged renderer metadata", async () => {
     const blocks = await render(
-      '<p><img src="https://example.com/x.png" longdesc="/api/v1/sends"><a href="https://example.com" data-emend-classes="send-bar" data-emend-diagram="evil">link</a></p><blockquote cite="/api/v1/sends">quote</blockquote>',
+      '<p><img src="https://example.com/x.png" longdesc="/api/v1/sends"><a href="https://example.com" data-recense-classes="send-bar" data-recense-diagram="evil">link</a></p><blockquote cite="/api/v1/sends">quote</blockquote>',
     );
     expect(blocks.every((block) => block.kind !== "diagram")).toBe(true);
     expect(blocks.map((block) => block.html).join("")).not.toMatch(/longdesc=|cite=|class="send-bar"/);

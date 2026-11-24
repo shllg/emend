@@ -1,4 +1,4 @@
-import { OTHER_TOPIC, type Target, type TopicMeta } from "@emend/contract";
+import { OTHER_TOPIC, type Target, type TopicMeta } from "@recense/contract";
 import { FileCode, FileText, ListTree, MessageSquare, TextSelect } from "lucide-react";
 import { expect, test } from "vitest";
 import { targetLabel } from "./targets.ts";

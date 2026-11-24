@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { type RefObject, useEffect, useMemo, useState } from "react";
 import { HIDDEN_COMMENTS_GROUP } from "../../lib/hidden-writeup.ts";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";

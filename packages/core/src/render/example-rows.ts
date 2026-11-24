@@ -69,7 +69,7 @@ export function exampleRows() {
         marker?.type === "element" &&
         marker.tagName === "span" &&
         Array.isArray(marker.properties.className) &&
-        marker.properties.className.includes("emend-callout-marker")
+        marker.properties.className.includes("recense-callout-marker")
       ) {
         // Keep the hidden marker and its separators outside the visible example rows.
         prefix.push(marker);
@@ -87,7 +87,7 @@ export function exampleRows() {
             child.type === "element" &&
             child.tagName === "br" &&
             Array.isArray(child.properties.className) &&
-            child.properties.className.includes("emend-callout-marker-break")
+            child.properties.className.includes("recense-callout-marker-break")
           ) {
             prefix.push(child);
           } else break;
@@ -117,18 +117,18 @@ export function exampleRows() {
       const rows = lines.map((line) => labelledRow(line.children));
       if (!rows.some(Boolean)) return;
       const classes = Array.isArray(node.properties.className) ? node.properties.className : [];
-      node.properties.className = [...classes, "emend-example-rows"];
+      node.properties.className = [...classes, "recense-example-rows"];
       const children: Children = [...prefix];
       let current: Row | undefined;
       const flush = () => {
         if (!current) return;
         children.push(
           current.label
-            ? span("emend-example-row", [
-                span("emend-example-label", current.label),
-                span("emend-example-value", current.value),
+            ? span("recense-example-row", [
+                span("recense-example-label", current.label),
+                span("recense-example-value", current.value),
               ])
-            : span("emend-example-line", current.value),
+            : span("recense-example-line", current.value),
         );
       };
       for (const [index, line] of lines.entries()) {

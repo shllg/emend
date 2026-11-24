@@ -15,9 +15,9 @@ test("favors word starts and consecutive letters", () => {
 });
 
 test("favors complete issue numbers over longer numbers with the same prefix", () => {
-  expect(fuzzyMatch("175", "emend-175-a")).toBeGreaterThan(fuzzyMatch("175", "emend-1750-other") as number);
-  expect(fuzzyMatch("18", "emend-18-x")).toBeGreaterThan(fuzzyMatch("18", "emend-184-y") as number);
-  expect(fuzzyMatch("175", "emend-175")).toBeGreaterThan(fuzzyMatch("175", "emend-1750") as number);
+  expect(fuzzyMatch("175", "recense-175-a")).toBeGreaterThan(fuzzyMatch("175", "recense-1750-other") as number);
+  expect(fuzzyMatch("18", "recense-18-x")).toBeGreaterThan(fuzzyMatch("18", "recense-184-y") as number);
+  expect(fuzzyMatch("175", "recense-175")).toBeGreaterThan(fuzzyMatch("175", "recense-1750") as number);
 });
 
 test("rejects missing first or middle letters without affecting repeated calls", () => {
@@ -49,7 +49,7 @@ test("chooses the best alignment even after an earlier matching start or letter"
 });
 
 test("matches words across fields independently of case and word order", () => {
-  const texts = ["Performance harness", "emend-175-harness", "Workshop"] as const;
+  const texts = ["Performance harness", "recense-175-harness", "Workshop"] as const;
   const score = (fuzzyMatch("175", texts[1]) as number) + (fuzzyMatch("perf", texts[0]) as number);
   expect(fuzzyMatchFields("175 PERF", texts)).toBe(score);
   expect(fuzzyMatchFields("perf\t175", texts)).toBe(score);

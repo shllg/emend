@@ -1,15 +1,16 @@
-import type { GlossaryTerm } from "@emend/contract";
+import type { GlossaryTerm } from "@recense/contract";
 import type { RefObject } from "react";
 import { createPortal } from "react-dom";
 import { type HoverTarget, useHoverCard } from "../../lib/use-hover-card.ts";
 
-const TERM = "span.emend-term[data-emend-term]";
+// Blocks stored before the rename carry `emend-term` and `data-emend-term`; they keep working.
+const TERM = "span:is(.recense-term, .emend-term):is([data-recense-term], [data-emend-term])";
 
 function termAt(target: EventTarget | null, root: HTMLElement, terms: GlossaryTerm[]): HoverTarget | undefined {
   if (!(target instanceof Element)) return;
   const element = target.closest<HTMLElement>(TERM);
   const block = element?.closest<HTMLElement>("[data-block-id]");
-  const value = element?.dataset.emendTerm;
+  const value = element?.dataset.recenseTerm ?? element?.dataset.emendTerm;
   if (
     !element ||
     !root.contains(element) ||

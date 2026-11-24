@@ -2,9 +2,9 @@
 
 ## The service does not start
 
-1. Run `emend service status`. It prints the launch agent's state and its last exit code.
+1. Run `recense service status`. It prints the launch agent's state and its last exit code.
 2. Check that the port is free: another program may hold it.
-3. Run `emend service uninstall`, then `emend service install` again.
+3. Run `recense service uninstall`, then `recense service install` again.
 
 ## The browser shows a blank page
 
@@ -12,4 +12,4 @@ The server is up but the browser holds an old build. Reload the page with the ca
 
 ## Still stuck
 
-Open an issue and include the output of `emend service status`. Leave out anything you do not want to share.
+Open an issue and include the output of `recense service status`. Leave out anything you do not want to share.

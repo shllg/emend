@@ -20,7 +20,7 @@ function screenshot(element: EventTarget | null, root: HTMLElement): LightboxIte
   const block = element.closest<HTMLElement>("[data-block-id]");
   const src = element.getAttribute("src");
   if (
-    !wrapper?.matches("span.emend-media") ||
+    !wrapper?.matches("span:is(.recense-media, .emend-media)") ||
     !block ||
     !root.contains(block) ||
     !src ||
@@ -29,7 +29,9 @@ function screenshot(element: EventTarget | null, root: HTMLElement): LightboxIte
   )
     return;
   const caption =
-    wrapper.querySelector(":scope > .emend-media-caption")?.textContent?.trim() || element.alt.trim() || "Screenshot";
+    wrapper.querySelector(":scope > :is(.recense-media-caption, .emend-media-caption)")?.textContent?.trim() ||
+    element.alt.trim() ||
+    "Screenshot";
   return { kind: "image", src, caption, blockId: block.dataset.blockId ?? "", element };
 }
 
@@ -54,7 +56,9 @@ function diagram(
 
 function collect(root: HTMLElement, diagramSource: DiagramSource) {
   // Include folded groups: the gallery follows all screenshots and diagrams in reading order.
-  return [...root.querySelectorAll("span.emend-media > img, button[data-lightbox-diagram]")].flatMap((element) => {
+  return [
+    ...root.querySelectorAll("span:is(.recense-media, .emend-media) > img, button[data-lightbox-diagram]"),
+  ].flatMap((element) => {
     const item = screenshot(element, root) ?? diagram(element, root, diagramSource);
     return item ? [item] : [];
   });

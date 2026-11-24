@@ -1,6 +1,6 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { ok } from "node:assert/strict";
-import type { RenderedBlock } from "@emend/contract";
+import type { RenderedBlock } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";

@@ -1,4 +1,4 @@
-import type { RevisionView } from "@emend/contract";
+import type { RevisionView } from "@recense/contract";
 import { afterEach, expect, test, vi } from "vitest";
 import { docFilename, docHeading, docTitle, findDocHeadings } from "./doc-navigation.ts";
 

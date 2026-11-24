@@ -1,4 +1,3 @@
-import type { AgentNoteView, FileView, RevisionView, Target, ThreadView } from "@emend/contract";
 import type {
   DiffLineAnnotation,
   FileDiffMetadata,
@@ -8,6 +7,7 @@ import type {
 } from "@pierre/diffs";
 import { FileDiff as PierreFileDiff, WorkerPoolContextProvider } from "@pierre/diffs/react";
 import DiffWorker from "@pierre/diffs/worker/worker.js?worker";
+import type { AgentNoteView, FileView, RevisionView, Target, ThreadView } from "@recense/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type ReactElement,

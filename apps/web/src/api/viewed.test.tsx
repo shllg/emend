@@ -1,4 +1,4 @@
-import type { RevisionView, ViewedRequest } from "@emend/contract";
+import type { RevisionView, ViewedRequest } from "@recense/contract";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";

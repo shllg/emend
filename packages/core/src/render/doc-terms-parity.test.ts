@@ -29,7 +29,7 @@ const apply = (tree: HtmlRoot, terms: unknown) => {
 const reference = (entries: Entry[], tree: HtmlRoot) => apply(tree, termMatcher(entries, Number.MAX_SAFE_INTEGER));
 const doc = (entries: Entry[], tree: HtmlRoot) => apply(tree, docTermMatcher(entries, Number.MAX_SAFE_INTEGER));
 const same = (entries: Entry[], tree: HtmlRoot) => expect(doc(entries, tree)).toEqual(reference(entries, tree));
-const markCount = (tree: HtmlRoot) => JSON.stringify(tree).split('"emend-term"').length - 1;
+const markCount = (tree: HtmlRoot) => JSON.stringify(tree).split('"recense-term"').length - 1;
 
 const budget: Entry[] = [{ term: "budget", aliases: ["budget item", "allowance"] }, { term: "hub node" }];
 test.each([

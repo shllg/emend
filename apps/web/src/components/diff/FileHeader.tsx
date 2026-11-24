@@ -1,4 +1,4 @@
-import type { FileView } from "@emend/contract";
+import type { FileView } from "@recense/contract";
 import { ChevronDown, ChevronRight, MessageSquarePlus } from "lucide-react";
 import type { Ref } from "react";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";

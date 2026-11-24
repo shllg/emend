@@ -1,7 +1,7 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { RenderedBlock, ThreadView } from "@emend/contract";
+import type { RenderedBlock, ThreadView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type Element as HappyElement, PropertySymbol } from "happy-dom";
@@ -27,7 +27,7 @@ const block: RenderedBlock = {
 const diffPair: RenderedBlock = {
   ...block,
   text: "Before After Diff More room for seeds.",
-  html: `<p class="emend-media-row emend-media-pair emend-media-pair-diff"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span> <span class="emend-media emend-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff"><span class="emend-media-caption">Diff</span></span>\n<span class="emend-media-effect">More room for seeds.</span></p>`,
+  html: `<p class="recense-media-row recense-media-pair recense-media-pair-diff"><span class="recense-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="recense-media-caption">Before</span></span> <span class="recense-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="recense-media-caption">After</span></span> <span class="recense-media recense-media-diff"><img src="/api/v1/media/${"c".repeat(64)}" alt="Diff"><span class="recense-media-caption">Diff</span></span>\n<span class="recense-media-effect">More room for seeds.</span></p>`,
 };
 function mountPairStyles() {
   // Load the production hide rules directly without needing the app stylesheet bundle.
@@ -321,7 +321,7 @@ test("a thread jump to the After caption switches a Before-only pair to Side by 
   const pair: RenderedBlock = {
     ...block,
     text: "Before After",
-    html: `<p class="emend-media-row emend-media-pair"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span></p>`,
+    html: `<p class="recense-media-row recense-media-pair"><span class="recense-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="recense-media-caption">Before</span></span> <span class="recense-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="recense-media-caption">After</span></span></p>`,
   };
   const after: ThreadView = {
     ...thread,
@@ -376,10 +376,10 @@ for (const support of ["with highlights", "without Highlight", "without Intl.Seg
       };
       const view = mount([item], [{ key: "overview", blocks: [diffPair] }]);
       const prose = view.container.querySelector("[data-block-id]") as HTMLElement;
-      const diff = prose.querySelector<HTMLElement>(".emend-media-diff");
+      const diff = prose.querySelector<HTMLElement>(".recense-media-diff");
       const target = prose.querySelector(`img[alt="${quote === "After" ? "After" : "Diff"}"]`)?.parentElement;
       if (!diff || !target) throw new Error("Missing pair image");
-      if (support === "with highlights") expect(highlights.get("emend-comment")?.size).toBe(1);
+      if (support === "with highlights") expect(highlights.get("recense-comment")?.size).toBe(1);
       else expect(highlights.size).toBe(0);
       fireEvent.click(screen.getByRole("button", { name: initial }));
       expect(prose.getAttribute("data-pair-mode")).toBe(mode);
@@ -409,7 +409,7 @@ test.each([
   const pair: RenderedBlock = {
     ...block,
     text: "Before After",
-    html: `<p class="emend-media-row emend-media-pair"><span class="emend-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="emend-media-caption">Before</span></span> <span class="emend-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="emend-media-caption">After</span></span></p>`,
+    html: `<p class="recense-media-row recense-media-pair"><span class="recense-media"><img src="/api/v1/media/${"a".repeat(64)}" alt="Before"><span class="recense-media-caption">Before</span></span> <span class="recense-media"><img src="/api/v1/media/${"b".repeat(64)}" alt="After"><span class="recense-media-caption">After</span></span></p>`,
   };
   const view = mount([], [{ key: "overview", blocks: [pair] }]);
   const prose = view.container.querySelector("[data-block-id]") as HTMLElement;

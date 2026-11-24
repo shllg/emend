@@ -1,4 +1,4 @@
-import { type KeyBinding, type KeySetting, SHORTCUT_DEFAULTS, ShortcutCommand } from "@emend/contract";
+import { type KeyBinding, type KeySetting, SHORTCUT_DEFAULTS, ShortcutCommand } from "@recense/contract";
 
 interface Candidate {
   value: KeyBinding;

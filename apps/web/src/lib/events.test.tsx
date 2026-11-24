@@ -141,7 +141,7 @@ test("two tabs share one stream, parse forwarded events, and refresh the followe
   const leader = await mount();
   const follower = await mount();
   expect(Events.opened).toHaveLength(1);
-  expect(Channel.opened.map((channel) => channel.name)).toEqual(["emend-events", "emend-events"]);
+  expect(Channel.opened.map((channel) => channel.name)).toEqual(["recense-events", "recense-events"]);
   act(() => source().emit("publish", { reviewId: id, revision: 3, body: "discarded" }));
   await tick();
   for (const tab of [leader, follower]) {
@@ -161,7 +161,7 @@ test("two tabs share one stream, parse forwarded events, and refresh the followe
 test("malformed channel messages cannot update either tab or invalidate queries", async () => {
   const a = await mount();
   const b = await mount();
-  const attacker = new Channel("emend-events");
+  const attacker = new Channel("recense-events");
   act(() => {
     for (const value of [
       null,

@@ -1,4 +1,4 @@
-import { type ReviewView, type RevisionView, reviewDownloadPath } from "@emend/contract";
+import { type ReviewView, type RevisionView, reviewDownloadPath } from "@recense/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate, useParams, useRouter } from "@tanstack/react-router";
 import { X } from "lucide-react";

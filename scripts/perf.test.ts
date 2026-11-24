@@ -72,7 +72,7 @@ test("cache homes and ref parents use only absolute XDG cache folders with a hom
   ];
   for (const { parent, expected } of variants) {
     assert.equal(cacheHome(parent, "/synthetic/account"), expected);
-    assert.equal(refParent(parent, "/synthetic/account"), join(expected, "emend-perf"));
+    assert.equal(refParent(parent, "/synthetic/account"), join(expected, "recense-perf"));
   }
 });
 
@@ -86,9 +86,9 @@ test("pid namespaces read the Linux link and distinguish unreadable from non-Lin
 });
 
 test("ref markers record the run privately and refuse to overwrite an existing marker", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-ref-marker-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-ref-marker-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const marker = join(root, ".emend-perf-ref");
+  const marker = join(root, ".recense-perf-ref");
   writeRefMarker(root, true, 123, "synthetic-host", "pid:[101]");
   const contents = readFileSync(marker, "utf8");
   assert.deepEqual(JSON.parse(contents), { pid: 123, host: "synthetic-host", pidns: "pid:[101]", keep: true });
@@ -98,14 +98,14 @@ test("ref markers record the run privately and refuse to overwrite an existing m
   const nonLinux = join(root, "non-linux");
   mkdirSync(nonLinux);
   writeRefMarker(nonLinux, false, 456, "synthetic-host", null);
-  assert.deepEqual(JSON.parse(readFileSync(join(nonLinux, ".emend-perf-ref"), "utf8")), {
+  assert.deepEqual(JSON.parse(readFileSync(join(nonLinux, ".recense-perf-ref"), "utf8")), {
     pid: 456, host: "synthetic-host", pidns: null, keep: false,
   });
   const defaults = join(root, "defaults");
   mkdirSync(defaults);
   writeRefMarker(defaults, false);
   const pidns = pidNamespace();
-  assert.deepEqual(JSON.parse(readFileSync(join(defaults, ".emend-perf-ref"), "utf8")), {
+  assert.deepEqual(JSON.parse(readFileSync(join(defaults, ".recense-perf-ref"), "utf8")), {
     pid: process.pid, host: hostname(), pidns: pidns === undefined ? false : pidns, keep: false,
   });
 });
@@ -126,7 +126,7 @@ test("process liveness uses signal zero and treats only ESRCH as a gone process"
 });
 
 test("ref sweeping requires a valid marker for a gone process on this host and namespace without keep", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-ref-sweep-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const marker = { pid: process.pid + 1, host: "synthetic-host", pidns: "pid:[101]", keep: false };
   const cases: { name: string; marker?: string; alive?: boolean; removed?: boolean }[] = [
@@ -151,7 +151,7 @@ test("ref sweeping requires a valid marker for a gone process on this host and n
     await t.test(variant.name, () => {
       const parent = mkdtempSync(join(root, "case-"));
       const folder = mkdtempSync(join(parent, "ref-"));
-      const markerPath = join(folder, ".emend-perf-ref");
+      const markerPath = join(folder, ".recense-perf-ref");
       writeFileSync(join(folder, "payload"), "synthetic export");
       if (variant.marker !== undefined) writeFileSync(markerPath, variant.marker);
       const logs: string[] = [], probed: number[] = [];
@@ -174,7 +174,7 @@ test("ref sweeping requires a valid marker for a gone process on this host and n
 });
 
 test("ref sweeping removes stale exports only in a known matching pid namespace", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-namespace-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-ref-sweep-namespace-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const cases: { name: string; pidns: string | null | undefined; markerPidns?: string | null | false; removed?: boolean }[] = [
     { name: "same namespace", pidns: "pid:[101]", markerPidns: "pid:[101]", removed: true },
@@ -195,7 +195,7 @@ test("ref sweeping removes stale exports only in a known matching pid namespace"
     await t.test(variant.name, () => {
       const parent = mkdtempSync(join(root, "case-"));
       const folder = mkdtempSync(join(parent, "ref-"));
-      const markerPath = join(folder, ".emend-perf-ref");
+      const markerPath = join(folder, ".recense-perf-ref");
       const pid = process.pid + 1;
       const marker = JSON.stringify({ pid, host: "synthetic-host", pidns: variant.markerPidns, keep: false });
       writeFileSync(markerPath, marker);
@@ -218,21 +218,21 @@ test("ref sweeping removes stale exports only in a known matching pid namespace"
 });
 
 test("ref sweeping skips links, non-directories, non-file markers and names outside the export pattern", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-ref-sweep-links-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-ref-sweep-links-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const parent = join(root, "cache"), target = join(root, "outside");
   mkdirSync(parent);
   mkdirSync(target);
   writeRefMarker(target, false, process.pid + 1, "synthetic-host", "pid:[101]");
   writeFileSync(join(target, "payload"), "synthetic export");
-  const targetMarker = join(target, ".emend-perf-ref");
+  const targetMarker = join(target, ".recense-perf-ref");
   const contents = readFileSync(targetMarker, "utf8");
   const exportLink = join(parent, "ref-XXXXXX");
   symlinkSync(target, exportLink);
   const markerLinkFolder = mkdtempSync(join(parent, "ref-"));
-  const markerLink = join(markerLinkFolder, ".emend-perf-ref");
+  const markerLink = join(markerLinkFolder, ".recense-perf-ref");
   symlinkSync(targetMarker, markerLink);
-  const directoryMarker = join(mkdtempSync(join(parent, "ref-")), ".emend-perf-ref");
+  const directoryMarker = join(mkdtempSync(join(parent, "ref-")), ".recense-perf-ref");
   mkdirSync(directoryMarker);
   const file = join(parent, "ref-file01");
   writeFileSync(file, "synthetic file");
@@ -255,11 +255,11 @@ test("ref sweeping skips links, non-directories, non-file markers and names outs
   assert.equal(readFileSync(file, "utf8"), "synthetic file");
   assert.equal(readFileSync(targetMarker, "utf8"), contents);
   assert.equal(readFileSync(join(target, "payload"), "utf8"), "synthetic export");
-  for (const name of otherNames) assert.equal(readFileSync(join(parent, name, ".emend-perf-ref"), "utf8"), contents);
+  for (const name of otherNames) assert.equal(readFileSync(join(parent, name, ".recense-perf-ref"), "utf8"), contents);
 });
 
 test("ref sweeping keeps exports owned by another uid", (t) => {
-  const parent = mkdtempSync(join(tmpdir(), "emend-ref-sweep-owner-test-"));
+  const parent = mkdtempSync(join(tmpdir(), "recense-ref-sweep-owner-test-"));
   t.after(() => rmSync(parent, { recursive: true, force: true }));
   const folders = Array.from({ length: 2 }, () => mkdtempSync(join(parent, "ref-")));
   for (const folder of folders) writeRefMarker(folder, false, process.pid + 1, "synthetic-host", "pid:[101]");
@@ -270,11 +270,11 @@ test("ref sweeping keeps exports owned by another uid", (t) => {
   });
   assert.deepEqual(probed, []);
   assert.deepEqual(logs, []);
-  for (const folder of folders) assert(existsSync(join(folder, ".emend-perf-ref")));
+  for (const folder of folders) assert(existsSync(join(folder, ".recense-perf-ref")));
 });
 
 test("a ref removal error logs one warning and the sweep continues", (t) => {
-  const parent = mkdtempSync(join(tmpdir(), "emend-ref-sweep-error-test-"));
+  const parent = mkdtempSync(join(tmpdir(), "recense-ref-sweep-error-test-"));
   t.after(() => rmSync(parent, { recursive: true, force: true }));
   const folders = Array.from({ length: 2 }, () => mkdtempSync(join(parent, "ref-")));
   const pid = process.pid + 1;
@@ -299,7 +299,7 @@ test("a ref removal error logs one warning and the sweep continues", (t) => {
 });
 
 test("private ref ancestors include the folder and root and allow only the current uid or root", () => {
-  const paths = ["/cache/emend-perf/ref-synthetic", "/cache/emend-perf", "/cache", "/"];
+  const paths = ["/cache/recense-perf/ref-synthetic", "/cache/recense-perf", "/cache", "/"];
   const visited: string[] = [];
   assert.doesNotThrow(() => assertPrivateAncestors(paths[0], 1000, (path) => {
     visited.push(path);
@@ -317,7 +317,7 @@ test("private ref ancestors include the folder and root and allow only the curre
 });
 
 test("private ref ancestors reject unsafe metadata at the first affected folder", async (t) => {
-  const paths = ["/cache/emend-perf/ref-synthetic", "/cache/emend-perf", "/cache", "/"];
+  const paths = ["/cache/recense-perf/ref-synthetic", "/cache/recense-perf", "/cache", "/"];
   const safe = { uid: 1000, mode: 0o40700, isDirectory: () => true, isSymbolicLink: () => false };
   const cases = [
     { name: "group writable", entry: { ...safe, mode: 0o40770 }, reason: "is writable by its group or by others, who could add modules that Node would load" },
@@ -345,16 +345,16 @@ test("private ref ancestors reject unsafe metadata at the first affected folder"
 
 test("output protects real state; ref exports also reject the checkout and paths outside their parent", () => {
   const identity = (path: string) => path;
-  const states = ["/state/emend"];
-  for (const path of ["/state", "/state/emend", "/state/emend/perf"])
+  const states = ["/state/recense"];
+  for (const path of ["/state", "/state/recense", "/state/recense/perf"])
     assert.throws(() => assertOutputFolder(path, states, identity, "perf output"), {
-      message: "The perf output folder overlaps real emend state",
+      message: "The perf output folder overlaps real recense state",
     });
   assert.throws(() => assertOutputFolder("relative", states, identity, "perf output"), {
     message: "The perf output folder must be absolute",
   });
   assert.doesNotThrow(() => assertOutputFolder("/checkout/.wt/perf", states, identity, "perf output"));
-  const parent = "/cache/emend-perf";
+  const parent = "/cache/recense-perf";
   const checkout = join(parent, "checkout");
   const ref = join(parent, "ref");
   for (const path of [checkout, join(checkout, "ref")])
@@ -377,22 +377,22 @@ test("output protects real state; ref exports also reject the checkout and paths
   assert.throws(() => assertRefFolder(ref, "relative", parent, states, identity), {
     message: "Ref paths must be absolute",
   });
-  for (const stateParent of ["/state", "/state/emend", "/state/emend/cache"])
+  for (const stateParent of ["/state", "/state/recense", "/state/recense/cache"])
     assert.throws(() => assertRefFolder(join(stateParent, "ref"), checkout, stateParent, states, identity), {
-      message: "The ref parent folder overlaps real emend state",
+      message: "The ref parent folder overlaps real recense state",
     });
   assert.throws(() => assertRefFolder(ref, checkout, parent, states, (path) => path === parent ? "/state" : path), {
-    message: "The ref parent folder overlaps real emend state",
+    message: "The ref parent folder overlaps real recense state",
   });
   assert.doesNotThrow(() => assertRefFolder(ref, checkout, parent, states, identity));
   assert.throws(() =>
     assertRefFolder(ref, checkout, parent, states, (path) =>
-      path === ref ? "/state/emend/ref" : path,
+      path === ref ? "/state/recense/ref" : path,
     ),
-    { message: "The ref folder overlaps real emend state" },
+    { message: "The ref folder overlaps real recense state" },
   );
-  assert.throws(() => assertRefFolder("/state/emend", checkout, parent, states, identity), {
-    message: "The ref folder overlaps real emend state",
+  assert.throws(() => assertRefFolder("/state/recense", checkout, parent, states, identity), {
+    message: "The ref folder overlaps real recense state",
   });
   const main = readFileSync(new URL("./perf.ts", import.meta.url), "utf8");
   const checks = [...main.matchAll(/assertOutputFolder\(([^;]+)\);/g)];
@@ -439,7 +439,7 @@ test("ref exports guard the cache before sweeping and mark the export immediatel
 });
 
 test("a ref export requires its own three regular workspace files", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-ref-workspace-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-ref-workspace-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const files = ["package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml"];
   for (const file of files) writeFileSync(join(root, file), "synthetic workspace file");
@@ -472,7 +472,7 @@ test("perf git lookups disable optional locks and dirty ignores untracked files"
 
 test("perf uses the shared sealed lifecycle, environment and headless browser, including ref builds", () => {
   const env = childEnvironment("/tmp/synthetic-perf", "linux");
-  assert.equal(env.EMEND_HOME, "/tmp/synthetic-perf/emend");
+  assert.equal(env.RECENSE_HOME, "/tmp/synthetic-perf/recense");
   assert.equal(env.HOME, "/tmp/synthetic-perf/home");
   assert.equal(env.PATH, "/usr/bin:/bin");
   assert(!("NODE_OPTIONS" in env));
@@ -514,7 +514,7 @@ test("build children use Node then pnpm on PATH and reuse only the parent Corepa
     HOME: "/synthetic/parent-home",
     PATH: "/synthetic/parent-bin",
     NODE_OPTIONS: "--trace-warnings",
-    EMEND_HOME: "/synthetic/parent-state",
+    RECENSE_HOME: "/synthetic/parent-state",
     COREPACK_ENABLE_NETWORK: "1",
     pnpm_config_pm_on_fail: "download",
     pnpm_config_verify_deps_before_run: "install",
@@ -589,7 +589,7 @@ test("successful builds stay silent; empty and signalled failures keep their one
 });
 
 test("ref resolution permits main ancestry and refuses branch-only commits before export", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-main-ref-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-main-ref-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const repo = join(root, "repo");
   mkdirSync(repo);
@@ -707,7 +707,7 @@ test("report escapes text, stays self-contained, marks busy runs and skipped rea
   assert(html.includes("200%"));
   assert(html.includes("<svg"));
   assert(html.indexOf("<code>bbbb") < html.indexOf("<code>aaaa"));
-  const out = mkdtempSync(join(tmpdir(), "emend-report-test-"));
+  const out = mkdtempSync(join(tmpdir(), "recense-report-test-"));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   writeReport(out, previous);
   const json = writeReport(out, current);
@@ -726,7 +726,7 @@ test("prototype-named metrics use fallback labels and survive writing the report
   const saved: unknown = JSON.parse(JSON.stringify(current));
   assert(isReportRun(saved));
   assert(Object.hasOwn(saved.measurements[0].metrics, "__proto__"));
-  const out = mkdtempSync(join(tmpdir(), "emend-metric-names-test-"));
+  const out = mkdtempSync(join(tmpdir(), "recense-metric-names-test-"));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   const notes: string[] = [];
   const json = writeReport(out, saved, (note) => notes.push(note));
@@ -807,7 +807,7 @@ test("skipped steps retain every full name and reason, including journeys with t
 });
 
 test("stray and truncated JSON files are omitted with one-line notes and valid history survives", (t) => {
-  const out = mkdtempSync(join(tmpdir(), "emend-stray-report-test-"));
+  const out = mkdtempSync(join(tmpdir(), "recense-stray-report-test-"));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   const previous = run(), current = run();
   previous.commit = { ...previous.commit, sha: "b".repeat(40), date: "2026-10-25T12:00:00Z" };
@@ -849,7 +849,7 @@ test("saved run validation checks nested metrics, skipped reasons, load and opti
 });
 
 test("run JSON preserves seal counts and the run list distinguishes zero from historical missing counts", (t) => {
-  const out = mkdtempSync(join(tmpdir(), "emend-seal-report-test-"));
+  const out = mkdtempSync(join(tmpdir(), "recense-seal-report-test-"));
   t.after(() => rmSync(out, { recursive: true, force: true }));
   const historical = run(), requestsOnly = run(), zero = run(), current = run();
   historical.commit = { ...historical.commit, sha: "d".repeat(40), date: "2026-10-23T12:00:00Z" };
@@ -914,7 +914,7 @@ test("route patterns group IDs, revisions and hashes without erasing route versi
 });
 
 test("byte counts use disk gzip, warm responses transfer no bytes, API timings use headers minus send", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-metrics-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-metrics-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "assets"));
   const js = "export const synthetic = 1;";
@@ -971,7 +971,7 @@ test("argument parsing rejects unknown or incomplete flags", () => {
 });
 
 test("CDP fields are narrowed before recording requests, response sizes and API timings", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-cdp-fields-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-cdp-fields-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const measurement = new NetworkMeasurement(root, origin);
@@ -1001,7 +1001,7 @@ test("CDP fields are narrowed before recording requests, response sizes and API 
 
 test("seeding uses distinct publish keys, reviewer APIs and CLI replies; extra publishes are not part of the seed", async (t) => {
   const { seed } = await import("./perf/seed.ts");
-  const root = mkdtempSync(join(tmpdir(), "emend-seed-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-seed-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const keys = new Set<string>();
   const gitCalls: { cwd: string; args: string[] }[] = [];
@@ -1081,7 +1081,7 @@ function assetResponse(
 }
 
 test("page figures count documents only and dedicated worker scripts have separate figures", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-loaded-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-loaded-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const assets = { js: "export const synthetic = 1;", css: "body { color: blue; }" };
@@ -1120,7 +1120,7 @@ test("page figures count documents only and dedicated worker scripts have separa
 });
 
 test("service worker network fetches count once only for assets also requested by the page", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-worker-transfer-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-worker-transfer-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const assets = { js: "export const synthetic = 1;", css: "body { color: blue; }" };
@@ -1162,7 +1162,7 @@ test("service worker network fetches count once only for assets also requested b
 });
 
 test("page and service worker precache races leave byte figures unchanged in every order and outcome", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-precache-race-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-precache-race-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const bytes = "export const synthetic = 1;";
@@ -1193,7 +1193,7 @@ test("page and service worker precache races leave byte figures unchanged in eve
 });
 
 test("page-tree requests without responses keep files out of service worker only figures", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-request-only-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-request-only-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const bytes = "export const syntheticWorker = 1;";
@@ -1220,7 +1220,7 @@ test("page-tree requests without responses keep files out of service worker only
 });
 
 test("service worker navigation pass-through counts the folder index once in network and never in sw", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-navigation-transfer-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-navigation-transfer-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const bytes = "<!doctype html><title>Synthetic</title>";
@@ -1239,7 +1239,7 @@ test("service worker navigation pass-through counts the folder index once in net
 });
 
 test("dedicated worker scripts transfer once across sessions and shared document assets stay in page figures", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-worker-scripts-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-worker-scripts-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const bytes = "export const syntheticHighlighter = 1;";
@@ -1288,7 +1288,7 @@ test("dedicated worker scripts transfer once across sessions and shared document
 });
 
 test("network accounting counts repeated page fetches and duplicate worker events once per file", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-transfer-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-transfer-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const js = "export const synthetic = 1;";
   writeFileSync(join(root, "app.js"), js);
@@ -1313,7 +1313,7 @@ test("network accounting counts repeated page fetches and duplicate worker event
 });
 
 test("asset paths stay inside the measured build, including worker-only requests and symlinks", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-asset-guard-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-asset-guard-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const dist = join(root, "dist");
   mkdirSync(dist);
@@ -1330,7 +1330,7 @@ test("asset paths stay inside the measured build, including worker-only requests
 });
 
 test("service worker fetches include every build file type once and resolve folder indexes", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-sw-files-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-sw-files-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   mkdirSync(join(root, "docs"));
@@ -1372,7 +1372,7 @@ test("service worker fetches include every build file type once and resolve fold
 });
 
 test("network and service worker figures exclude cache responses, 304s and unsuccessful fetches", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-sw-cache-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-sw-cache-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const bytes = "<!doctype html><title>Synthetic</title>";
@@ -1396,7 +1396,7 @@ test("network and service worker figures exclude cache responses, 304s and unsuc
 });
 
 test("service worker file and folder paths cannot escape the measured build", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-sw-guard-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-sw-guard-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const dist = join(root, "dist");
   mkdirSync(dist);
@@ -1413,7 +1413,7 @@ test("service worker file and folder paths cannot escape the measured build", (t
 });
 
 test("file preparation settles the loaded review after file readiness and before opening Files", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-file-prepare-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-file-prepare-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const steps: string[] = [];
   const frames: (() => void)[] = [];
@@ -1534,7 +1534,7 @@ test("worker preparation timeouts skip samples without recording traffic or timi
 });
 
 test("cold samples record through worker activation and a second settle without extending timings", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "emend-sw-sample-test-"));
+  const root = mkdtempSync(join(tmpdir(), "recense-sw-sample-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const origin = "http://127.0.0.1:43210";
   const bytes = "synthetic build content";

@@ -286,7 +286,7 @@ async function main() {
       skip("run/build", error);
       throw error;
     }
-    const entry = join(source, "apps/emend/dist/emend.mjs");
+    const entry = join(source, "apps/recense/dist/recense.mjs");
     if (!existsSync(entry)) throw new Error("The CLI is not built; run pnpm build first");
     const server = await sealed.startServer(entry, sealedRoot, env, "00000000-0000-4000-8000-000000000175", true);
     const { browser, desktop } = await sealed.signIn(entry, sealedRoot, env, server, options.chromium, LAPTOP, true);
@@ -310,7 +310,7 @@ async function main() {
       skip("seed/count", new Error(`Created ${new Set(seeded.reviewIds).size} of ${SEED.inboxReviews} inbox items`));
     // Keep sign-in cookies in the default context, but stop its inbox polling during measurements.
     await desktop.send("Page.navigate", { url: "about:blank" });
-    run.measurements = await measureJourneys(browser, seeded, join(source, "apps/emend/dist/web"), skip);
+    run.measurements = await measureJourneys(browser, seeded, join(source, "apps/recense/dist/web"), skip);
     console.log("- timing publication after browser journeys");
     const publishTimes: number[] = [];
     for (let repeat = 0; repeat < REPETITIONS; repeat++) {

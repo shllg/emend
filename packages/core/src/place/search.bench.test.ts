@@ -1,4 +1,4 @@
-import type { LinesTarget } from "@emend/contract";
+import type { LinesTarget } from "@recense/contract";
 import { expect, test } from "vitest";
 import { placeHtmlSpan } from "./html.ts";
 import { placeLines } from "./lines.ts";

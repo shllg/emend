@@ -10,12 +10,12 @@ const execArgv = process.versions.node.split(".")[0] === "24" ? ["--no-wasm-code
 
 export default defineConfig({
   test: {
-    fileParallelism: process.env.EMEND_BENCH !== "1",
+    fileParallelism: process.env.RECENSE_BENCH !== "1",
     // Local runs leave half the cores for git, Vite and server processes tests start; CI keeps Vitest's default.
     maxWorkers: process.env.CI ? undefined : "50%",
     projects: [
       // Only pnpm bench opts in; ordinary and sharded runs never discover this project.
-      ...(process.env.EMEND_BENCH === "1"
+      ...(process.env.RECENSE_BENCH === "1"
         ? [
             {
               test: {
@@ -31,20 +31,20 @@ export default defineConfig({
             },
           ]
         : []),
-      ...["packages/contract", "packages/core", "apps/emend"].map((root) => ({
+      ...["packages/contract", "packages/core", "apps/recense"].map((root) => ({
         test: {
           name: root,
           execArgv,
           root,
           environment: "node",
           globalSetup,
-          include: ["src/**/*.test.ts", isolationTest, ...(root === "apps/emend" ? [launcherTest, skillsTest] : [])],
+          include: ["src/**/*.test.ts", isolationTest, ...(root === "apps/recense" ? [launcherTest, skillsTest] : [])],
           exclude: [...configDefaults.exclude, "**/*.bench.test.ts"],
         },
       })),
       {
         oxc: { jsx: { runtime: "automatic" } },
-        define: { __EMEND_VERSION__: JSON.stringify("0.0.0-test") },
+        define: { __RECENSE_VERSION__: JSON.stringify("0.0.0-test") },
         test: {
           name: "apps/web",
           execArgv,

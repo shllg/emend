@@ -128,8 +128,8 @@ test("missing connection evidence and partial blockers cannot release work", () 
 
 test("shared eligibility checks claims by number across slugs and registry metadata", () => {
   for (const claim of [
-    { branch: "emend-42-other-title", reason: "local branch" },
-    { branch: "emend-other", reason: "registered worktree", issue: 42 },
+    { branch: "recense-42-other-title", reason: "local branch" },
+    { branch: "recense-other", reason: "registered worktree", issue: 42 },
     { branch: "fix-anything", reason: "open PR #9", issue: 42 },
   ])
     assert.equal(evaluateIssue(readyIssue(42), "owner", indexClaims([claim]), READY_LABEL).row.status, "taken");
@@ -137,7 +137,7 @@ test("shared eligibility checks claims by number across slugs and registry metad
     evaluateIssue(
       readyIssue(42),
       "owner",
-      indexClaims([{ branch: "emend-420-other", reason: "local branch" }]),
+      indexClaims([{ branch: "recense-420-other", reason: "local branch" }]),
       READY_LABEL,
     ).row.status,
     "pickable",
@@ -213,18 +213,18 @@ test("issue check refuses invalid branches, mismatched metadata, and missing or 
       commonDir: join(dir, ".git"),
       worktreesDir: join(dir, "worktrees"),
       callerTop: dir,
-      callerBranch: "emend-42-fix",
+      callerBranch: "recense-42-fix",
     };
     const fails = (reason: RegExp) =>
       assert.throws(
         () => checkIssue(repo),
         (e: unknown) => e instanceof WtError && e.code === 1 && reason.test(e.message) && !e.message.includes("\n"),
       );
-    for (const branch of [null, "main", "emend-042-task", "emend-0-invalid", "emend-42-"]) {
+    for (const branch of [null, "main", "recense-042-task", "recense-0-invalid", "recense-42-"]) {
       repo.callerBranch = branch;
       fails(/issue worktree/);
     }
-    repo.callerBranch = "emend-42-fix";
+    repo.callerBranch = "recense-42-fix";
     fails(/does not match/);
     mkdirSync(join(dir, ".wt"));
     writeFileSync(join(dir, ".wt/worktree.json"), JSON.stringify({ issue: 43 }));
@@ -256,7 +256,7 @@ test("issue spawn refuses local mode before any tool call or filesystem access",
 test("closing keywords follow the registered issue branch and scan comments and fences", () =>
   snapshotFixture((dir) => {
     const repo = { callerTop: dir } as Repo;
-    const branch = "emend-42-fix-pane";
+    const branch = "recense-42-fix-pane";
     mkdirSync(join(dir, ".wt"));
     writeFileSync(join(dir, ".wt/worktree.json"), JSON.stringify({ issue: 42 }));
     for (const body of [
@@ -297,11 +297,11 @@ test("closing keywords follow the registered issue branch and scan comments and 
       "<!--\n```\n-->\nCloses #42",
     ])
       closingGuard(repo, branch, body);
-    for (const name of ["emend-42-Uppercase", "emend-42-你好", "emend-42-"]) {
+    for (const name of ["recense-42-Uppercase", "recense-42-你好", "recense-42-"]) {
       assert.throws(() => closingGuard(repo, name, "No closing keyword"), /must close/);
       closingGuard(repo, name, "Closes #42");
     }
-    for (const task of ["emend-feature-042-old-task", "042-old-task", "feature-name"])
+    for (const task of ["recense-feature-042-old-task", "042-old-task", "feature-name"])
       closingGuard(repo, task, "No closing keyword required.");
     writeFileSync(join(dir, ".wt/worktree.json"), JSON.stringify({ issue: 43 }));
     assert.throws(() => closingGuard(repo, branch, "Closes #42"), /does not match/);

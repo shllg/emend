@@ -1,5 +1,5 @@
 // @vitest-environment-options {"settings":{"disableIframePageLoading":true}}
-import { LIMITS, type ReviewView, RevisionView, SyntaxRole, type ThreadView } from "@emend/contract";
+import { LIMITS, type ReviewView, RevisionView, SyntaxRole, type ThreadView } from "@recense/contract";
 import { QueryClient } from "@tanstack/react-query";
 import { createMemoryHistory } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -559,7 +559,7 @@ test("a frame navigate message cannot open a source-only doc", async () => {
     window.dispatchEvent(
       new MessageEvent("message", {
         source: frame.contentWindow,
-        data: { type: "emend:navigate", path, fragment: "" },
+        data: { type: "recense:navigate", path, fragment: "" },
       }),
     );
   });

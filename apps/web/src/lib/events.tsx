@@ -1,4 +1,4 @@
-import type { ReviewEvent } from "@emend/contract";
+import type { ReviewEvent } from "@recense/contract";
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
 import { subscribeReviewEvents } from "./event-stream.ts";

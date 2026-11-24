@@ -3,12 +3,12 @@ import { createConnection } from "node:net";
 import { homedir, userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { stateDir } from "../../apps/emend/src/state/paths.ts";
+import { stateDir } from "../../apps/recense/src/state/paths.ts";
 
 type Environment = Record<string, string | undefined>;
 
 // Protect both the default location and any explicit parent override. Only path metadata is read.
-// `accountHome` is the passwd home (os.userInfo().homedir), which emend's own config code also
+// `accountHome` is the passwd home (os.userInfo().homedir), which recense's own config code also
 // trusts; it can differ from $HOME, so its defaults are protected too.
 export function protectedStateDirs(env: Environment, platform: string, home: string, accountHome = home): string[] {
   // The plain defaults stay protected whether or not XDG_DATA_HOME points elsewhere.
@@ -45,22 +45,22 @@ function overlaps(a: string, b: string): boolean {
 export interface SealedPaths {
   root: string;
   tmpDir: string;
-  emendHome: string;
+  recenseHome: string;
   realStateDirs: readonly string[];
 }
 
 // The guard is pure; the caller supplies canonicalPath at the filesystem boundary.
 export function assertSealedPaths(paths: SealedPaths, canonicalize: (path: string) => string): void {
   if (!paths.realStateDirs.length) throw new Error("The real state directories must be supplied");
-  const all = [paths.root, paths.tmpDir, paths.emendHome, ...paths.realStateDirs];
+  const all = [paths.root, paths.tmpDir, paths.recenseHome, ...paths.realStateDirs];
   if (all.some((path) => !isAbsolute(path))) throw new Error("Screenshot paths must be absolute");
-  const [root, tmpDir, emendHome, ...realStateDirs] = all.map((path) => canonicalize(path));
+  const [root, tmpDir, recenseHome, ...realStateDirs] = all.map((path) => canonicalize(path));
   if (!inside(tmpDir, root)) throw new Error("The sealed root must resolve inside the temporary directory");
-  if (!inside(root, emendHome)) throw new Error("EMEND_HOME must resolve inside the sealed root");
+  if (!inside(root, recenseHome)) throw new Error("RECENSE_HOME must resolve inside the sealed root");
   for (const state of realStateDirs) {
-    if (overlaps(emendHome, state)) throw new Error("EMEND_HOME overlaps real emend state");
+    if (overlaps(recenseHome, state)) throw new Error("RECENSE_HOME overlaps real recense state");
     // Cleanup removes the whole root, so it must not contain real state either.
-    if (overlaps(root, state)) throw new Error("The sealed root overlaps real emend state");
+    if (overlaps(root, state)) throw new Error("The sealed root overlaps real recense state");
   }
 }
 
@@ -73,7 +73,7 @@ export function assertTempParent(
   if (!isAbsolute(tmpDir)) throw new Error("The temporary directory must be absolute");
   const parent = canonicalize(tmpDir);
   for (const state of realStateDirs)
-    if (overlaps(parent, canonicalize(state))) throw new Error("The temporary directory overlaps real emend state");
+    if (overlaps(parent, canonicalize(state))) throw new Error("The temporary directory overlaps real recense state");
 }
 
 /**
@@ -109,7 +109,7 @@ export function childEnvironment(root: string, platform: string): Record<string,
     XDG_CACHE_HOME: join(root, "cache"),
     XDG_RUNTIME_DIR: join(root, "runtime"),
     TMPDIR: join(root, "tmp"),
-    EMEND_HOME: join(root, "emend"),
+    RECENSE_HOME: join(root, "recense"),
     LANG: "C.UTF-8",
     TZ: "UTC",
     GIT_CONFIG_NOSYSTEM: "1",
@@ -119,7 +119,7 @@ export function childEnvironment(root: string, platform: string): Record<string,
 
 export function assertSafePort(port: number, inUse = false): void {
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid screenshot port");
-  if (port === 3636) throw new Error("Port 3636 is reserved for the real emend server");
+  if (port === 3636) throw new Error("Port 3636 is reserved for the real recense server");
   if (inUse) throw new Error(`Screenshot port ${port} already accepts connections on 127.0.0.1`);
 }
 
@@ -230,7 +230,7 @@ export function parsePairingLink(output: string, origin: string): string {
 
 // ---- Output folder, fixture paths ---------------------------------------------------------------
 
-/** An output folder must not overlap real emend state. */
+/** An output folder must not overlap real recense state. */
 export function assertOutputFolder(
   out: string,
   realStateDirs: readonly string[],
@@ -240,7 +240,7 @@ export function assertOutputFolder(
   if (!isAbsolute(out)) throw new Error(`The ${label} folder must be absolute`);
   const folder = canonicalize(out);
   for (const state of realStateDirs) {
-    if (overlaps(folder, canonicalize(state))) throw new Error(`The ${label} folder overlaps real emend state`);
+    if (overlaps(folder, canonicalize(state))) throw new Error(`The ${label} folder overlaps real recense state`);
   }
 }
 

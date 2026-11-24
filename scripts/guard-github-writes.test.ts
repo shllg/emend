@@ -4589,7 +4589,7 @@ const roundTwelve: R8Rule[] = [
       "-U someone",
       "-G developers",
       "-t console",
-      "-C emend",
+      "-C recense",
       "-q example",
       "-p example",
     ].map((args) => `ps ${args}`),
@@ -4618,7 +4618,7 @@ const roundTwelve: R8Rule[] = [
       ["jq .env notes.json", undefined],
       ["jq --arg key env -n '$key'", undefined],
       ["tmux list-sessions", undefined],
-      ["systemctl --user status emend", undefined],
+      ["systemctl --user status recense", undefined],
     ],
     disable: [
       ['if (command === "jq" && jqEnvironment(args)) return true;', ""],
@@ -4712,7 +4712,7 @@ const roundThirteen: R8Rule[] = [
     name: "2 non-protected directory and bare globs",
     expected: undefined,
     commands: [
-      "flock /tmp/claude-1000/emend-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1",
+      "flock /tmp/claude-1000/recense-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1",
       "node --test bin/lib/wt/*.test.ts",
       "touch src/*",
       "touch *",
@@ -5511,7 +5511,7 @@ const everydayFourteen: [string, Finding][] = [
   ["git commit -q -F .wt/commit-msg.txt", undefined],
   ["git log -1 --format='%h %G? %s'", undefined],
   ['pnpm verify:static > .wt/static.log 2>&1; echo "exit $?"', undefined],
-  ["flock /tmp/claude-1000/emend-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1", undefined],
+  ["flock /tmp/claude-1000/recense-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1", undefined],
   ["cat .claude/settings.json", undefined],
   ["sed -n '1,40p' .claude/settings.json", undefined],
   ["jq . .claude/settings.json", undefined],
@@ -5864,7 +5864,7 @@ const differentialCorpora: { name: string; cases: DifferentialCase[] }[] = [
       ["rg -n foo .claude", "none", "none", "everyday"],
       ["less .claude/settings.json", "none", "none", "everyday"],
       [
-        "flock /tmp/claude-1000/emend-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1",
+        "flock /tmp/claude-1000/recense-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1",
         "none",
         "none",
         "everyday",
@@ -5927,7 +5927,7 @@ const differentialCorpora: { name: string; cases: DifferentialCase[] }[] = [
       ["git log -1 --format='%h %G? %s'", "none", "none", "everyday"],
       ['pnpm verify:static > .wt/static.log 2>&1; echo "exit $?"', "none", "none", "everyday"],
       [
-        "flock /tmp/claude-1000/emend-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1",
+        "flock /tmp/claude-1000/recense-verify.lock node --test bin/lib/wt/*.test.ts > .wt/t.log 2>&1",
         "none",
         "none",
         "everyday",
@@ -6091,7 +6091,7 @@ const roundEighteenHistory: Record<string, [string, string, string]> = {
   "s2probe-r14/probe4.mjs": [
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
-    "a70b39ef332ab2649b0d574c51c1ccf753897654e30eed0f2126cdf7407b9622",
+    "c2870d7fadfbfd5eef84934c2ab0bed37e7d669b46cdd413ab722f8361d9ebba",
   ],
   "s2probe-r14/probe6.mjs": [
     "KKWTTTTTTT",
@@ -6101,7 +6101,7 @@ const roundEighteenHistory: Record<string, [string, string, string]> = {
   "s2probe-r11/probe3.mjs everyday": [
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
-    "b137f74214d56b9f372d0389b8ba479ba842c7ba8434506fec864d9e661b2157",
+    "699fb3d4298e7a856ea1468ed66a9d8c6a56b3b43f2feb296358279bfeba5bf9",
   ],
   "R16 1 CX1 unquoted interpreter heredocs": [
     "KTNNNNNN",
@@ -8269,7 +8269,7 @@ const roundNineteenHistory: Record<string, [string, string, string, string]> = {
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
-    "a70b39ef332ab2649b0d574c51c1ccf753897654e30eed0f2126cdf7407b9622",
+    "c2870d7fadfbfd5eef84934c2ab0bed37e7d669b46cdd413ab722f8361d9ebba",
   ],
   "s2probe-r14/probe6.mjs": [
     "KKWTTTTTTT",
@@ -8281,7 +8281,7 @@ const roundNineteenHistory: Record<string, [string, string, string, string]> = {
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
-    "b137f74214d56b9f372d0389b8ba479ba842c7ba8434506fec864d9e661b2157",
+    "699fb3d4298e7a856ea1468ed66a9d8c6a56b3b43f2feb296358279bfeba5bf9",
   ],
   "R16 1 CX1 unquoted interpreter heredocs": [
     "KTNNNNNN",
@@ -11888,7 +11888,7 @@ const roundTwentyHistory: Record<string, [string, string, string, string]> = {
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
     "NNNNNNNNNNNNNNNNNNNTTTTTKKTTNTTNNKTT",
-    "a70b39ef332ab2649b0d574c51c1ccf753897654e30eed0f2126cdf7407b9622"
+    "c2870d7fadfbfd5eef84934c2ab0bed37e7d669b46cdd413ab722f8361d9ebba"
   ],
   "s2probe-r14/probe6.mjs": [
     "KKWTTTTTTT",
@@ -11900,7 +11900,7 @@ const roundTwentyHistory: Record<string, [string, string, string, string]> = {
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
     "NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNTNNNNNNNNNNNNNNNNNNNNNNNNNNNNKK",
-    "b137f74214d56b9f372d0389b8ba479ba842c7ba8434506fec864d9e661b2157"
+    "699fb3d4298e7a856ea1468ed66a9d8c6a56b3b43f2feb296358279bfeba5bf9"
   ],
   "R16 1 CX1 unquoted interpreter heredocs": [
     "KTNNNNNN",

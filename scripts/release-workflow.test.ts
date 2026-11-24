@@ -151,7 +151,7 @@ test("run scripts receive expressions only through env", () => {
 });
 
 test("the workflow gates the selected SHA and keeps dry runs free of remote mutations", () => {
-  assert.match(jobs.get("plan") ?? "", /if: github.ref == 'refs\/heads\/main' && github.repository == 'shllg\/emend'/);
+  assert.match(jobs.get("plan") ?? "", /if: github.ref == 'refs\/heads\/main' && github.repository == 'shllg\/recense'/);
   assert.match(jobs.get("plan") ?? "", /^    if: .*&& vars\.RELEASE_ENABLED == 'true'$/m);
   assert.match(jobs.get("verify") ?? "", /^    uses: \.\/\.github\/workflows\/verify\.yml$/m);
   assert.match(jobs.get("verify") ?? "", /^      ref: \$\{\{ needs.plan.outputs.sha \}\}$/m);
@@ -354,7 +354,7 @@ test("mark uses the tagged tree and only the two stamped blobs without custom co
     /'\{base_tree: \$base_tree, tree: \[\s+\{path: "plugin\/\.claude-plugin\/plugin.json", mode: "100644", type: "blob", content: \$plugin\},\s+\{path: "\.claude-plugin\/marketplace.json", mode: "100644", type: "blob", content: \$marketplace\}\s+\]\}'/,
   );
   assert(mark.includes('gh api --method POST "repos/$GH_REPO/git/trees" --input - --jq .sha'));
-  assert(mark.includes('--arg message "chore: stamp emend $VERSION into the plugin manifests"'));
+  assert(mark.includes('--arg message "chore: stamp recense $VERSION into the plugin manifests"'));
   assert(mark.includes('--arg tree "$tree" --argjson parents "$parents"'));
   assert(mark.includes("'{message: $message, tree: $tree, parents: $parents}'"));
   assert(mark.includes('gh api --method POST "repos/$GH_REPO/git/commits" --input - --jq .sha'));

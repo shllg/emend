@@ -25,7 +25,7 @@ import {
   fakeGithubOrigin,
   gitIn,
   installFake,
-  installFakeEmend,
+  installFakeRecense,
   issueRules,
   makeFixture,
   makeTestEnv,
@@ -683,7 +683,7 @@ test("pr create without --draft passes no --draft", () =>
 
 test("issue PRs require the exact issue and one of GitHub's closing keywords", () =>
   scenario(({ env, fx, repo }) => {
-    const branch = "emend-42-fix-pane";
+    const branch = "recense-42-fix-pane";
     gitIn(fx.main, "checkout", "--quiet", "-b", branch);
     repo.callerBranch = branch;
     mkdirSync(join(fx.main, ".wt"));
@@ -725,8 +725,8 @@ test("pr create checks the body file against its own linked worktree's issue", (
   scenario(
     async ({ env, fx, repo }) => {
       installFake(env, "gh", issueRules([readyIssue(42)]));
-      const wt = setup(repo, { branch: "emend-42-fix-pane", issue: 42 });
-      installFake(env, "gh", createRules(`${CREATED_URL}\n`, "emend-42-fix-pane"));
+      const wt = setup(repo, { branch: "recense-42-fix-pane", issue: 42 });
+      installFake(env, "gh", createRules(`${CREATED_URL}\n`, "recense-42-fix-pane"));
       // Conflicting main-checkout metadata must not win.
       mkdirSync(join(fx.main, ".wt"));
       writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 99 }));
@@ -748,7 +748,7 @@ test("pr create checks the body file against its own linked worktree's issue", (
 
 test("invalid worktree issue metadata cannot bypass the PR body guard", () =>
   scenario(({ fx, repo, env }) => {
-    repo.callerBranch = "emend-42-fix-pane";
+    repo.callerBranch = "recense-42-fix-pane";
     mkdirSync(join(fx.main, ".wt"));
     installFake(env, "gh", [NO_PR]);
     for (const text of ["{", "null", JSON.stringify({ issue: "42" }), JSON.stringify({ issue: -42 })]) {
@@ -901,7 +901,7 @@ let headSha = SHA;
 function publishHead(ctx: Ctx): void {
   headSha = gitIn(ctx.fx.main, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "pr head");
   gitIn(ctx.fx.main, "push", "--quiet", "--force", "origin", `${headSha}:refs/pull/7/head`);
-  installFakeEmend(ctx.env, headSha, [approvedReview(BRANCH, headSha)]);
+  installFakeRecense(ctx.env, headSha, [approvedReview(BRANCH, headSha)]);
 }
 
 /** A scenario whose HEAD already has a published PR head. */
@@ -1062,10 +1062,10 @@ test("pr merge happy path squashes with the reviewed head", () =>
 test("pr merge refuses an unapproved head before the GitHub merge call", () =>
   mscenario((ctx) => {
     installFake(ctx.env, "gh", mergeOkRules());
-    installFakeEmend(ctx.env, headSha, [approvedReview("another-branch", headSha)]);
+    installFakeRecense(ctx.env, headSha, [approvedReview("another-branch", headSha)]);
     assert.throws(() => prMerge(ctx.repo, MERGE_ARGS), {
       code: 1,
-      message: `emend shows no approval of ${headSha} on ${BRANCH}: the review of this commit names another branch. Nothing was merged.`,
+      message: `recense shows no approval of ${headSha} on ${BRANCH}: the review of this commit names another branch. Nothing was merged.`,
     });
     assert.deepEqual(mergeCalls(ctx.env), []);
   }));
@@ -1073,7 +1073,7 @@ test("pr merge refuses an unapproved head before the GitHub merge call", () =>
 test("pr merge needs the original approved commit locally to compare the change", () =>
   mscenario((ctx) => {
     installFake(ctx.env, "gh", mergeOkRules());
-    installFakeEmend(ctx.env, OTHER_SHA, [approvedReview(BRANCH, OTHER_SHA)]);
+    installFakeRecense(ctx.env, OTHER_SHA, [approvedReview(BRANCH, OTHER_SHA)]);
     assert.throws(() => prMerge(ctx.repo, { ...MERGE_ARGS, approvedHead: OTHER_SHA }), {
       code: 1,
       message: "The approved head commit is not available locally. Nothing was merged.",
@@ -1098,7 +1098,7 @@ for (const changed of [false, true]) {
       // A local history graft hides the merge base from a replacement-aware diff.
       gitIn(main, "replace", "--graft", approved);
       installFake(ctx.env, "gh", mergeOkRules());
-      installFakeEmend(ctx.env, approved, [approvedReview(BRANCH, approved)]);
+      installFakeRecense(ctx.env, approved, [approvedReview(BRANCH, approved)]);
       const invoke = () =>
         commands.pr?.({
           repo: ctx.repo,
@@ -1266,7 +1266,7 @@ test("pr merge --pr works from a matching linked worktree", () =>
   mscenario(
     (ctx) => {
       const wt = setup(ctx.repo, { branch: "feat-b", busy: new Set<number>() }).path;
-      installFakeEmend(ctx.env, headSha, [approvedReview("feat-b", headSha)]);
+      installFakeRecense(ctx.env, headSha, [approvedReview("feat-b", headSha)]);
       installFake(
         ctx.env,
         "gh",
@@ -1527,11 +1527,11 @@ test("i: PR launcher ignores environment allowed phrases and accepts file allowe
         { match: ["pr", "edit"], stdout: "updated\n" },
         closingRule(),
       ]);
-      const env = { EMEND_PRIVATE_TERMS: "fixturecorp\n!fixturecorp/public-tool" };
+      const env = { RECENSE_PRIVATE_TERMS: "fixturecorp\n!fixturecorp/public-tool" };
       const wt = join(ctx.fx.main, "bin", "wt");
       const bad = await runWt(wt, ["pr", "edit", "--title", "fixturecorp"], { cwd: ctx.fx.main, env });
       assert.equal(bad.code, 1);
-      const note = "check:public: allowed phrases in EMEND_PRIVATE_TERMS are ignored\n";
+      const note = "check:public: allowed phrases in RECENSE_PRIVATE_TERMS are ignored\n";
       assert.equal(bad.stderr, `${note}title:1:1: private term (env line 1)\n`);
       assert.deepEqual(fakeCalls(ctx.env, "gh"), []);
       const ignored = await runWt(wt, ["pr", "edit", "--title", "fixturecorp/public-tool"], { cwd: ctx.fx.main, env });
@@ -1973,7 +1973,7 @@ test("R10.A: refusal and owner confirmation identify both commits at the same ma
 test("pr create and edit guard registered issue branches and refuse mismatched issue metadata", () =>
   scenario(
     ({ env, fx, repo }) => {
-      const branch = "emend-42-fix-pane";
+      const branch = "recense-42-fix-pane";
       mkdirSync(join(fx.main, ".wt"));
       writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 42 }));
       for (const body of [
@@ -2000,13 +2000,13 @@ test("pr create and edit guard registered issue branches and refuse mismatched i
       expectCode(() => prCreate(repo, { title: "T", body: "Closes #42", draft: false }), 2);
       expectCode(() => prEdit(repo, { body: "Closes #42" }), 2);
     },
-    { branch: "emend-42-fix-pane" },
+    { branch: "recense-42-fix-pane" },
   ));
 
 test("issue branch closing guards recognize Markdown emphasis and ignore word fragments", () =>
   scenario(
     ({ env, fx, repo }) => {
-      const branch = "emend-42-fix-pane";
+      const branch = "recense-42-fix-pane";
       mkdirSync(join(fx.main, ".wt"));
       writeFileSync(join(fx.main, ".wt/worktree.json"), JSON.stringify({ issue: 42 }));
       gitIn(fx.main, "remote", "set-url", "origin", "https://github.com/current/project.git");
@@ -2048,7 +2048,7 @@ test("issue branch closing guards recognize Markdown emphasis and ignore word fr
         assert.equal(prEdit(repo, { body }), "edited", body);
       }
     },
-    { branch: "emend-42-fix-pane" },
+    { branch: "recense-42-fix-pane" },
   ));
 
 test("pr merge accepts a subject file and strips one final newline", () =>

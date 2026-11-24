@@ -1,4 +1,4 @@
-import type { FilePath, RevisionView } from "@emend/contract";
+import type { FilePath, RevisionView } from "@recense/contract";
 
 export function openingView(revision: RevisionView): { tab: "writeup" | "diff" | "docs"; doc?: FilePath } {
   if (revision.main === "writeup") return { tab: "writeup" };

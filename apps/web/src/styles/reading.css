@@ -522,10 +522,10 @@
   .em-writeup-muted .em-prose a :is(strong, code) {
     color: inherit;
   }
-  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose::highlight(emend-comment),
-  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose *::highlight(emend-comment),
-  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose::highlight(emend-comment-active),
-  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose *::highlight(emend-comment-active) {
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose::highlight(recense-comment),
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose *::highlight(recense-comment),
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose::highlight(recense-comment-active),
+  :is(.em-writeup-quiet, .em-writeup-muted) .em-prose *::highlight(recense-comment-active) {
     color: var(--fg-reading);
   }
   .em-writeup-why,

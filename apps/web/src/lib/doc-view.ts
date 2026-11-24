@@ -1,4 +1,4 @@
-import type { RevisionView, ThreadView } from "@emend/contract";
+import type { RevisionView, ThreadView } from "@recense/contract";
 import type { ReviewSearch } from "../router.tsx";
 
 type Doc = RevisionView["docs"][number];

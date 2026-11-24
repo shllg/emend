@@ -1,4 +1,4 @@
-import type { InboxItem } from "@emend/contract";
+import type { InboxItem } from "@recense/contract";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowDown, ArrowUp } from "lucide-react";

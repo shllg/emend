@@ -1,5 +1,5 @@
 @layer base {
-  /* Minimal element base: consumers get emend type + colour on body, focus ring, marks. */
+  /* Minimal element base: consumers get recense type + colour on body, focus ring, marks. */
   html {
     -webkit-text-size-adjust: 100%;
   }
@@ -96,11 +96,11 @@
   select {
     cursor: pointer;
   }
-  ::highlight(emend-comment) {
+  ::highlight(recense-comment) {
     background: var(--mark-bg);
     text-decoration: underline solid var(--mark-line) 1.5px;
   }
-  ::highlight(emend-comment-active) {
+  ::highlight(recense-comment-active) {
     background: var(--mark-bg-active);
     text-decoration: underline solid var(--mark-line) 1.5px;
   }

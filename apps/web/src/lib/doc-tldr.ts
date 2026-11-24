@@ -1,4 +1,4 @@
-import type { RenderedBlock } from "@emend/contract";
+import type { RenderedBlock } from "@recense/contract";
 
 /** Find the first h2 TL;DR section when it has content, ending before the next h1 or h2. */
 export function docTldrRange(blocks: readonly RenderedBlock[]): { start: number; end: number } | undefined {

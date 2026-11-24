@@ -1,4 +1,4 @@
-import { type FileView, OTHER_TOPIC, type TopicMeta } from "@emend/contract";
+import { type FileView, OTHER_TOPIC, type TopicMeta } from "@recense/contract";
 import { ChevronDown, Columns2, FileCode, List } from "lucide-react";
 import { plural } from "../../lib/count.ts";
 import type { FileOrder } from "../../lib/layout-store.ts";

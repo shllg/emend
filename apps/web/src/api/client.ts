@@ -1,4 +1,4 @@
-import { ErrorBody, type SessionRequest } from "@emend/contract";
+import { ErrorBody, type SessionRequest } from "@recense/contract";
 
 export class ApiError extends Error {
   status: number;

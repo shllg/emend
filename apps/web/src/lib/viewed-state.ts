@@ -1,4 +1,4 @@
-import type { RevisionView, ViewedRequest } from "@emend/contract";
+import type { RevisionView, ViewedRequest } from "@recense/contract";
 import type { QueryClient } from "@tanstack/react-query";
 
 export type ViewedChange = {

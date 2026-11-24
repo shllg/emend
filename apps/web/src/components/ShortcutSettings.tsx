@@ -5,7 +5,7 @@ import {
   type SettingsUpdate,
   SettingsView,
   type ShortcutCommand,
-} from "@emend/contract";
+} from "@recense/contract";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { patch } from "../api/client.ts";

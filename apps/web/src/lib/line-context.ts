@@ -1,4 +1,4 @@
-import { LIMITS, type SourceLinesTarget } from "@emend/contract";
+import { LIMITS, type SourceLinesTarget } from "@recense/contract";
 
 export type LinesError = "too-many-lines" | "too-long" | "invalid-range";
 

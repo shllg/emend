@@ -7,7 +7,7 @@ import {
   SampleView,
   SettingsView,
   ThemeList,
-} from "@emend/contract";
+} from "@recense/contract";
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { viewedState } from "../lib/viewed-state.ts";
 import { get } from "./client.ts";

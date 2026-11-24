@@ -1,4 +1,4 @@
-import type { ThemeBase, ThemeScaleStep, ThemeToken } from "@emend/contract";
+import type { ThemeBase, ThemeScaleStep, ThemeToken } from "@recense/contract";
 
 /** CSS values, with var(--name) references stored as names. Kept in colors.css order. */
 export type ThemeBaseTable = Record<ThemeScaleStep | ThemeToken, string>;

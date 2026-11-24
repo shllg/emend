@@ -1,4 +1,4 @@
-import type { ThemeBase, ThemeScaleStep, ThemeToken } from "@emend/contract";
+import type { ThemeBase, ThemeScaleStep, ThemeToken } from "@recense/contract";
 import { compositeThemeColor, parseThemeColor, type ThemeRgba, themeContrast } from "./color.ts";
 
 type ColorName = ThemeScaleStep | ThemeToken;

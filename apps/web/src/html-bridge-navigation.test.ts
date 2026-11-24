@@ -67,7 +67,7 @@ function bridge(html: string, base = "docs/a.html", shadow = false, prepare?: (w
       for (const name of ["closest", "getAttribute", "scrollIntoView", "getBoundingClientRect"])
         Object.defineProperty(element, name, { value: window.document.createElement("input"), configurable: true });
   }
-  const source = readFileSync(new URL("../../emend/src/server/content/bridge.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../recense/src/server/content/bridge.ts", import.meta.url), "utf8");
   const script = runInNewContext(`${source.replace("export const", "const")}; BRIDGE_SOURCE;`);
   const scroll = vi.spyOn(window.Element.prototype, "scrollIntoView").mockImplementation(() => {});
   const scrollTo = vi.spyOn(window.Element.prototype, "scrollTo").mockImplementation(() => {});
@@ -121,7 +121,7 @@ function bridge(html: string, base = "docs/a.html", shadow = false, prepare?: (w
 test.each(docLinkCases)("C3 bridge resolver matches core: $name", async ({ base, href, docs, expected }) => {
   const b = bridge("<body><a>Link</a><h2 id='part'>Part</h2></body>", base);
   try {
-    b.message({ type: "emend:docs", paths: docs });
+    b.message({ type: "recense:docs", paths: docs });
     const link = b.window.document.querySelector("a");
     if (!link) throw new Error("missing link");
     link.setAttribute("href", href);
@@ -131,9 +131,11 @@ test.each(docLinkCases)("C3 bridge resolver matches core: $name", async ({ base,
       event.preventDefault();
     });
     link.dispatchEvent(new b.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
-    const sent = b.post.mock.calls.filter(([data]) => data.type === "emend:navigate");
+    const sent = b.post.mock.calls.filter(([data]) => data.type === "recense:navigate");
     if (expected && expected.path !== base) {
-      expect(sent).toEqual([[{ type: "emend:navigate", path: expected.path, fragment: expected.fragment ?? "" }, "*"]]);
+      expect(sent).toEqual([
+        [{ type: "recense:navigate", path: expected.path, fragment: expected.fragment ?? "" }, "*"],
+      ]);
       expect(prevented).toBe(true);
     } else {
       expect(sent).toEqual([]);
@@ -174,7 +176,7 @@ test.each([
     const before = { href: b.window.location.href, length: b.window.history.length };
     expect(click(b, required(b.window.document.querySelector("a"))).defaultPrevented).toBe(true);
     expect({ href: b.window.location.href, length: b.window.history.length }).toEqual(before);
-    expect(b.post.mock.calls.filter(([data]) => data.type === "emend:navigate")).toEqual([]);
+    expect(b.post.mock.calls.filter(([data]) => data.type === "recense:navigate")).toEqual([]);
   } finally {
     await b.close();
   }
@@ -193,7 +195,7 @@ test("theme query does not suppress a same-path link with another query", async 
     expect(prevented).toBe(false);
     expect(b.scroll).not.toHaveBeenCalled();
     expect(b.scrollTo).not.toHaveBeenCalled();
-    expect(b.post.mock.calls.filter(([data]) => data.type === "emend:navigate")).toEqual([]);
+    expect(b.post.mock.calls.filter(([data]) => data.type === "recense:navigate")).toEqual([]);
   } finally {
     await b.close();
   }
@@ -207,7 +209,7 @@ const fixtures = [
     { name: `${fixture.name} old`, html: fixture.old },
     { name: `${fixture.name} new`, html: fixture.new },
   ]),
-  ...["../../../sync/", "../../emend/src/server/content/fixtures/"].flatMap((path) =>
+  ...["../../../sync/", "../../recense/src/server/content/fixtures/"].flatMap((path) =>
     readdirSync(new URL(path, import.meta.url), { recursive: true, encoding: "utf8" })
       .filter((file) => file.endsWith(".html"))
       .map((file) => ({ name: file, html: readFileSync(new URL(`${path}${file}`, import.meta.url), "utf8") })),
@@ -235,15 +237,15 @@ test.each(fixtures)("C3 bridge/server heading parity: $name", async ({ name, htm
     const indexes = capped ? [0, 512, 1023] : [...headings.keys()];
     for (const [call, heading] of indexes.entries()) {
       const value = required(headings[heading]);
-      b.message({ type: "emend:goto", heading, label: value.text });
+      b.message({ type: "recense:goto", heading, label: value.text });
       expect(b.scroll).toHaveBeenCalledTimes(call + 1);
       if (capped) expect(b.scroll.mock.instances[call]).toBe(required(elements[heading]));
     }
     const candidateLabels = new Set(["", ...elements.map((element) => cleanDocTitle(element.textContent))]);
-    for (const label of candidateLabels) b.message({ type: "emend:goto", heading: headings.length, label });
+    for (const label of candidateLabels) b.message({ type: "recense:goto", heading: headings.length, label });
     expect(b.scroll).toHaveBeenCalledTimes(indexes.length);
     if (capped) expect(b.scroll.mock.instances).not.toContain(required(elements[1024]));
-    b.message({ type: "emend:goto", heading: 0, label: "wrong label" });
+    b.message({ type: "recense:goto", heading: 0, label: "wrong label" });
     expect(b.scroll).toHaveBeenCalledTimes(indexes.length);
   } finally {
     await b.close();
@@ -257,7 +259,7 @@ test("C3 goto is parent-only, rejects invalid offsets and survives named DOM-met
     true,
   );
   try {
-    const goto = { type: "emend:goto", heading: 0, label: "Part" };
+    const goto = { type: "recense:goto", heading: 0, label: "Part" };
     b.message(goto, null);
     for (const fraction of [-1, 2, NaN, Infinity]) b.message({ ...goto, fraction });
     expect(b.scroll).not.toHaveBeenCalled();
@@ -283,13 +285,13 @@ test("C3 position uses a heading index and section fraction, and throttles scrol
     b.post.mockClear();
     for (let i = 0; i < 10; i++) b.window.dispatchEvent(new b.window.Event("scroll"));
     await b.window.happyDOM.waitUntilComplete();
-    expect(b.post.mock.calls.filter(([data]) => data.type === "emend:position")).toEqual([
-      [{ type: "emend:position", heading: 1, fraction: 0.75 }, "*"],
+    expect(b.post.mock.calls.filter(([data]) => data.type === "recense:position")).toEqual([
+      [{ type: "recense:position", heading: 1, fraction: 0.75 }, "*"],
     ]);
     offset = 100;
     b.window.dispatchEvent(new b.window.Event("scroll"));
     await b.window.happyDOM.waitUntilComplete();
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 1, fraction: 0 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 1, fraction: 0 }, "*");
   } finally {
     await b.close();
   }
@@ -410,20 +412,20 @@ test.each([true, false])(
       },
     );
     try {
-      b.message({ type: "emend:goto", heading: 0, label: "Part" });
-      b.message({ type: "emend:goto", heading: 1, label: "Next" });
+      b.message({ type: "recense:goto", heading: 0, label: "Part" });
+      b.message({ type: "recense:goto", heading: 1, label: "Next" });
       expect(b.scroll).toHaveBeenCalledTimes(2);
-      b.message({ type: "emend:goto", heading: 2, label: "Skip" });
+      b.message({ type: "recense:goto", heading: 2, label: "Skip" });
       expect(b.scroll).toHaveBeenCalledTimes(2);
-      b.message({ type: "emend:goto", heading: 0, label: "Part", fraction: 0.5 });
+      b.message({ type: "recense:goto", heading: 0, label: "Part", fraction: 0.5 });
       expect(formOffset).toBe(500);
       await resumeMeasurement(b);
       await b.window.happyDOM.waitUntilComplete();
-      expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0.5 }, "*");
-      b.message({ type: "emend:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
+      expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0.5 }, "*");
+      b.message({ type: "recense:highlight", anchors: [{ threadId: "one", quote: "seed", prefix: "", suffix: "" }] });
       expect(b.highlights.size).toBe(1);
       b.scroll.mockClear();
-      b.message({ type: "emend:scroll", threadId: "one" });
+      b.message({ type: "recense:scroll", threadId: "one" });
       expect(b.scroll).toHaveBeenCalledOnce();
       // Prepare a native selection without asking the DOM emulator to interpret the shadowed properties.
       restore();
@@ -438,7 +440,7 @@ test.each([true, false])(
         },
       });
       b.window.document.dispatchEvent(new b.window.Event("mouseup"));
-      expect(b.post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0].quote).toBe("seed");
+      expect(b.post.mock.calls.findLast(([data]) => data.type === "recense:anchor")?.[0].quote).toBe("seed");
       const before = { href: b.window.location.href, length: b.window.history.length };
       Object.defineProperty(b.window.document, "baseURI", {
         configurable: true,
@@ -454,7 +456,7 @@ test.each([true, false])(
       expect({ href: b.window.location.href, length: b.window.history.length }).toEqual(before);
       b.window.dispatchEvent(new b.window.Event("scroll"));
       await b.window.happyDOM.waitUntilComplete();
-      expect(b.post.mock.calls.some(([data]) => data.type === "emend:position")).toBe(true);
+      expect(b.post.mock.calls.some(([data]) => data.type === "recense:position")).toBe(true);
       expect(touched).not.toHaveBeenCalled();
     } finally {
       await b.close();
@@ -462,7 +464,7 @@ test.each([true, false])(
   },
 );
 
-const FALLBACK_CSS = "@layer emend-fallback { pre { overflow-x: auto; } }";
+const FALLBACK_CSS = "@layer recense-fallback { pre { overflow-x: auto; } }";
 
 test("the layout fallback ignores shadowed document properties", async () => {
   const touched = vi.fn();
@@ -509,7 +511,7 @@ test("the layout fallback ignores shadowed document properties", async () => {
       ),
     ).toHaveLength(1);
     expect(touched).not.toHaveBeenCalled();
-    expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+    expect(b.post).toHaveBeenCalledWith({ type: "recense:ready" }, "*");
   } finally {
     await b.close();
   }
@@ -532,12 +534,12 @@ test("a failing layout fallback leaves the bridge working", async () => {
         (el) => el.localName === "style" && el.textContent === FALLBACK_CSS,
       ),
     ).toHaveLength(0);
-    expect(b.post).toHaveBeenCalledWith({ type: "emend:ready" }, "*");
+    expect(b.post).toHaveBeenCalledWith({ type: "recense:ready" }, "*");
     const range = b.window.document.createRange();
     range.selectNodeContents(required(text));
     b.window.getSelection()?.addRange(range);
     b.window.document.dispatchEvent(new b.window.Event("mouseup"));
-    expect(b.post.mock.calls.findLast(([data]) => data.type === "emend:anchor")?.[0].quote).toBe("Seed");
+    expect(b.post.mock.calls.findLast(([data]) => data.type === "recense:anchor")?.[0].quote).toBe("Seed");
   } finally {
     await b.close();
   }
@@ -589,9 +591,9 @@ test.each(["area", "svg href", "svg xlink", "shadow"])(
       expect(click(b, link).defaultPrevented).toBe(true);
       expect(b.scroll.mock.instances).toEqual([doc.querySelector("h2")]);
       href("other.html#part");
-      b.message({ type: "emend:docs", paths: ["docs/other.html"] });
+      b.message({ type: "recense:docs", paths: ["docs/other.html"] });
       expect(click(b, link).defaultPrevented).toBe(true);
-      expect(b.post).toHaveBeenCalledWith({ type: "emend:navigate", path: "docs/other.html", fragment: "part" }, "*");
+      expect(b.post).toHaveBeenCalledWith({ type: "recense:navigate", path: "docs/other.html", fragment: "part" }, "*");
       expect({ href: b.window.location.href, length: b.window.history.length }).toEqual(before);
     } finally {
       await b.close();
@@ -606,7 +608,7 @@ test.each(["link", "goto"])("R1.2 %s opens all ancestor details before scrolling
   try {
     const before = { href: b.window.location.href, length: b.window.history.length };
     if (kind === "link") expect(click(b, required(b.window.document.querySelector("a"))).defaultPrevented).toBe(true);
-    else b.message({ type: "emend:goto", heading: 0, label: "Part" });
+    else b.message({ type: "recense:goto", heading: 0, label: "Part" });
     expect([...b.window.document.querySelectorAll("details")].every((node) => node.open)).toBe(true);
     expect({ href: b.window.location.href, length: b.window.history.length }).toEqual(before);
   } finally {
@@ -652,7 +654,7 @@ test("R2.2 document restore uses instant heading and fractional scrolling despit
     b.scrollTo.mockImplementation(function (this: Element, options: number | ScrollToOptions | undefined) {
       if (typeof options === "object" && options.behavior === "instant") this.scrollTop = options.top ?? 0;
     });
-    b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.5 });
+    b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0.5 });
     expect(b.scroll).toHaveBeenCalledExactlyOnceWith({ block: "start", behavior: "instant" });
     expect(b.scrollTo).toHaveBeenLastCalledWith({ top: 525, behavior: "instant" });
     expect(b.scrollTo.mock.instances.at(-1)).toBe(root);
@@ -660,7 +662,7 @@ test("R2.2 document restore uses instant heading and fractional scrolling despit
     expect(root.scrollTop).toBe(525);
     await resumeMeasurement(b);
     await b.window.happyDOM.waitUntilComplete();
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0.5 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0.5 }, "*");
   } finally {
     await b.close();
   }
@@ -687,8 +689,8 @@ test.each(["introduction", "hidden headings"])("R1.3 position skips %s", async (
     await b.window.happyDOM.waitUntilComplete();
     expect(b.post).toHaveBeenLastCalledWith(
       kind === "introduction"
-        ? { type: "emend:position", heading: null, fraction: 0 }
-        : { type: "emend:position", heading: 0, fraction: 0.5 },
+        ? { type: "recense:position", heading: null, fraction: 0 }
+        : { type: "recense:position", heading: 0, fraction: 0.5 },
       "*",
     );
   } finally {
@@ -764,7 +766,7 @@ test.each([
 ])("R2.2 nested-scroller $name lands instantly despite smooth CSS", async ({ heading, label, fraction, offset }) => {
   const b = nestedScroller();
   try {
-    b.message({ type: "emend:goto", heading, label, fraction });
+    b.message({ type: "recense:goto", heading, label, fraction });
     if (offset !== undefined) expect(b.container.scrollTop).toBeCloseTo(offset);
     expect(b.window.document.scrollingElement.scrollTop).toBe(0);
     expect(b.window.document.body.scrollTop).toBe(0);
@@ -781,7 +783,7 @@ test.each([
     } else expect(b.scrollTo).not.toHaveBeenCalled();
     await resumeMeasurement(b);
     await b.window.happyDOM.waitUntilComplete();
-    const position = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+    const position = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
     // This inset container starts 43px below the frame's top. Picks retain that inset.
     const top = (heading === 0 ? 300 : 1400) - b.container.scrollTop + 43;
     expect(position?.heading).toBe(heading);
@@ -800,7 +802,7 @@ test("R2.2 a non-bubbling nested scroll reports position relative to the frame v
     b.container.scrollTop = 600;
     b.container.dispatchEvent(new b.window.Event("scroll"));
     await b.window.happyDOM.waitUntilComplete();
-    expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "emend:position", heading: 0, fraction: 357 / 600 }, "*");
+    expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "recense:position", heading: 0, fraction: 357 / 600 }, "*");
   } finally {
     await b.close();
   }
@@ -828,7 +830,7 @@ test.each(["link", "goto"])("R2.3 %s opens closed details through the heading's 
     });
     const before = { href: b.window.location.href, length: b.window.history.length };
     if (kind === "link") expect(click(b, required(doc.querySelector("a"))).defaultPrevented).toBe(true);
-    else b.message({ type: "emend:goto", heading: 0, label: "Part" });
+    else b.message({ type: "recense:goto", heading: 0, label: "Part" });
     expect(details.open).toBe(true);
     expect(b.scroll.mock.instances).toEqual([heading]);
     expect(poison).not.toHaveBeenCalled();
@@ -911,13 +913,13 @@ test.each(["report", "restore"])("R3 viewport-scrolling body with overflow-x hid
     b.root.scrollTop = 1100;
     b.body.scrollTop = 17;
     if (action === "restore") {
-      b.message({ type: "emend:goto", heading: 1, label: "Second", fraction: 0.5 });
+      b.message({ type: "recense:goto", heading: 1, label: "Second", fraction: 0.5 });
       expect(b.root.scrollTop).toBe(1100);
       await resumeMeasurement(b);
       expect(b.body.scrollTop).toBe(17); // An ineffective ancestor must be put back.
     }
     vi.advanceTimersByTime(200);
-    const position = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+    const position = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
     expect(position?.heading).toBe(1);
     expect(position?.fraction).toBeCloseTo(0.5);
   } finally {
@@ -933,8 +935,8 @@ test("R3 a nested scroller below the introduction stays in the introduction on o
         return new b.window.DOMRect(0, this === b.container ? 1200 : 1203 + b.headings.indexOf(this) * 600, 400, 20);
       });
       await b.window.happyDOM.waitUntilComplete();
-      expect(b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0], visit).toEqual({
-        type: "emend:position",
+      expect(b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0], visit).toEqual({
+        type: "recense:position",
         heading: null,
         fraction: 0,
       });
@@ -980,7 +982,7 @@ test.each(["wheel", "touchmove", "touchend", "keydown", "pointerup"])(
       b.container.dispatchEvent(new b.window.Event("scroll"));
       expect(b.documentScroll).not.toHaveBeenCalled();
       vi.advanceTimersByTime(100);
-      expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 2 / 3 }, "*");
+      expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 2 / 3 }, "*");
     } finally {
       await b.close();
     }
@@ -999,7 +1001,7 @@ test("R3 shadow momentum is sampled until a trailing stable check, including mot
     vi.advanceTimersByTime(200);
     b.container.scrollTop = 600;
     vi.advanceTimersByTime(200);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 2 / 3 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 2 / 3 }, "*");
     b.bounds.mockClear();
     vi.advanceTimersByTime(200);
     expect(b.bounds).toHaveBeenCalledTimes(2);
@@ -1023,7 +1025,7 @@ test("R3 checkVisibility excludes a closed-details heading even when it has clie
     });
     expect(required(headings[1]).getClientRects().length).toBe(1);
     vi.advanceTimersByTime(200);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0.5 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0.5 }, "*");
   } finally {
     await b.close();
   }
@@ -1046,7 +1048,7 @@ test("R3 one report reads each of 1000 heading rects once without walking ancest
     expect(new Set(bounds.mock.instances).size).toBe(1000);
     expect(styles).not.toHaveBeenCalled();
     expect(parents).not.toHaveBeenCalled();
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 7, fraction: 0.5 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 7, fraction: 0.5 }, "*");
   } finally {
     await b.close();
   }
@@ -1070,11 +1072,11 @@ function readingLineLayout(kind: string) {
 test("R4 an inset Contents pick reports its heading at the reading line", async () => {
   const b = nestedScroller();
   try {
-    b.message({ type: "emend:goto", heading: 0, label: "First" });
+    b.message({ type: "recense:goto", heading: 0, label: "First" });
     await b.window.happyDOM.waitUntilComplete();
     expect(b.container.scrollTop).toBe(300);
     expect(b.scrollTo).not.toHaveBeenCalled();
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0 }, "*");
   } finally {
     await b.close();
   }
@@ -1089,7 +1091,7 @@ test.each(["document", "inset", "body"].flatMap((kind) => [false, true].map((las
     try {
       b.scroller.scrollTop = initial;
       await b.settle();
-      saved = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+      saved = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
       expect(saved?.heading).toBe(last ? 2 : kind === "inset" ? 0 : 1);
       const top = kind === "inset" ? (last ? -157 : -257) : last ? -300 : -200;
       const span = last ? (kind === "inset" ? 900 - top : 900) : 600;
@@ -1101,14 +1103,14 @@ test.each(["document", "inset", "body"].flatMap((kind) => [false, true].map((las
     try {
       const position = required(saved);
       restored.message({
-        type: "emend:goto",
+        type: "recense:goto",
         heading: position.heading,
         fraction: position.fraction,
         label: ["First", "Second", "Third"][position.heading],
       });
       await resumeMeasurement(restored);
       await restored.settle();
-      const after = restored.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+      const after = restored.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
       expect(after?.heading).toBe(position.heading);
       // The measured loop permits an error below 0.01 instead of solving an exact pixel formula.
       expect(Math.abs(after.fraction - position.fraction)).toBeLessThan(0.01);
@@ -1123,11 +1125,11 @@ test.each(["document", "inset", "body"])(
   async (kind) => {
     const b = readingLineLayout(kind);
     try {
-      b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.05 });
+      b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0.05 });
       await resumeMeasurement(b);
       await b.settle();
       expect(b.scroller.scrollTop).toBeCloseTo(kind === "inset" ? 273 : 230);
-      const after = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+      const after = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
       expect(after?.heading).toBe(0);
       expect(after?.fraction).toBeCloseTo(0.05);
     } finally {
@@ -1175,13 +1177,13 @@ test("R5.1 restoring fraction zero aligns the saved heading to the reading line"
   try {
     b.root.scrollTop = 200;
     vi.advanceTimersByTime(400);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0 }, "*");
     b.root.scrollTop = 0;
-    b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0 });
+    b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0 });
     expect(b.root.scrollTop).toBe(200);
     await resumeMeasurement(b);
     vi.advanceTimersByTime(200);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0 }, "*");
   } finally {
     await b.close();
   }
@@ -1228,15 +1230,15 @@ test.each(["footer", "distant heading"])(
     const b = coupledScroller(kind);
     try {
       vi.advanceTimersByTime(400);
-      const saved = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+      const saved = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
       expect(saved.heading).toBe(0);
       expect(saved.fraction).toBeCloseTo(b.fraction);
       b.root.scrollTop = 0;
       b.pane.scrollTop = 0;
-      b.message({ type: "emend:goto", heading: 0, label: "Inside", fraction: saved.fraction });
+      b.message({ type: "recense:goto", heading: 0, label: "Inside", fraction: saved.fraction });
       await resumeMeasurement(b);
       vi.advanceTimersByTime(200);
-      const after = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+      const after = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
       expect(after.heading).toBe(saved.heading);
       expect(Math.abs(after.fraction - saved.fraction)).toBeLessThan(0.01);
       expect(b.window.document.body.scrollTop).toBe(0);
@@ -1255,14 +1257,14 @@ async function reportAfterRestore(
   const b = coupledScroller(kind, paneLimit);
   try {
     vi.advanceTimersByTime(400);
-    const first = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+    const first = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
     const position = saved ?? first;
     b.root.scrollTop = 0;
     b.pane.scrollTop = 0;
-    b.message({ type: "emend:goto", heading: 0, label: "Inside", fraction: position.fraction });
+    b.message({ type: "recense:goto", heading: 0, label: "Inside", fraction: position.fraction });
     await resumeMeasurement(b);
     vi.advanceTimersByTime(200);
-    return { first, after: b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0] };
+    return { first, after: b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0] };
   } finally {
     await b.close();
   }
@@ -1308,7 +1310,7 @@ test("R7b a bracket contains an overshoot and converges within sixteen measured 
       return result;
     });
     const saved = 0.95;
-    b.message({ type: "emend:goto", heading: 0, label: "Inside", fraction: saved });
+    b.message({ type: "recense:goto", heading: 0, label: "Inside", fraction: saved });
     const passes = measured.slice(0, -1);
     expect(passes.length).toBeGreaterThan(2);
     expect(passes.length).toBeLessThanOrEqual(16);
@@ -1329,7 +1331,7 @@ test("R7b a bracket contains an overshoot and converges within sixteen measured 
     expect(Math.abs(required(measured.at(-1)).fraction - saved)).toBeLessThanOrEqual(0.002);
     await resumeMeasurement(b);
     vi.advanceTimersByTime(200);
-    const after = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+    const after = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
     expect(after.heading).toBe(0);
     expect(Math.abs(after.fraction - saved)).toBeLessThanOrEqual(0.002);
   } finally {
@@ -1359,8 +1361,8 @@ test.each(
 )("R5.3 $kind stays pinned through $input and scroll events that move nothing", async ({ input, kind }) => {
   const b = shortSections();
   try {
-    const pinned = { type: "emend:position", heading: 0, fraction: kind === "restore" ? 0.25 : 0 };
-    b.message({ type: "emend:goto", heading: 0, label: "First", ...(kind === "restore" ? { fraction: 0.25 } : {}) });
+    const pinned = { type: "recense:position", heading: 0, fraction: kind === "restore" ? 0.25 : 0 };
+    b.message({ type: "recense:goto", heading: 0, label: "First", ...(kind === "restore" ? { fraction: 0.25 } : {}) });
     b.window.dispatchEvent(new b.window.Event("scroll"));
     vi.advanceTimersByTime(400);
     expect(b.post).toHaveBeenLastCalledWith(pinned, "*");
@@ -1369,11 +1371,11 @@ test.each(
     b.window.dispatchEvent(new b.window.Event("scroll"));
     vi.advanceTimersByTime(400);
     expect(b.post).toHaveBeenLastCalledWith(pinned, "*");
-    expect(b.post.mock.calls.filter(([data]) => data.type === "emend:position")).toHaveLength(1);
+    expect(b.post.mock.calls.filter(([data]) => data.type === "recense:position")).toHaveLength(1);
     b.root.scrollTop = 700;
     b.window.dispatchEvent(new b.window.Event("scroll"));
     vi.advanceTimersByTime(400);
-    const actual = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+    const actual = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
     expect(actual.heading).toBe(1);
     expect(actual.fraction).toBeCloseTo(450 / 550);
   } finally {
@@ -1381,25 +1383,25 @@ test.each(
   }
 });
 
-test.each(["emend:scroll", "programmatic scroll"])(
+test.each(["recense:scroll", "programmatic scroll"])(
   "R6.1 a pinned goto ends when the view moves by %s, with no input event",
   async (how) => {
     const b = shortSections();
     try {
-      b.message({ type: "emend:goto", heading: 0, label: "First" });
-      b.message({ type: "emend:highlight", anchors: [{ threadId: "t", quote: "Last", prefix: "", suffix: "" }] });
+      b.message({ type: "recense:goto", heading: 0, label: "First" });
+      b.message({ type: "recense:highlight", anchors: [{ threadId: "t", quote: "Last", prefix: "", suffix: "" }] });
       vi.advanceTimersByTime(400);
-      expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0 }, "*");
+      expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0 }, "*");
       b.scroll.mockImplementation(function (this: Element) {
         b.root.scrollTop = 700;
       });
-      if (how === "emend:scroll") b.message({ type: "emend:scroll", threadId: "t" });
+      if (how === "recense:scroll") b.message({ type: "recense:scroll", threadId: "t" });
       else {
         b.root.scrollTop = 700;
         b.window.dispatchEvent(new b.window.Event("scroll"));
       }
       vi.advanceTimersByTime(400);
-      const actual = b.post.mock.calls.findLast(([data]) => data.type === "emend:position")?.[0];
+      const actual = b.post.mock.calls.findLast(([data]) => data.type === "recense:position")?.[0];
       expect(actual.heading).toBe(1);
       expect(actual.fraction).toBeCloseTo(450 / 550);
     } finally {
@@ -1418,10 +1420,10 @@ test("R7.2 a broken same-doc fragment keeps the restore pin and does not scroll"
     const link = b.window.document.createElement("a");
     link.setAttribute("href", "#missing");
     b.window.document.body.appendChild(link);
-    b.message({ type: "emend:goto", heading: 0, label: "First", fraction: 0.25 });
+    b.message({ type: "recense:goto", heading: 0, label: "First", fraction: 0.25 });
     vi.advanceTimersByTime(400);
     expect(b.root.scrollTop).toBe(213); // Actual fraction 0.26; the pin must keep the requested 0.25.
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0.25 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0.25 }, "*");
     const before = { href: b.window.location.href, length: b.window.history.length };
     b.scroll.mockClear();
     b.scrollTo.mockClear();
@@ -1436,7 +1438,7 @@ test("R7.2 a broken same-doc fragment keeps the restore pin and does not scroll"
     // Show that the landing error exists, independently of the pinned report.
     await resumeMeasurement(b);
     vi.advanceTimersByTime(200);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0.26 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0.26 }, "*");
   } finally {
     await b.close();
   }
@@ -1445,10 +1447,10 @@ test("R7.2 a broken same-doc fragment keeps the restore pin and does not scroll"
 test("R5.3 picking a final heading keeps that heading even when scroll limits leave it below the line", async () => {
   const b = shortSections();
   try {
-    b.message({ type: "emend:goto", heading: 2, label: "Last" });
+    b.message({ type: "recense:goto", heading: 2, label: "Last" });
     expect(b.root.scrollTop).toBe(700);
     vi.advanceTimersByTime(200);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 2, fraction: 0 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 2, fraction: 0 }, "*");
   } finally {
     await b.close();
   }
@@ -1477,7 +1479,7 @@ test.each(
       },
     });
     vi.advanceTimersByTime(trigger === "idle" ? 200 : 400);
-    if (trigger === "goto") b.message({ type: "emend:goto", heading: 0, label: "First" });
+    if (trigger === "goto") b.message({ type: "recense:goto", heading: 0, label: "First" });
     b.post.mockClear();
     bounds.mockClear();
     hidden = true;
@@ -1488,7 +1490,7 @@ test.each(
     hidden = false;
     b.window.dispatchEvent(new b.window.Event("scroll"));
     vi.advanceTimersByTime(200);
-    expect(b.post.mock.calls.some(([data]) => data.type === "emend:position")).toBe(true);
+    expect(b.post.mock.calls.some(([data]) => data.type === "recense:position")).toBe(true);
   } finally {
     Object.defineProperty(b.elementPrototype, "checkVisibility", { configurable: true, writable: true, value: method });
     await b.close();
@@ -1520,7 +1522,7 @@ test("R6.2 layout-driven scroll events post nothing and start no sampling when t
       return new b.window.DOMRect(0, this.localName === "h2" ? 50 : 500, 400, 20);
     });
     vi.advanceTimersByTime(1500);
-    const posts = () => b.post.mock.calls.filter(([data]) => data.type === "emend:position").length;
+    const posts = () => b.post.mock.calls.filter(([data]) => data.type === "recense:position").length;
     expect(posts()).toBe(1);
     bounds.mockClear();
     for (let tick = 0; tick < 25; tick++) {
@@ -1547,7 +1549,7 @@ test("R6.2 a posted position repeats nothing, and momentum still reports its fin
       vi.advanceTimersByTime(200);
     }
     vi.advanceTimersByTime(2000);
-    expect(b.post.mock.calls.at(-1)?.[0]).toEqual({ type: "emend:position", heading: 1, fraction: 130 / 550 });
+    expect(b.post.mock.calls.at(-1)?.[0]).toEqual({ type: "recense:position", heading: 1, fraction: 130 / 550 });
     const count = b.post.mock.calls.length;
     b.window.dispatchEvent(new b.window.Event("scroll"));
     b.window.dispatchEvent(new b.window.Event("resize"));
@@ -1566,11 +1568,11 @@ test("R5.6 resizing the frame updates the reading line without a scroll", async 
       return new b.window.DOMRect(0, this === headings[0] ? 140 : 740, 400, 20);
     });
     vi.advanceTimersByTime(400);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: null, fraction: 0 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: null, fraction: 0 }, "*");
     Object.defineProperty(b.window, "innerHeight", { configurable: true, value: 800 });
     b.window.dispatchEvent(new b.window.Event("resize"));
     vi.advanceTimersByTime(200);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 0.1 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 0.1 }, "*");
   } finally {
     await b.close();
   }
@@ -1588,7 +1590,7 @@ test("R5.6 body scroll height wins over html height when only the body scrolls",
       () => new b.window.DOMRect(0, 200 - body.scrollTop, 400, 20),
     );
     vi.advanceTimersByTime(200);
-    expect(b.post).toHaveBeenLastCalledWith({ type: "emend:position", heading: 0, fraction: 500 / 2800 }, "*");
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:position", heading: 0, fraction: 500 / 2800 }, "*");
   } finally {
     await b.close();
   }

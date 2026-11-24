@@ -5,7 +5,7 @@ import {
   THEME_TOKENS,
   ThemeEntry,
   type ThemeValid,
-} from "@emend/contract";
+} from "@recense/contract";
 import { expect, test } from "vitest";
 import { compositeThemeColor, parseThemeColor, themeColorHex } from "./color.ts";
 import { themeDownloadLook } from "./download.ts";

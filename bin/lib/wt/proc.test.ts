@@ -62,7 +62,7 @@ test("run reports a missing program as 127 and a timeout as 124", () => {
 
 test("every process helper strips private terms and pins the Git history seen by fzf previews", (t) => {
   const parent = {
-    EMEND_PRIVATE_TERMS: "fixturecorp",
+    RECENSE_PRIVATE_TERMS: "fixturecorp",
     GIT_NO_REPLACE_OBJECTS: "0",
     GIT_GRAFT_FILE: "/synthetic/grafts",
     GIT_REPLACE_REF_BASE: "refs/synthetic/",
@@ -72,7 +72,7 @@ test("every process helper strips private terms and pins the Git history seen by
   t.mock.property(process, "env", parent);
   const spy = t.mock.method(childProcess, "spawnSync", (...args: unknown[]) => {
     const options = args[2] as { env: NodeJS.ProcessEnv; encoding: string };
-    assert.equal(Object.hasOwn(options.env, "EMEND_PRIVATE_TERMS"), false);
+    assert.equal(Object.hasOwn(options.env, "RECENSE_PRIVATE_TERMS"), false);
     assert.equal(options.env.GIT_TERMINAL_PROMPT, "0");
     assert.equal(options.env.GIT_NO_REPLACE_OBJECTS, "1");
     assert.equal(options.env.GIT_GRAFT_FILE, "/dev/null/wt-no-grafts");
@@ -155,7 +155,7 @@ for (const execute of [run, runBytes]) {
         GH_NO_UPDATE_NOTIFIER: "0",
         GH_REPO: "synthetic/wrong-repository",
         GH_HOST: "example.invalid",
-        EMEND_PRIVATE_TERMS: "fixturecorp",
+        RECENSE_PRIVATE_TERMS: "fixturecorp",
         GIT_CONFIG_PARAMETERS: "'user.name=Synthetic User'",
         GIT_DIFF_OPTS: "--unified=0",
         GIT_DIR: "/synthetic/git-dir",
@@ -186,7 +186,7 @@ for (const execute of [run, runBytes]) {
             "FORCE_COLOR",
             "GH_REPO",
             "GH_HOST",
-            "EMEND_PRIVATE_TERMS",
+            "RECENSE_PRIVATE_TERMS",
             "GIT_CONFIG_PARAMETERS",
             "GIT_DIFF_OPTS",
             "GIT_DIR",

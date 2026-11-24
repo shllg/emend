@@ -14,7 +14,7 @@ import type { ReadingEntry } from "./use-reading-trail.ts";
 
 export const restoreDelays = [0, 100, 300, 800, 1500] as const;
 const saveInterval = 250;
-const captureEvent = "emend:capture-reading-position";
+const captureEvent = "recense:capture-reading-position";
 
 /** The route calls this after a completed jump, while the destination's DOM is mounted. */
 export function captureReadingPosition() {

@@ -1,4 +1,4 @@
-import type { TopicMeta } from "@emend/contract";
+import type { TopicMeta } from "@recense/contract";
 
 export function AttentionChip({ attention }: { attention: TopicMeta["attention"] }) {
   return attention ? (

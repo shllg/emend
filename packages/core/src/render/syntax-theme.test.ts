@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
-import { SyntaxRole } from "@emend/contract";
+import { SyntaxRole } from "@recense/contract";
 import { expect, test } from "vitest";
 import { sharedHighlighter } from "./highlighter.ts";
 import { syntaxColors, syntaxRole, syntaxTheme } from "./syntax-theme.ts";
@@ -22,10 +22,10 @@ test("core's roles and font styles match the diff's TextMate rules", async () =>
 
 test("Shiki restores non-hex colours through colorReplacements", async () => {
   const highlighter = await sharedHighlighter();
-  expect(highlighter.getLoadedThemes()).toEqual(["emend"]);
+  expect(highlighter.getLoadedThemes()).toEqual(["recense"]);
   const { tokens, fg, bg } = highlighter.codeToTokens("const count: number = 1; // note", {
     lang: "ts",
-    theme: "emend",
+    theme: "recense",
     // A loaded machine must not cut the line short in this colour-mapping test.
     tokenizeTimeLimit: 0,
   });

@@ -1,11 +1,11 @@
-import { type InboxItem, type InboxListGroup, LIMITS } from "@emend/contract";
+import { type InboxItem, type InboxListGroup, LIMITS } from "@recense/contract";
 import { fuzzyMatchFields } from "./fuzzy-match.ts";
 
 // Agent-written fields may be far longer; an issue number and a name sit at the start.
 const paletteFieldChars = LIMITS.titleChars;
 
 export type InboxKind = "" | "review" | "publish";
-export const inboxKindKey = "emend:inbox-kind";
+export const inboxKindKey = "recense:inbox-kind";
 export function readInboxKind(): InboxKind {
   try {
     const stored = localStorage.getItem(inboxKindKey);

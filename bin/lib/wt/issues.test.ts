@@ -48,8 +48,8 @@ const blockedBy = (...numbers: number[]) => ({
 
 test("issues trust only the latest ready event, then blockers, then taken branches", () =>
   scenario(({ env, fx, repo }) => {
-    gitIn(fx.main, "branch", "emend-1-taken");
-    gitIn(fx.main, "branch", "emend-2-taken");
+    gitIn(fx.main, "branch", "recense-1-taken");
+    gitIn(fx.main, "branch", "recense-2-taken");
     installFake(
       env,
       "gh",
@@ -82,10 +82,10 @@ test("issues trust only the latest ready event, then blockers, then taken branch
 
 test("issues detect local, registered, live origin, and PR heads with an exact issue prefix", () =>
   scenario(({ env, fx, repo }) => {
-    gitIn(fx.main, "branch", "emend-7-local");
-    gitIn(fx.origin, "branch", "emend-9-remote", "main");
+    gitIn(fx.main, "branch", "recense-7-local");
+    gitIn(fx.origin, "branch", "recense-9-remote", "main");
     withRegistry(repo, (r) => {
-      r.worktrees["emend-8-registered"] = {
+      r.worktrees["recense-8-registered"] = {
         path: join(repo.worktreesDir, "missing"),
         port: 1,
         issue: 8,
@@ -94,16 +94,16 @@ test("issues detect local, registered, live origin, and PR heads with an exact i
       };
     });
     for (const name of [
-      "emend-011-task",
+      "recense-011-task",
       "011-legacy-task",
-      "emend-110-different",
-      "other-emend-11-project",
-      "emend-11",
+      "recense-110-different",
+      "other-recense-11-project",
+      "recense-11",
     ])
       gitIn(fx.main, "branch", name);
     const prs = Array.from({ length: 31 }, (_, i) => ({
       number: i + 1,
-      headRefName: i === 30 ? "emend-10-pr" : `other-${i}`,
+      headRefName: i === 30 ? "recense-10-pr" : `other-${i}`,
     }));
     installFake(
       env,
@@ -120,11 +120,11 @@ test("issues detect local, registered, live origin, and PR heads with an exact i
     );
     assert.deepEqual(
       rows.map((r) => r.branch),
-      ["emend-7-local", "emend-8-registered", "emend-9-remote", "emend-10-pr", null],
+      ["recense-7-local", "recense-8-registered", "recense-9-remote", "recense-10-pr", null],
     );
     for (const [i, why] of ["local branch", "registered worktree", "origin branch", "open PR #31"].entries())
       assert.ok(rows[i]?.reason?.includes(why));
-    assert.throws(() => gitIn(fx.main, "rev-parse", "--verify", "origin/emend-9-remote"));
+    assert.throws(() => gitIn(fx.main, "rev-parse", "--verify", "origin/recense-9-remote"));
     const calls = fakeCalls(env, "gh");
     assert.equal(calls.length, 2);
     assert.ok(calls.some((c) => c.some((a) => a.includes("closingIssuesReferences"))));
@@ -158,7 +158,7 @@ test("issues order bugs first, then priority, age and number and tidy terminal t
     const out = await runWt(join(fx.main, "bin/wt"), ["issues"], { cwd: fx.main });
     assert.equal(out.code, 0, out.stderr);
     assert.equal(out.stdout, `${formatIssues(rows)}\n`);
-    assert.match(out.stdout, /^#1 {2}bug {2}P0 {2}pickable {2}Fix the review pane/m);
+    assert.match(out.stdout, /^#1 {2}bug {2}P0 {2}pickable {2}Fix review pane/m);
     assert.doesNotMatch(out.stdout, /[^\P{Cc}\n]|[\p{Zl}\p{Zp}]/u);
     const json = await runWt(join(fx.main, "bin/wt"), ["issues", "--json"], { cwd: fx.main });
     assert.equal(json.code, 0, json.stderr);
@@ -214,7 +214,7 @@ test("issues page past 100 with raw string variables, never a query per issue", 
 
 test("pickIssue shares the queue preflight and distinguishes missing, blocked, untrusted and taken", () =>
   scenario(({ env, fx, repo }) => {
-    gitIn(fx.main, "branch", "emend-3-some-slug");
+    gitIn(fx.main, "branch", "recense-3-some-slug");
     installFake(
       env,
       "gh",
@@ -325,18 +325,18 @@ test("repository mismatch refuses the queue and spawn without creating a claim",
 
 test("deleted remote tracking refs do not claim work; unfetched heads do", () =>
   scenario(({ env, fx, repo }) => {
-    gitIn(fx.origin, "branch", "emend-42-deleted", "main");
+    gitIn(fx.origin, "branch", "recense-42-deleted", "main");
     gitIn(fx.main, "fetch", "--quiet", "origin");
-    gitIn(fx.origin, "branch", "-D", "emend-42-deleted");
+    gitIn(fx.origin, "branch", "-D", "recense-42-deleted");
     gitIn(fx.main, "config", "remote.origin.fetch", "+refs/heads/main:refs/remotes/origin/main");
-    gitIn(fx.origin, "branch", "emend-43-unfetched", "main");
+    gitIn(fx.origin, "branch", "recense-43-unfetched", "main");
     installFake(env, "gh", issueRules([readyIssue(42), readyIssue(43)]));
     assert.deepEqual(
       scanIssues(repo).map((r) => r.status),
       ["pickable", "taken"],
     );
-    assert.ok(gitIn(fx.main, "rev-parse", "origin/emend-42-deleted"));
-    assert.throws(() => gitIn(fx.main, "rev-parse", "--verify", "origin/emend-43-unfetched"));
+    assert.ok(gitIn(fx.main, "rev-parse", "origin/recense-42-deleted"));
+    assert.throws(() => gitIn(fx.main, "rev-parse", "--verify", "origin/recense-43-unfetched"));
   }));
 
 test("cross-repository PRs are skipped, while same-repository closing references claim work", () =>
@@ -351,7 +351,7 @@ test("cross-repository PRs are skipped, while same-repository closing references
       issueRules(
         [readyIssue(42), readyIssue(43), readyIssue(44)],
         [
-          { number: 1, headRefName: "emend-42-fork", isCrossRepository: true, closingIssuesReferences: refs(42) },
+          { number: 1, headRefName: "recense-42-fork", isCrossRepository: true, closingIssuesReferences: refs(42) },
           { number: 2, headRefName: "fix-without-issue-prefix", closingIssuesReferences: refs(43) },
           { number: 3, headRefName: "another-repo-reference", closingIssuesReferences: refs(44, "other/repo") },
         ],
@@ -372,7 +372,7 @@ test("PR pagination and incomplete closing references fail closed", () =>
       {
         queryIncludes: "pullRequests(states:",
         match: ["cursor=more"],
-        stdout: prPage([{ number: 1, headRefName: "emend-42-later-page" }]),
+        stdout: prPage([{ number: 1, headRefName: "recense-42-later-page" }]),
       },
       ...issueRules([readyIssue(42)]),
     ]);
@@ -404,7 +404,7 @@ test("JSON output tidies titles and claimed branch names", () =>
       "gh",
       issueRules(
         [readyIssue(42, { title: "Fix\u202e title\u200b" })],
-        [{ number: 1, headRefName: "emend-42-\u202epr\u200b" }],
+        [{ number: 1, headRefName: "recense-42-\u202epr\u200b" }],
       ),
     );
     const out = await runWt(join(fx.main, "bin/wt"), ["issues", "--json"], { cwd: fx.main });
@@ -421,7 +421,7 @@ test("issue check accepts only its own claims and unchanged approved content", (
     installFake(env, "gh", issueRules([original]));
     const picked = pickIssue(repo, 42);
     const snapshot = issueSnapshot(picked);
-    const wt = setup(repo, { branch: "emend-42-check", issue: 42 });
+    const wt = setup(repo, { branch: "recense-42-check", issue: 42 });
     assert.equal(readFileSync(join(wt.path, ".wt/issue.md"), "utf8"), issueSnapshotText(picked));
     const createdSnapshot = JSON.parse(readFileSync(join(wt.path, ".wt/issue.json"), "utf8"));
     assert.deepEqual(createdSnapshot, { ...snapshot, fetchedAt: createdSnapshot.fetchedAt });
@@ -471,19 +471,19 @@ test("issue check accepts only its own claims and unchanged approved content", (
     await fail(/not open and ready/);
     installFake(env, "gh", [{ code: 1, stderr: "network is unreachable" }]);
     await fail(/GitHub/, 69);
-    installFake(env, "gh", issueRules([original], [ownPr, { number: 2, headRefName: "emend-42-other" }]));
+    installFake(env, "gh", issueRules([original], [ownPr, { number: 2, headRefName: "recense-42-other" }]));
     await fail(/taken/);
     installFake(env, "gh", issueRules([original], [ownPr, { ...ownPr, number: 2, headRefName: "closing-elsewhere" }]));
     await fail(/taken/);
     installFake(env, "gh", issueRules([original], [ownPr]));
-    gitIn(fx.main, "branch", "emend-42-other-local");
+    gitIn(fx.main, "branch", "recense-42-other-local");
     await fail(/taken/);
-    gitIn(fx.main, "branch", "-D", "emend-42-other-local");
-    gitIn(fx.origin, "branch", "emend-42-other-remote", "main");
+    gitIn(fx.main, "branch", "-D", "recense-42-other-local");
+    gitIn(fx.origin, "branch", "recense-42-other-remote", "main");
     await fail(/taken/);
-    gitIn(fx.origin, "branch", "-D", "emend-42-other-remote");
+    gitIn(fx.origin, "branch", "-D", "recense-42-other-remote");
     withRegistry(repo, (r) => {
-      r.worktrees["emend-another-name"] = {
+      r.worktrees["recense-another-name"] = {
         path: join(repo.worktreesDir, "other"),
         port: 2,
         issue: 42,
@@ -501,7 +501,7 @@ for (const claim of ["registry", "local", "remote"] as const) {
       setAfterLockHookForTests(() => {
         if (claim === "registry") {
           const r = readRegistry(repo);
-          r.worktrees["emend-different-name"] = {
+          r.worktrees["recense-different-name"] = {
             path: join(repo.worktreesDir, "other"),
             port: 1,
             issue: 42,
@@ -509,15 +509,15 @@ for (const claim of ["registry", "local", "remote"] as const) {
             createdAt: "t",
           };
           writeFileSync(registryPath(repo), JSON.stringify(r));
-        } else gitIn(claim === "local" ? fx.main : fx.origin, "branch", "emend-42-concurrent", "main");
+        } else gitIn(claim === "local" ? fx.main : fx.origin, "branch", "recense-42-concurrent", "main");
       });
       try {
         assert.throws(
-          () => setup(repo, { branch: "emend-42-new-title", issue: 42 }),
+          () => setup(repo, { branch: "recense-42-new-title", issue: 42 }),
           (e: unknown) => e instanceof WtError && e.code === 3 && /taken/.test(e.message),
         );
-        assert.equal(existsSync(join(repo.worktreesDir, "emend-42-new-title")), false);
-        assert.equal(readRegistry(repo).worktrees["emend-42-new-title"], undefined);
+        assert.equal(existsSync(join(repo.worktreesDir, "recense-42-new-title")), false);
+        assert.equal(readRegistry(repo).worktrees["recense-42-new-title"], undefined);
       } finally {
         setAfterLockHookForTests(null);
       }
@@ -526,13 +526,15 @@ for (const claim of ["registry", "local", "remote"] as const) {
 
 test("setup --issue ignores oversized branch claims and writes spawn's exact approved snapshot", () =>
   scenario(async ({ env, fx, repo }) => {
-    gitIn(fx.main, "branch", "emend-99999999999999999999-x");
-    gitIn(fx.origin, "branch", "emend-99999999999999999998-x", "main");
+    gitIn(fx.main, "branch", "recense-99999999999999999999-x");
+    gitIn(fx.origin, "branch", "recense-99999999999999999998-x", "main");
     installFake(env, "gh", issueRules([readyIssue(42)]));
     const approved = pickIssue(repo, 42);
-    const out = await runWt(join(fx.main, "bin/wt"), ["setup", "emend-42-snapshot", "--issue", "42"], { cwd: fx.main });
+    const out = await runWt(join(fx.main, "bin/wt"), ["setup", "recense-42-snapshot", "--issue", "42"], {
+      cwd: fx.main,
+    });
     assert.equal(out.code, 0, out.stderr);
-    const top = join(repo.worktreesDir, "emend-42-snapshot");
+    const top = join(repo.worktreesDir, "recense-42-snapshot");
     assert.equal(readFileSync(join(top, ".wt/issue.md"), "utf8"), issueSnapshotText(approved));
     const saved = JSON.parse(readFileSync(join(top, ".wt/issue.json"), "utf8"));
     assert.deepEqual(saved, { ...issueSnapshot(approved), fetchedAt: saved.fetchedAt });

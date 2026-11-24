@@ -1,4 +1,4 @@
-import type { RevisionView, ThreadView, TopicMeta, UnplacedReason } from "@emend/contract";
+import type { RevisionView, ThreadView, TopicMeta, UnplacedReason } from "@recense/contract";
 import {
   ArrowUpRight,
   Bot,
