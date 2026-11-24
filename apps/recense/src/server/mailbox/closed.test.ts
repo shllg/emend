@@ -168,6 +168,8 @@ test("a waiting take is ended once by a retire, with closed", async () => {
   expect(events.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect((await act(reviewId, "retire", {})).status).toBe(204);
   expect(await waiting).toMatchObject({ kind: "closed", reason: "retired" });
+  expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(false);
+  expect(events.agentWaiting(f.ownerId, reviewId)).toBe(false);
   expect((await row(reviewId))?.releasedReason).toBeNull();
   expect(await deliveryRows()).toHaveLength(1);
 });
@@ -181,6 +183,7 @@ test("a waiting take is ended by a snooze with closed", async () => {
   expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(true);
   expect((await act(reviewId, "snooze", { untilRevision: true })).status).toBe(204);
   expect(await waiting).toMatchObject({ kind: "closed", reason: "snoozed", until: null });
+  expect(f.deps.events?.agentWaiting(f.ownerId, reviewId)).toBe(false);
 });
 
 test("a waiting take on a deleted review gets 404", async () => {
