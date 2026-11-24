@@ -107,9 +107,10 @@ test("the merge skill checks the approved review for late feedback before restar
   const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
   const readiness = skill.slice(skill.indexOf("## 2. Readiness"), skill.indexOf("## 3. The approval"));
   const approval = readiness.indexOf("<main>/bin/wt approval --head <head>");
-  const take = readiness.indexOf('Run "Take pending feedback"');
+  const take = readiness.indexOf('In the PR\'s worktree, run "Take pending feedback"');
   const restart = readiness.indexOf("Then restart at step 1");
   assert.ok(approval >= 0 && approval < take && take < restart);
+  assert.match(readiness.slice(take, restart), /In the main checkout, skip that procedure\.[^\n]*question in step 3/);
   const lookup = readiness.slice(approval, take);
   assert.match(lookup, /In the main checkout, run `<main>\/bin\/wt approval --branch <headRefName> --head <head>`/);
   assert.match(lookup, /retained approved head/);
@@ -130,25 +131,37 @@ test("the merge skill checks the approved review for late feedback before restar
   assert.match(lookup, /approved <sha> review <id> revision <n>/);
 });
 
-test("the merge skill takes pending feedback at the approval gate and before the post-rebase approval rerun", () => {
+test("the merge skill asks the owner in main and takes pending feedback only in the PR's worktree", () => {
   const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
   const gate = skill.slice(skill.indexOf("## 3. The approval"), skill.indexOf("### Take pending feedback"));
   assert.match(gate, /In the main checkout, run `<main>\/bin\/wt approval --branch <headRefName> --head <headRefOid>`/);
+  const approved = gate.slice(gate.indexOf("- Exit 0:"), gate.indexOf("- Exit 1:"));
+  assert.match(approved, /keep the approved head[^\n]*review id/);
+  assert.match(approved, /In the PR's worktree, run "Take pending feedback" with that id before going on/);
+  const mainCheckout = approved.slice(approved.indexOf("In the main checkout,"));
   assert.match(
-    gate,
-    /- Exit 0:[^\n]*approved head[^\n]*review id[^\n]*\n\s*Run "Take pending feedback"[^\n]*before going on/,
+    mainCheckout,
+    /show the owner the approved head and review id[\s\S]*notify question`, then ask the owner once/,
   );
+  assert.match(
+    mainCheckout,
+    /"Merge PR #[^\n]*later Go\?"\n\s*- `Merge`[^\n]*step 4[^\n]*`--pr <n>` in step 7\.\n\s*- `Stop` — stop here\./,
+  );
+  assert.doesNotMatch(mainCheckout, /Take pending feedback|emend feedback/);
 
   const procedure = skill.slice(skill.indexOf("### Take pending feedback"), skill.indexOf("## 4. Behind main"));
+  assert.match(procedure, /Run this procedure only in the PR's worktree/);
+  assert.match(procedure, /A main-checkout run never takes or saves feedback/);
   const tracked = procedure.indexOf("git ls-files -- .wt");
-  const saved = procedure.indexOf("list saved results");
+  const saved = procedure.indexOf("List saved results");
   const fetch = procedure.indexOf('emend feedback <review-id> --save "<folder>"');
   assert.ok(tracked >= 0 && tracked < saved && saved < fetch);
   assert.match(procedure.slice(tracked, saved), /Read the hand-off[\s\S]*notify blocked[^\n]*stop/);
-  assert.match(procedure, /In the main checkout,[^\n]*fresh folder[^\n]*With only a review id/);
+  const savedResults = procedure.slice(saved, fetch);
+  assert.match(savedResults, /Delete each saved `pending` file and continue checking saved results/);
   assert.match(
-    procedure.slice(saved, fetch),
-    /saved result's `deliveryId` is absent from `handled.txt`[^\n]*\/e-pr-finalize/,
+    savedResults,
+    /saved `go`, `approve` or `closed` whose `deliveryId` is absent from `handled.txt`[^\n]*\/e-pr-finalize[^\n]*stop/,
   );
   const result = procedure.slice(fetch);
   assert.match(result, /non-zero exit[\s\S]*notify blocked[^\n]*stop/);
@@ -157,7 +170,10 @@ test("the merge skill takes pending feedback at the approval gate and before the
   assert.match(result, /On `go`, [^\n]*\/e-pr-finalize[^\n]*stop/);
   assert.match(result, /On an `approve`[^\n]*handled.txt[^\n]*\/e-pr-finalize[^\n]*stop/);
   const rerun = skill.slice(skill.indexOf("5. After the rebase, push and green CI"), skill.indexOf("## 5."));
-  assert.match(rerun, /Run "Take pending feedback"[^\n]*\n\s*Rerun `<main>\/bin\/wt approval --head <approved head>`/);
+  assert.match(
+    rerun,
+    /In the PR's worktree, run "Take pending feedback"[^\n]*\n\s*Rerun `<main>\/bin\/wt approval --head <approved head>`/,
+  );
   assert.match(rerun, /On exit 1, run `<main>\/bin\/wt notify blocked`, report [^\n]*approval[^\n]* and stop\./);
   assert.match(rerun, /A later run restarts at step 1/);
   assert.match(skill, /Any other change from READY[^\n]*stops the merge[^\n]*e-pr-finalize/);
@@ -167,11 +183,17 @@ test("local landing takes feedback for the approved review after verification an
   const skill = readFileSync(join(root, ".claude/skills/e-merge-local/SKILL.md"), "utf8");
   const land = skill.slice(skill.indexOf("## 4. Land"), skill.indexOf("## 5."));
   const verify = land.lastIndexOf("pnpm verify");
+  const tracked = land.indexOf("3. Run `git ls-files -- .wt` in the worktree");
   const check = land.indexOf("check the folder and its entries");
+  const saved = land.indexOf("List saved results");
   const fetch = land.indexOf('emend feedback <review-id> --save "<top>/.wt/review"');
   const command = land.indexOf("<main>/bin/wt land");
-  assert.ok(verify >= 0 && verify < check && check < fetch && fetch < command);
-  assert.match(land.slice(check, fetch), /unhandled `go` as in step 3/);
+  assert.ok(verify >= 0 && verify < tracked && tracked < check && check < saved && saved < fetch && fetch < command);
+  assert.match(
+    land.slice(tracked, check),
+    /must succeed and print nothing\.\n\s*Otherwise run `<main>\/bin\/wt notify blocked`, report the failure and stop/,
+  );
+  assert.match(land.slice(saved, fetch), /unhandled `go` as in step 3/);
   const feedback = land.slice(fetch, command);
   assert.match(feedback, /review id from step 3's `bin\/wt approval` output/);
   assert.match(feedback, /On `pending`, delete that file and land/);

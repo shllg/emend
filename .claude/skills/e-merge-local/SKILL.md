@@ -85,7 +85,10 @@ restate them here.
 2. Write `<top>/.wt/land-body.md`. The subject is a Conventional Commits line of at most 72
    characters. The body has `## Summary` with one to three bullets, then every distinct `Sync:`
    trailer from the branch's commits. No attribution.
-3. Write the subject to `<top>/.wt/land-subject.txt` with the Write tool.
+3. Run `git ls-files -- .wt` in the worktree. Step 4.1 may have rebased it onto a new base.
+   The command must succeed and print nothing.
+   Otherwise run `<main>/bin/wt notify blocked`, report the failure and stop.
+   Write the subject to `<top>/.wt/land-subject.txt` with the Write tool.
    emend keeps an approval while a later owner answer waits and sets it aside only when that answer is taken.
    Before landing, check the folder and its entries as `emend-feedback` says under "Read the hand-off".
    List saved results as it says and handle any unhandled `go` as in step 3 before landing.
