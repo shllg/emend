@@ -2691,7 +2691,9 @@ delivery confirmation. `viewed` follows a successful viewed-mark PUT and invalid
 review's revision queries. These events are emitted after the transaction commits. Events have no
 replay ids; clients refresh their cached state on every connection, including the first.
 The waiting event signals a change: `agentWaiting(ownerId, reviewId)` stays true during an
-open take and for 35 seconds after the last waiting take ends. Views also include
+open take and for 35 seconds after the last waiting take ends without a result. This bridges
+the gap between take rounds. A take that returns a Send or `closed` ends the waiting state
+at once unless another take on the same review is still open. Views also include
 unexpired direct waits, which do not emit waiting events. Each owner may open 32 streams
 across both endpoints combined; additional streams return `429 rate_limited`. A stream
 buffering over 100 events is closed. Device revocation and session logout close that
