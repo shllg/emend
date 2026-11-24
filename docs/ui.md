@@ -319,12 +319,16 @@ Below 768 px; check at 390×844.
   only. Entrances ease with `--ease-out`. Reuse the keyframes `em-fade`, `em-sheet-up`,
   `em-sheet-right`, `em-sheet-left`, `em-tooltip`, `em-pulse` and `em-spin`.
 - Motion only confirms a change: an overlay or toast arrives, a control answers, a spinner waits,
-  the waiting dot pulses, a new inbox row fades from `--accent-tint` over 1 s. Only the pulse and
-  spinners loop. No decorative motion and no entrance over 240 ms.
+  a new inbox row fades from `--accent-tint` over 1 s. When waiting starts, the waiting dot pulses
+  three times (4.8 s), then holds still with its colour and its "Agent waiting" label. Only spinners
+  loop, and only while work runs. No decorative motion and no entrance over 240 ms.
 - Animate opacity, transform, colour and shadow only, never size or position; a resize drag
   follows the pointer. Jumps to a thread, file, topic or heading are instant, never smooth.
-- CSS animations and transitions only, so `prefers-reduced-motion: reduce` cuts each to 1 ms
-  (`styles/base.css`); one-off highlights such as the inbox arrival are skipped there.
+- CSS animations and transitions only. `prefers-reduced-motion: reduce` cuts each to 1 ms and runs
+  every animation once (`animation-iteration-count: 1` in `styles/base.css`) so it shows its end
+  state and holds still. The waiting dot stays still and spinners stand still, while `aria-busy` and
+  the inactive button keep the busy state clear. One-off highlights such as the inbox arrival are
+  skipped there.
 
 ## 9. Copy
 

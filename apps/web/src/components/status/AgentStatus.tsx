@@ -24,7 +24,7 @@ export const agentStatusLabels: Record<AgentStatusKey, string> = {
   pickedUp: "Picked up",
 };
 export const agentDotClasses = {
-  waiting: "bg-agent-waiting text-agent-waiting animate-[em-pulse_var(--dur-pulse)_var(--ease-out)_infinite]",
+  waiting: "bg-agent-waiting text-agent-waiting animate-[em-pulse_var(--dur-pulse)_var(--ease-out)_3]",
   pending: "border-[1.5px] border-agent-none",
   pickedUp: "bg-agent-none",
 };
