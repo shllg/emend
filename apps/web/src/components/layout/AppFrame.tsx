@@ -233,6 +233,7 @@ function AppFrameContent({ isReview = false, children }: { isReview?: boolean; c
               label="Refresh"
               icon={RefreshCw}
               aria-busy={busy}
+              disabled={busy}
               className={busy ? "[&>svg]:animate-spin" : undefined}
               onClick={() => void refresh()}
             />

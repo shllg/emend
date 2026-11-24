@@ -674,10 +674,13 @@ test("the desktop header has a Refresh button on every page that has the frame",
     await waitFor(() => expect(Events.opened.length).toBe(prior + 1));
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(Events.opened.length).toBe(prior + 2));
+    expect(screen.getByRole("button", { name: "Refresh" }).getAttribute("aria-busy")).toBe("true");
+    expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(true);
     act(() => Events.opened.at(-1)?.open());
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Refresh" }).getAttribute("aria-busy")).not.toBe("true"),
     );
+    expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(false);
     view.unmount();
     cleanup();
   }
