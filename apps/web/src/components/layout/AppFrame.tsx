@@ -229,14 +229,17 @@ function AppFrameContent({ isReview = false, children }: { isReview?: boolean; c
           />
         ) : (
           <div className="flex items-center">
-            <IconButton
-              label="Refresh"
-              icon={RefreshCw}
-              aria-busy={busy}
-              disabled={busy}
-              className={busy ? "[&>svg]:animate-spin" : undefined}
-              onClick={() => void refresh()}
-            />
+            {
+              // aria-disabled, not disabled: the button keeps keyboard focus while it refreshes.
+              <IconButton
+                label="Refresh"
+                icon={RefreshCw}
+                aria-busy={busy}
+                aria-disabled={busy}
+                className={busy ? "[&>svg]:animate-spin" : undefined}
+                onClick={() => void refresh()}
+              />
+            }
             <IconButton label="Devices" icon={Smartphone} asChild>
               <Link to="/devices" />
             </IconButton>

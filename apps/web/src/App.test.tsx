@@ -670,17 +670,19 @@ test("the desktop header has a Refresh button on every page that has the frame",
   for (const path of ["/", `/r/${id}`, "/devices"]) {
     const prior = Events.opened.length;
     const view = mount(path);
-    await screen.findByRole("button", { name: "Refresh" });
+    const refresh = await screen.findByRole("button", { name: "Refresh" });
     await waitFor(() => expect(Events.opened.length).toBe(prior + 1));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    act(() => refresh.focus());
+    fireEvent.click(refresh);
     await waitFor(() => expect(Events.opened.length).toBe(prior + 2));
-    expect(screen.getByRole("button", { name: "Refresh" }).getAttribute("aria-busy")).toBe("true");
-    expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(refresh.getAttribute("aria-busy")).toBe("true");
+    expect(refresh.getAttribute("aria-disabled")).toBe("true");
+    expect((refresh as HTMLButtonElement).disabled).toBe(false);
+    expect(document.activeElement).toBe(refresh);
     act(() => Events.opened.at(-1)?.open());
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Refresh" }).getAttribute("aria-busy")).not.toBe("true"),
-    );
-    expect((screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(refresh.getAttribute("aria-busy")).not.toBe("true"));
+    expect(refresh.getAttribute("aria-disabled")).not.toBe("true");
+    expect(document.activeElement).toBe(refresh);
     view.unmount();
     cleanup();
   }
