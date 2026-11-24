@@ -32,11 +32,13 @@ type MountOptions = {
   issueRefs?: IssueRef[];
   phone?: boolean;
   glossary?: { term: string; definition: string }[];
+  /** A writeup stored before the rename: `data-emend-issue`. */
+  legacy?: boolean;
 };
 async function mount(options: MountOptions = {}) {
   const { issueRefs = refs, phone = false } = options;
   const url = "repoUrl" in options ? options.repoUrl : repoUrl;
-  const writeup = RenderedWriteup.parse(
+  const rendered = RenderedWriteup.parse(
     await renderWriteup(
       {
         overview: "Fixes #412 and follows #9, not #7.",
@@ -49,6 +51,9 @@ async function mount(options: MountOptions = {}) {
       { repoUrl, issueRefs },
     ),
   );
+  const writeup = options.legacy
+    ? (JSON.parse(JSON.stringify(rendered).replaceAll("data-recense-issue", "data-emend-issue")) as typeof rendered)
+    : rendered;
   vi.useFakeTimers();
   const view = render(
     <QueryClientProvider client={client}>
@@ -68,7 +73,9 @@ async function mount(options: MountOptions = {}) {
     </QueryClientProvider>,
   );
   const anchor = (n: number) => {
-    const found = view.container.querySelector<HTMLElement>(`a[data-recense-issue="${n}"]`);
+    const found = view.container.querySelector<HTMLElement>(
+      `a[data-${options.legacy ? "emend" : "recense"}-issue="${n}"]`,
+    );
     if (!found) throw new Error(`Missing anchor #${n}`);
     return found;
   };
@@ -112,6 +119,17 @@ test("mouse hover opens the card after 500 ms and leaving closes it", async () =
   advance(1);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(issue.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("an issue link stored before the rename, with data-emend-issue, still opens its card", async () => {
+  const { anchor } = await mount({ legacy: true });
+  const issue = anchor(412);
+  over(issue);
+  advance(500);
+  const card = screen.getByRole("dialog", { name: "#412 Store money as whole cents" });
+  expect(within(card).getByRole("link", { name: "View on github.com" }).getAttribute("href")).toBe(
+    "https://github.com/example/app/issues/412",
+  );
 });
 
 test("the card names the state as a word and links to the issue", async () => {

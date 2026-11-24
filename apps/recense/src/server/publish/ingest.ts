@@ -6,7 +6,8 @@ import {
   isRenderedMarkdownDoc,
   LIMITS,
   type PublishRequest,
-  type PublishResponse,
+  type PublishResponseWire,
+  wireHtmlLook,
   writeupIsEmpty,
 } from "@recense/contract";
 import { blockHash, composeRenames, decodeText, type PlaceContext } from "@recense/core";
@@ -92,7 +93,7 @@ export async function ingest(
   instanceId: string,
   input: PublishRequest,
   deps: Deps,
-): Promise<PublishResponse> {
+): Promise<PublishResponseWire> {
   let release: (() => void) | undefined;
   try {
     release = await publishSlots.acquire(deps.signal);
@@ -112,7 +113,7 @@ async function computePublish(
   instanceId: string,
   input: PublishRequest,
   deps: Deps,
-): Promise<PublishResponse> {
+): Promise<PublishResponseWire> {
   const writeupEmpty = writeupIsEmpty(input.writeup);
   const worker = deps.executor ? undefined : workerExecutor();
   const run = deps.executor ?? worker;
@@ -558,7 +559,7 @@ async function computePublish(
         const ordered = input.files
           .map((file, ord) => ({ file, ord }))
           .sort((a, b) => Number(a.file.role === "asset") - Number(b.file.role === "asset"));
-        const htmlLooks: NonNullable<PublishResponse["htmlLooks"]> = [];
+        const htmlLooks: NonNullable<PublishResponseWire["htmlLooks"]> = [];
         let inserted = 0;
         for (const { file, ord } of ordered) {
           checkPublishSignal(deps.signal);
@@ -604,7 +605,7 @@ async function computePublish(
           if (htmlDoc && !unrenderedPaths.has(file.path))
             htmlLooks.push({
               path: file.path,
-              look: look ?? "custom",
+              look: wireHtmlLook(look ?? "custom"),
               ...(colorScheme === "light" ? { colorScheme } : {}),
             });
           for (const [noteOrd, note] of (file.notes ?? []).entries())

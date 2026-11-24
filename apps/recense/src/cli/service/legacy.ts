@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { parseServeArgs } from "../commands/serve.ts";
 import { CliError } from "../http.ts";
 import { readOwnedService, type ServiceContext, ServiceFileNotOwned, validatePaths } from "./common.ts";
+import { serviceField } from "./launchd.ts";
 
 // The service of the name before the rename. recense neither starts nor keeps it.
 const unitName = "emend";
@@ -10,7 +11,7 @@ const systemdPrefix = "# written by emend\n";
 const launchdLabel = "dev.emend.server";
 const launchdPrefix = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- written by emend -->\n';
 
-type LegacyContext = Pick<ServiceContext, "home" | "io" | "tool">;
+type LegacyContext = Pick<ServiceContext, "home" | "io" | "tool" | "now" | "sleep">;
 
 export const legacyUnitPath = (home: string, configHome: string | undefined) =>
   join(configHome && isAbsolute(configHome) ? configHome : join(home, ".config"), `systemd/user/${unitName}.service`);
@@ -105,14 +106,13 @@ export interface LegacyService {
 }
 
 /**
- * Stops and removes the service of the old name, the way recense removes its own. Returns what it knew about
- * the old service, or undefined when none was there. With `needOptions` it refuses, before it stops anything,
- * when the old options cannot be read, because dropping them silently could move the server or lose its route.
+ * Reads what the service of the old name ran with, and changes nothing. Returns undefined when none is there.
+ * With `needOptions` it refuses when the old options cannot be read, because dropping them silently could
+ * move the server or lose its route.
  */
-export async function removeLegacyService(
+export async function inspectLegacyService(
   platform: string,
-  context: LegacyContext,
-  uid?: number,
+  context: Pick<ServiceContext, "home" | "io">,
   needOptions = false,
 ): Promise<LegacyService | undefined> {
   if (platform !== "linux" && platform !== "darwin") return undefined;
@@ -132,22 +132,70 @@ export async function removeLegacyService(
     throw new CliError(
       "could not read the options of the old emend service, so it was left running; run recense service install with the options it used (see emend.service or dev.emend.server.plist).",
     );
-  const { home, io, tool } = context;
-  if (platform === "linux") {
-    const path = legacyUnitPath(home, io.env.XDG_CONFIG_HOME);
-    const systemctl = await tool("systemctl");
-    await systemctl(["--user", "disable", "--now", unitName], "report");
-    await unlink(path);
-    await systemctl(["--user", "daemon-reload"]);
-  } else {
-    if (uid === undefined) throw new CliError("Could not determine the service user.");
-    const launchctl = await tool("launchctl");
-    await launchctl(["bootout", `gui/${uid}/${launchdLabel}`], "report");
-    await unlink(legacyPlistPath(home));
-  }
-  io.stdout("recense: removed the old emend service; the recense service replaces it\n");
   return {
     ...(flags === undefined ? {} : { flags }),
     ...(parsed?.stateDir === undefined ? {} : { stateDir: parsed.stateDir }),
   };
+}
+
+const launchdTarget = (uid: number) => `gui/${uid}/${launchdLabel}`;
+
+/** The process id of the old service's server; zero when it does not run. */
+export async function legacyServicePid(platform: string, context: LegacyContext, uid?: number): Promise<number> {
+  if (platform === "linux") {
+    const systemctl = await context.tool("systemctl");
+    const result = await systemctl(["--user", "show", "--property=MainPID", "--value", unitName], "ignore");
+    const pid = Number(result.stdout.trim());
+    return result.code === 0 && Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+  }
+  if (uid === undefined) throw new CliError("Could not determine the service user.");
+  const launchctl = await context.tool("launchctl");
+  const result = await launchctl(["print", launchdTarget(uid)], "ignore");
+  const pid = Number(serviceField(result.stdout, "pid"));
+  return result.code === 0 && Number.isSafeInteger(pid) && pid > 0 ? pid : 0;
+}
+
+/**
+ * Stops the old service and waits until it is gone, but leaves its file and its enabled state alone. Returns a
+ * function that starts it again, for a handover that fails after this point.
+ */
+export async function stopLegacyService(
+  platform: string,
+  context: LegacyContext,
+  uid?: number,
+): Promise<() => Promise<void>> {
+  const deadline = context.now() + 10000;
+  const wait = async (running: () => Promise<boolean>) => {
+    while (await running()) {
+      const remaining = deadline - context.now();
+      if (remaining <= 0) throw new CliError("the old emend service did not stop; it was left as it was. Try again.");
+      await context.sleep(Math.min(200, remaining));
+    }
+  };
+  if (platform === "linux") {
+    const systemctl = await context.tool("systemctl");
+    await systemctl(["--user", "stop", unitName], "ignore");
+    await wait(async () => (await systemctl(["--user", "is-active", unitName], "ignore")).code === 0);
+    return async () => void (await systemctl(["--user", "start", unitName], "ignore"));
+  }
+  if (uid === undefined) throw new CliError("Could not determine the service user.");
+  const launchctl = await context.tool("launchctl");
+  await launchctl(["bootout", launchdTarget(uid)], "ignore");
+  await wait(async () => (await launchctl(["print", launchdTarget(uid)], "ignore")).code === 0);
+  return async () => void (await launchctl(["bootstrap", `gui/${uid}`, legacyPlistPath(context.home)], "ignore"));
+}
+
+/** Removes the stopped service of the old name: its enabled state and its file. */
+export async function removeLegacyService(platform: string, context: LegacyContext, uid?: number): Promise<void> {
+  const { home, io, tool } = context;
+  if (platform === "linux") {
+    const systemctl = await tool("systemctl");
+    await systemctl(["--user", "disable", unitName], "report");
+    await unlink(legacyUnitPath(home, io.env.XDG_CONFIG_HOME));
+    await systemctl(["--user", "daemon-reload"]);
+  } else {
+    if (uid === undefined) throw new CliError("Could not determine the service user.");
+    await unlink(legacyPlistPath(home));
+  }
+  io.stdout("recense: removed the old emend service; the recense service replaces it\n");
 }

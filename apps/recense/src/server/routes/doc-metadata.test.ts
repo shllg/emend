@@ -101,7 +101,10 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
     };
     const response = await f.request("/publish", "POST", input, "agent");
     expect(response.status).toBe(200);
-    const published = PublishResponse.parse(await response.json());
+    const wire = (await response.json()) as { htmlLooks: { look: string }[] };
+    // The wire keeps the name from before the rename, so an old CLI still reads the response.
+    expect(wire.htmlLooks.map((entry) => entry.look)).toEqual(["emend", "emend", "custom"]);
+    const published = PublishResponse.parse(wire);
     expect(published.unrendered).toEqual(["failed.html"]);
     expect(published.htmlLooks).toEqual([
       { path: "structure.html", look: "recense" },
@@ -118,7 +121,9 @@ test("publish records HTML look, leaves other and failed metadata null, and omit
       });
     }
     const viewPath = `/reviews/${published.reviewId}/revisions/1`;
-    const view = RevisionView.parse(await (await f.request(viewPath, "GET")).json());
+    const rawView = (await (await f.request(viewPath, "GET")).json()) as { docs: { look?: string }[] };
+    expect(rawView.docs[0]?.look).toBe("emend");
+    const view = RevisionView.parse(rawView);
     expect(view.docs[0]).toMatchObject({ kind: "html", look: "recense", headings: [{ level: 2, text: "Part" }] });
     expect(view.docs[1]).toMatchObject({ kind: "html", look: "recense", colorScheme: "light" });
     for (const doc of view.docs.slice(2)) expect(doc).not.toHaveProperty("look");

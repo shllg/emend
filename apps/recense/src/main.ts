@@ -3,7 +3,7 @@ import type { UpdateOptions } from "./cli/commands/update.ts";
 import type { ServiceOptions } from "./cli/service/common.ts";
 import { NewerDatabaseError } from "./db/migrate.ts";
 import { isStateModeError, StateFolderWriteError, stateAccessError } from "./state/files.ts";
-import { moveLegacyState } from "./state/legacy.ts";
+import { legacyServerFolder, moveLegacyState } from "./state/legacy.ts";
 import { defaultConfigDir, defaultStateDir } from "./state/paths.ts";
 import { VERSION } from "./version.ts";
 
@@ -25,7 +25,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   if (argv.length === 2 && argv[0] === "status" && argv[1] === "--line") {
     try {
       const { statusLineCommand } = await import("./cli/commands/status.ts");
-      if (moveLegacyState(io.env) !== undefined) return 0;
+      if (moveLegacyState(io.env).refusal !== undefined) return 0;
       await statusLineCommand(defaultStateDir(io.env), io, { signal: io.statusLineSignal });
     } catch {
       // State-folder resolution and loading the status line must also stay silent.
@@ -63,13 +63,17 @@ export async function run(argv: string[], io: Io): Promise<number> {
     io.stdout(`recense ${VERSION}\n`);
     return 0;
   }
-  // The service command first replaces a service of the old name, which may hold the old folder.
-  if (argv[0] !== "service") {
-    const refusal = moveLegacyState(io.env);
+  // The service command first replaces a service of the old name, which may hold the old folder, and
+  // stop must reach a server of the old name before anything moves.
+  let legacyStop: string | undefined;
+  if (argv[0] === "stop") legacyStop = legacyServerFolder(io.env);
+  else if (argv[0] !== "service") {
+    const { refusal, note } = moveLegacyState(io.env);
     if (refusal !== undefined) {
       io.stderr(`recense: ${refusal}\n`);
       return 1;
     }
+    if (note !== undefined) io.stderr(`${note}\n`);
   }
   if (
     [
@@ -126,7 +130,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return 0;
       }
       const command = await commands[argv[0] as keyof typeof commands]();
-      await command(defaultStateDir(io.env), argv.slice(1), io);
+      await command(legacyStop ?? defaultStateDir(io.env), argv.slice(1), io);
       return 0;
     } catch (error) {
       if (error instanceof CliSignalExit) return error.exitCode;

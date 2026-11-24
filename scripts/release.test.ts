@@ -18,6 +18,7 @@ import { type TestContext, test } from "node:test";
 import {
   classifyCommit,
   compareVersions,
+  isPublished,
   lastTag,
   localDate,
   plan,
@@ -820,8 +821,9 @@ for (const status of [200, 404, 302, 403, 429, 503]) {
   test(`the default npm query treats HTTP ${status} explicitly`, async (t) => {
     const { root, sha } = pendingRelease(t);
     if (status !== 404) git(root, "update-ref", "refs/remotes/origin/release", sha);
+    const asked: string[] = [];
     const query = t.mock.method(globalThis, "fetch", async (url, options) => {
-      assert.equal(url, "https://registry.npmjs.org/@shllg%2Frecense/0.1.1");
+      asked.push(url);
       assert.equal(options.redirect, "manual");
       assert(options.signal instanceof AbortSignal);
       return new Response(null, { status });
@@ -834,7 +836,14 @@ for (const status of [200, 404, 302, 403, 429, 503]) {
         (error) => error instanceof ReleaseError && error.message.includes(`npm returned HTTP ${status}`),
       );
     }
-    assert.equal(query.mock.callCount(), 1);
+    // A 404 under the current name is followed by one query under the name before the rename.
+    assert.deepEqual(
+      asked,
+      status === 404
+        ? ["https://registry.npmjs.org/@shllg%2Frecense/0.1.1", "https://registry.npmjs.org/@shllg%2Femend/0.1.1"]
+        : ["https://registry.npmjs.org/@shllg%2Frecense/0.1.1"],
+    );
+    assert.equal(query.mock.callCount(), asked.length);
   });
 }
 
@@ -993,3 +1002,23 @@ for (const mode of ["new", "resume"] as const) {
     }
   });
 }
+
+test("a version published only under the name before the rename counts as published", async () => {
+  const asked: string[] = [];
+  const registry = (published: string[]) =>
+    (async (url: string | URL | Request) => {
+      asked.push(String(url));
+      return new Response(null, { status: published.some((name) => String(url).includes(`/${name}/`)) ? 200 : 404 });
+    }) as typeof fetch;
+  assert.equal(await isPublished("0.17.1", registry(["@shllg%2Femend"])), true);
+  assert.deepEqual(asked, [
+    "https://registry.npmjs.org/@shllg%2Frecense/0.17.1",
+    "https://registry.npmjs.org/@shllg%2Femend/0.17.1",
+  ]);
+  assert.equal(await isPublished("0.17.1", registry(["@shllg%2Frecense"])), true);
+  assert.equal(await isPublished("0.17.1", registry([])), false);
+  await assert.rejects(
+    isPublished("0.17.1", (async () => new Response(null, { status: 500 })) as typeof fetch),
+    /npm returned HTTP 500 for @shllg\/recense@0.17.1/,
+  );
+});

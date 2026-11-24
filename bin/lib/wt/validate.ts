@@ -118,8 +118,11 @@ export function readTextFile(file: string, max = MAX_TEXT_FILE_BYTES): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(readFileBytes(file, max));
 }
 
+/** A numeric branch name, `recense-<n>-` or the `emend-<n>-` of before the rename (open branches keep it). */
+export const NUMERIC_BRANCH = /^(?:recense|emend)-[0-9]+-/u;
+
 export function issueFromBranch(branch: string): number | null {
-  const n = /^recense-([1-9][0-9]*)-/.exec(branch)?.[1];
+  const n = /^(?:recense|emend)-([1-9][0-9]*)-/.exec(branch)?.[1];
   // A name discovered among claims is data, not an explicit issue-number argument.
   // Keep user input strict while treating unparseable branch numbers as no inferred issue.
   return n !== undefined && Number.isSafeInteger(Number(n)) ? Number(n) : null;
@@ -127,7 +130,7 @@ export function issueFromBranch(branch: string): number | null {
 
 /** Numeric recense names are reserved for explicitly registered issues, including padded numbers. */
 export function requireIssueBranch(branch: string, issue?: number): void {
-  if (/^recense-[0-9]+-/u.test(branch) && issue === undefined)
+  if (NUMERIC_BRANCH.test(branch) && issue === undefined)
     throw new WtError(2, "Numeric recense branch names require --issue.");
   if (issue !== undefined && issueFromBranch(branch) !== issue)
     throw new WtError(2, "The branch number must match --issue.");

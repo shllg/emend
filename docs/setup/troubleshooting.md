@@ -280,13 +280,13 @@ understand the request.
 Fix: stop that process yourself. Find it in your own terminal. On Linux:
 
 ```sh
-pgrep -af '[e]mend.mjs serve'
+pgrep -af '[r]ecense.mjs serve'
 ```
 
 On macOS:
 
 ```sh
-pgrep -lf '[e]mend.mjs serve'
+pgrep -lf '[r]ecense.mjs serve'
 ```
 
 End the process it lists with `kill <pid>`. Then run `recense service install` again, or run `recense`

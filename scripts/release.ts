@@ -244,20 +244,27 @@ interface PlanOptions {
   releaseRef?: string;
 }
 
-export async function isPublished(version: string): Promise<boolean> {
-  let response: Response;
-  try {
-    response = await fetch(`https://registry.npmjs.org/@shllg%2Frecense/${encodeURIComponent(version)}`, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(30_000),
-    });
-    await response.body?.cancel();
-  } catch {
-    throw new ReleaseError(`release: could not check npm for @shllg/recense@${version}`);
+const PUBLISHED_NAMES = ["@shllg%2Frecense", "@shllg%2Femend"] as const;
+
+/** True when the version is on npm under the current name or under the name before the rename. */
+export async function isPublished(version: string, fetcher: typeof fetch = fetch): Promise<boolean> {
+  for (const name of PUBLISHED_NAMES) {
+    const label = decodeURIComponent(name);
+    let response: Response;
+    try {
+      response = await fetcher(`https://registry.npmjs.org/${name}/${encodeURIComponent(version)}`, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+      });
+      await response.body?.cancel();
+    } catch {
+      throw new ReleaseError(`release: could not check npm for ${label}@${version}`);
+    }
+    if (response.status === 200) return true;
+    if (response.status !== 404)
+      throw new ReleaseError(`release: npm returned HTTP ${response.status} for ${label}@${version}`);
   }
-  if (response.status === 200) return true;
-  if (response.status === 404) return false;
-  throw new ReleaseError(`release: npm returned HTTP ${response.status} for @shllg/recense@${version}`);
+  return false;
 }
 
 function releaseCommit(root: string, ref: string): string {

@@ -380,14 +380,29 @@ name. To move over:
    line that says it is now `recense`, and runs `recense`. It goes away in a later release.
 4. Run `recense`. On first start it moves your state folder (`~/.local/share/emend`, on macOS
    `~/Library/Application Support/emend`) and your config folder (`~/.config/emend`) to their `recense`
-   names, and renames the database file. It deletes nothing. It refuses, and moves nothing, while a
-   server still uses the old state folder. A folder you picked with `EMEND_HOME` keeps its place and
-   is read as `RECENSE_HOME`; so is `EMEND_STATUS_LINE_DEADLINE_MS` as `RECENSE_STATUS_LINE_DEADLINE_MS`.
-5. If you used the service, run `recense service install`. It stops and removes the old `emend`
-   service, then installs the `recense` one. `recense service status` says when an old one is still
+   names. Every start also renames the database file `emend.db` (with its `-wal` and `-shm` files) to
+   `recense.db` in the state folder it uses, so a folder you picked with `EMEND_HOME` or `RECENSE_HOME`
+   keeps its place and gets the new file name. Only a run without either variable moves the folders, so a
+   worktree or a test run never moves your real ones; with a variable set, a config folder that still has
+   the old name is read in place. recense deletes nothing. It refuses, and moves nothing, while any
+   process still holds the old database (a server, or an `emend wait`): it names the process id; stop it
+   (`recense stop` reaches an old server too), then run `recense` again. On a system where recense cannot
+   see open files, it asks you to rename the three database files yourself. When both state folders
+   exist, one line on stderr says that the old one is left alone. `EMEND_STATUS_LINE_DEADLINE_MS` is read
+   as `RECENSE_STATUS_LINE_DEADLINE_MS`.
+5. If you used the service, run `recense service install`. It reads the old service's options and its
+   `EMEND_HOME`, stops the old `emend` service and waits for it, moves the state, installs the `recense`
+   service with the same options (the old `EMEND_HOME` becomes `RECENSE_HOME`), and only then removes the
+   old unit. If a step fails, the old service runs again or the new unit is already written with the old
+   options, so run the same command again. `recense service status` says when an old one is still
    installed.
-6. Reinstall the Claude Code plugin as `recense`, and run `recense skills install`: it replaces the
-   old `emend-*` skill links with `recense-*` ones.
+6. Reinstall the Claude Code plugin as `recense`: `claude plugin marketplace add shllg/recense@release`,
+   then `claude plugin install recense@recense` (in your own terminal). Run `recense skills install`: it
+   replaces the old `emend-*` skill links with `recense-*` ones.
+
+`recense update` updates `@shllg/recense` only. It leaves an old `@shllg/emend` install alone, and `emend update`
+never learns about the new name, so do steps 2 and 3 once by hand. The refusal in step 4 clears when no process
+holds the old database any more: stop that process, or reboot, and run `recense` again.
 
 Browsers pair again only when you also moved to another address; a signed-in browser stays signed in,
 and its saved settings move over on the first load.

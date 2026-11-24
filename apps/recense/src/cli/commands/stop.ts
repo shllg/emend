@@ -4,7 +4,7 @@ import type { Io } from "../../main.ts";
 import { checkTokenFileMode } from "../../state/token-file.ts";
 import { escapeReference } from "../escape.ts";
 import { CliError, CliUsageError } from "../http.ts";
-import { type ServerRecord, serverRecord } from "../server-client.ts";
+import { pidMayBeServer, type ServerRecord, serverRecord } from "../server-client.ts";
 import { servicePid } from "../service/pid.ts";
 import { requestServerStop } from "../service/takeover.ts";
 import { removeStaleTailscaleServe } from "../tailscale.ts";
@@ -54,6 +54,8 @@ export async function stopCommand(stateDir: string, args: string[], io: Io) {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ESRCH") break;
       }
+      // A live pid that runs some other program is a stale record whose pid was reused, not a server closing.
+      if (!pidMayBeServer(before.pid)) break;
       // Discovery is removed after db.close(); zombies still answer kill(pid, 0).
       // The per-process key also distinguishes a replacement that reused this pid.
       const current = await serverRecord(stateDir);

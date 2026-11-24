@@ -147,7 +147,10 @@ test("export carries stored HTML appearance and explicit nulls for every other f
     colorScheme,
   });
   expect(exported.bundle.files.map(appearance)).toEqual(appearances);
-  expect(JSON.parse(exported.json).files.map(appearance)).toEqual(appearances);
+  // What goes to the hub spells the recense look as 0.17 hubs read it.
+  expect(JSON.parse(exported.json).files.map(appearance)).toEqual(
+    appearances.map((entry) => ({ ...entry, look: entry.look === "recense" ? "emend" : entry.look })),
+  );
 });
 
 test.each([

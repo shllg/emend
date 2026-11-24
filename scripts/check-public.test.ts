@@ -351,6 +351,21 @@ test("the line marker cannot disable redaction in a reported filename", () => {
   ]);
 });
 
+test("EMEND_PRIVATE_TERMS, the name before the rename, still counts, after RECENSE_PRIVATE_TERMS", () => {
+  const cwd = repo();
+  const terms = loadPrivateTerms(
+    cwd,
+    { RECENSE_PRIVATE_TERMS: "fixture-team", EMEND_PRIVATE_TERMS: "# old\nfixturecorp\n!fixturecorp/shared" },
+    { root: cwd },
+  );
+  assert.deepEqual(
+    terms.terms.map((term) => term.value),
+    ["fixture-team", "fixturecorp"],
+  );
+  assert.deepEqual(terms.notes, ["check:public: allowed phrases in EMEND_PRIVATE_TERMS are ignored"]);
+  assert.equal(cli(cwd, ["--text", "FIXTURECORP"], { EMEND_PRIVATE_TERMS: "fixturecorp" }).status, 1);
+});
+
 test("private lists preserve line numbers and only file allowed phrases take effect", () => {
   const cwd = repo();
   writeFileSync(path.join(cwd, ".private-terms"), "# synthetic\n\nfixturecorp\n!fixturecorp/public-tool\n");

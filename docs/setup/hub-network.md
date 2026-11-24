@@ -27,8 +27,8 @@ recense pair, attach, detach, config or devices yourself, give me the command in
 --host or any flag this page does not name; never retry a command through another program (for
 example script) to get a terminal; outside your sandbox run only recense service install --public-url
 <my address>, recense service status and recense service uninstall, and no other command; run no process
-listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[e]mend.mjs serve';
-macOS: pgrep -lf '[e]mend.mjs serve').
+listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[r]ecense.mjs serve';
+macOS: pgrep -lf '[r]ecense.mjs serve').
 Make this machine my recense hub behind my own HTTPS address (https://github.com/shllg/recense).
 Follow https://github.com/shllg/recense/blob/release/docs/setup/hub-network.md step by step. recense
 must already be installed here (https://github.com/shllg/recense/blob/release/docs/setup/local.md).
@@ -191,7 +191,7 @@ stores) or recense's state folder; outside your sandbox run only recense service
 <my address>, recense service status and recense service uninstall, and no other command; never pass
 --host or any flag this page does not name; never retry a command through another program (for
 example script) to get a terminal; run no process listing yourself, ask me to run pgrep in my own
-terminal (Linux: pgrep -af '[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Run recense service install --public-url with my HTTPS origin, then recense service status. Show me
 both outputs. If the output says to enable linger, give me that sudo command to run myself. If a
 server cannot be asked to stop, ask me to run the pgrep command for my system and end that server,

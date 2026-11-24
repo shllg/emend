@@ -21,8 +21,8 @@ devices yourself, give me the command instead; never pass --host or any flag thi
 name; never retry a command through another program (for example script) to get a terminal; never
 list the devices on my tailnet; outside your sandbox run only recense service install --tailscale,
 recense service status and recense service uninstall, and no other command; run no process listing
-yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[e]mend.mjs serve'; macOS: pgrep
--lf '[e]mend.mjs serve').
+yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep
+-lf '[r]ecense.mjs serve').
 Make this machine my recense hub on my own tailnet (https://github.com/shllg/recense). Follow
 https://github.com/shllg/recense/blob/release/docs/setup/hub-tailscale.md step by step. recense must
 already be installed here (https://github.com/shllg/recense/blob/release/docs/setup/local.md). Ask me
@@ -155,7 +155,7 @@ stores) or recense's state folder; never list the devices on my tailnet; outside
 recense service install --tailscale, recense service status and recense service uninstall, and no other
 command; never pass --host or any flag this page does not name; never retry a command through
 another program (for example script) to get a terminal; run no process listing yourself, ask me to
-run pgrep in my own terminal (Linux: pgrep -af '[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs
+run pgrep in my own terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs
 serve').
 Run recense service install --tailscale and recense service status and show me the output of both. If
 Tailscale refuses to set up Serve, give me the sudo tailscale serve command recense prints, to run

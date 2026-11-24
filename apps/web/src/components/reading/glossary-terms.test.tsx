@@ -27,8 +27,8 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
-async function mount(glossary: WriteupInput["glossary"] = entries) {
-  const writeup = RenderedWriteup.parse(
+async function mount(glossary: WriteupInput["glossary"] = entries, legacy = false) {
+  const rendered = RenderedWriteup.parse(
     await renderWriteup(
       {
         overview: "Budget budget and retry retry.",
@@ -40,6 +40,14 @@ async function mount(glossary: WriteupInput["glossary"] = entries) {
       [],
     ),
   );
+  // A writeup stored before the rename carries `emend-term` and `data-emend-term`.
+  const writeup = legacy
+    ? (JSON.parse(
+        JSON.stringify(rendered)
+          .replaceAll("data-recense-term", "data-emend-term")
+          .replaceAll("recense-term", "emend-term"),
+      ) as typeof rendered)
+    : rendered;
   vi.useFakeTimers();
   const view = render(
     <QueryClientProvider client={client}>
@@ -55,7 +63,7 @@ async function mount(glossary: WriteupInput["glossary"] = entries) {
       </ToastProvider>
     </QueryClientProvider>,
   );
-  const marks = [...view.container.querySelectorAll<HTMLElement>("span.recense-term")];
+  const marks = [...view.container.querySelectorAll<HTMLElement>(legacy ? "span.emend-term" : "span.recense-term")];
   const first = marks[0];
   return { ...view, writeup, marks, first: first as HTMLElement };
 }
@@ -130,6 +138,15 @@ test("hover opens after 500 ms and the card contains only text and the glossary 
   expect(first.getAttribute("aria-expanded")).toBe("true");
   expect(first.getAttribute("aria-controls")).toBe(card.id);
   expect([...card.children].every((child) => child.getAttribute("dir") === "auto")).toBe(true);
+});
+
+test("a term stored before the rename, with emend-term and data-emend-term, still opens its card", async () => {
+  const { first, marks } = await mount(entries, true);
+  expect(marks.length).toBeGreaterThan(0);
+  expect(first.hasAttribute("data-emend-term")).toBe(true);
+  over(first);
+  advance(500);
+  expect(screen.getByRole("dialog", { name: "Budget" }).textContent).toContain("The attempts allowed.");
 });
 
 test("leaving cancels pending hover and crossing the gap or entering the card cancels closing", async () => {

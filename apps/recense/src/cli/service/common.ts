@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import type { Io } from "../../main.ts";
+import type { HolderProbe } from "../../state/legacy.ts";
 import { escapeReference } from "../escape.ts";
 import { findExecutable } from "../executable.ts";
 import { CliError } from "../http.ts";
@@ -29,6 +30,8 @@ export interface ServiceOptions extends Partial<CliRuntime> {
   cwd?: string;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** Tests answer which processes hold the old database; the default asks the system. */
+  holders?: HolderProbe;
   stopLocalServer?: () => Promise<string | undefined>;
   waitForServer?: (options: ServerReadyOptions) => Promise<{ url: string; pid: number } | null>;
 }

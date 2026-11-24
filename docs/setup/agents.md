@@ -19,7 +19,7 @@ never run claude plugin commands yourself, give them to me for my own terminal; 
 does not name; never retry a command through another program (for example script) to get a
 terminal; never list the devices on my tailnet; outside your sandbox run only recense skills
 install, and no other command; run no process listing yourself, ask me to run pgrep in my own
-terminal (Linux: pgrep -af '[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Give my coding agents recense. Follow
 https://github.com/shllg/recense/blob/release/docs/setup/agents.md step by step. Ask me which agents
 I use (Claude Code, Codex, others that read ~/.agents/skills) and whether I want the MCP server and

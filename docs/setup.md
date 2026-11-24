@@ -46,8 +46,8 @@ pages do not name; never retry a command through another program (for example sc
 terminal; never list the devices on my tailnet; outside your sandbox run only recense service install
 (with only the flags the pages name, including --public-url <my address>, never --host), recense
 service status, recense service uninstall and recense skills install, and no other command; run no
-process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[e]mend.mjs
-serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[r]ecense.mjs
+serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Set me up with recense, the review tool for agent work (https://github.com/shllg/recense). Ask me
 which setups I want: one machine, my own hub on Tailscale or behind my own address, attached
 machines, my agents. Then follow the page of each setup step by step, starting with

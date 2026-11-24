@@ -174,6 +174,9 @@ test("issue branch parsing treats an unrepresentable number as no inferred issue
     refuses(() => issueNumber(digits), digits);
   }
   assert.equal(issueFromBranch("recense-42-x"), 42);
+  // An open branch from before the rename keeps yielding its issue number.
+  assert.equal(issueFromBranch("emend-42-x"), 42);
+  assert.equal(issueFromBranch("emend-042-x"), null);
   assert.equal(issueFromBranch("recense-9007199254740991-x"), Number.MAX_SAFE_INTEGER);
   assert.equal(issueFromBranch("recense-042-x"), null);
   assert.equal(issueFromBranch("recense-feature-042-x"), null);

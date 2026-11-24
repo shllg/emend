@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { z } from "zod";
 import * as contract from "./index.ts";
 
 test("HTML doc images are optional, bounded asset paths", () => {
@@ -304,4 +305,25 @@ test("the look `emend`, as named before the rename, is accepted and read as `rec
   expect(schema.parse([{ ...doc, look: "emend" }])).toEqual([{ ...doc, look: "recense" }]);
   expect(contract.HtmlLookValue.parse("emend")).toBe("recense");
   expect(contract.HtmlLookValue.safeParse("EMEND").success).toBe(false);
+});
+
+test("the wire spells the recense look `emend`, so 0.17 readers still accept it in both directions", () => {
+  // The schemas of 0.17: an old CLI reading a publish response, an old hub reading an import bundle row.
+  const oldLook = z.enum(["emend", "custom"]);
+  const oldPublishResponse = z.object({ htmlLooks: z.array(z.object({ path: z.string(), look: oldLook })).optional() });
+  const oldImportFile = z.object({ look: oldLook.nullable().optional() });
+  expect(contract.wireHtmlLook("recense")).toBe("emend");
+  expect(contract.wireHtmlLook("custom")).toBe("custom");
+  // New hub to old CLI: the wire value passes the old schema and the new one reads it as `recense`.
+  const response = { htmlLooks: [{ path: "a.html", look: contract.wireHtmlLook("recense") }] };
+  expect(oldPublishResponse.parse(response)).toEqual(response);
+  expect(contract.PublishResponse.shape.htmlLooks.parse(response.htmlLooks)).toEqual([
+    { path: "a.html", look: "recense" },
+  ]);
+  // New CLI to old hub: a request row carries `emend`, and a new hub reads `emend` or `recense` alike.
+  const row = { look: contract.wireHtmlLook("recense") };
+  expect(oldImportFile.parse(row)).toEqual(row);
+  expect(oldImportFile.safeParse({ look: "recense" }).success).toBe(false);
+  expect(contract.HtmlLookValue.parse(row.look)).toBe("recense");
+  expect(contract.HtmlLookValue.parse("recense")).toBe("recense");
 });

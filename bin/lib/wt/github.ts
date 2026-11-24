@@ -22,6 +22,7 @@ import {
   branchName,
   commitSha,
   issueFromBranch,
+  NUMERIC_BRANCH,
   oneLine,
   parseFlags,
   prNumber,
@@ -911,7 +912,7 @@ function normalizeClosingText(decoded: string): string {
 export function closingGuard(repo: Repo, branch: string, body: string, requireOwn = true): void {
   const branchIssue = issueFromBranch(branch);
   const metadata = worktreeIssue(repo.callerTop ?? repo.mainRoot);
-  if (/^recense-[0-9]+-/u.test(branch) && (branchIssue === null || metadata !== branchIssue))
+  if (NUMERIC_BRANCH.test(branch) && (branchIssue === null || metadata !== branchIssue))
     throw new WtError(2, "Worktree issue does not match the branch. Use spawn --issue to register an issue worktree.");
   const issue = metadata === branchIssue ? branchIssue : null;
   const normalized = new Map<string, string>();

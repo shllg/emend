@@ -201,6 +201,24 @@ test("approval checks the recense child of each XDG folder and honors the state 
     assert.throws(check, { code: 69, message: "RECENSE_HOME must be an absolute path." });
   }));
 
+test("approval also checks the old emend folders that recense would move into place", () =>
+  scenario((env, repo) => {
+    const check = () => assertRecenseEnv([repo.mainRoot]);
+    const xdg = join(env.root, "xdg-old");
+    mkdirSync(xdg);
+    symlinkSync(repo.mainRoot, join(xdg, "emend"));
+    process.env.XDG_CONFIG_HOME = xdg;
+    assert.throws(check, folderRefusal("old config"));
+    delete process.env.XDG_CONFIG_HOME;
+    if (process.platform !== "darwin") {
+      process.env.XDG_DATA_HOME = xdg;
+      assert.throws(check, folderRefusal("old state"));
+      // A state override moves no old state folder.
+      process.env.RECENSE_HOME = join(env.home, "state");
+      assert.doesNotThrow(check);
+    }
+  }));
+
 test("approval checks the home defaults when XDG settings are missing or relative", () =>
   scenario((env, repo) => {
     const config = join(env.home, ".config");

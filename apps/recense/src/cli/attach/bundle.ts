@@ -1,4 +1,4 @@
-import { ImportBundle, importRowCount, LIMITS } from "@recense/contract";
+import { ImportBundle, importRowCount, LIMITS, wireHtmlLook } from "@recense/contract";
 import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { Queries } from "../../db/client.ts";
 import {
@@ -37,7 +37,11 @@ export function prepareBundle(input: ImportBundle): { bundle: ImportBundle; json
   )
     throw new CliError("too large");
   const bundle = ImportBundle.parse(input);
-  const json = JSON.stringify(bundle);
+  // The hub may be a 0.17 one: the wire spells the recense look as it was before the rename.
+  const json = JSON.stringify({
+    ...bundle,
+    files: bundle.files.map((file) => (file.look ? { ...file, look: wireHtmlLook(file.look) } : file)),
+  });
   if (Buffer.byteLength(json, "utf8") > LIMITS.publishJsonBytes) throw new CliError("too large");
   return { bundle, json };
 }

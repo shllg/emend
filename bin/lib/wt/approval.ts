@@ -103,11 +103,18 @@ export function assertRecenseEnv(roots: string[]): void {
     (process.platform === "darwin"
       ? join(home, "Library", "Application Support", "recense")
       : join(dataHome, "recense"));
-  for (const [name, path] of [
+  // recense moves the folders of the name before the rename into the new places on its first start, so a
+  // link inside the repository at an old name would end up there. Check them as well.
+  const legacyState =
+    process.platform === "darwin" ? join(home, "Library", "Application Support", "emend") : join(dataHome, "emend");
+  const folders: [string, string][] = [
     ["home", home],
     ["state", state],
     ["config", join(configHome, "recense")],
-  ] as const) {
+    ["old config", join(configHome, "emend")],
+    ...(RECENSE_HOME ? [] : ([["old state", legacyState]] as [string, string][])),
+  ];
+  for (const [name, path] of folders) {
     const resolved = resolve(path);
     if (
       inside(roots, resolved) ||

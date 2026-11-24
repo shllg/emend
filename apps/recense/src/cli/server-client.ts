@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join } from "node:path";
@@ -23,6 +24,19 @@ export interface ServerRecord {
   pid: number;
   key: string;
 }
+/**
+ * False when the process with this id is known to run some other program than a recense or emend server.
+ * Only Linux can say (`/proc/<pid>/cmdline`); anywhere else, or when it cannot read, the answer is true.
+ */
+export function pidMayBeServer(pid: number): boolean {
+  try {
+    const args = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+    return args.some((arg) => /(^|\/)(recense|emend)(\.mjs)?$/.test(arg));
+  } catch {
+    return true;
+  }
+}
+
 export async function serverRecord(stateDir: string, expectedUrl?: string): Promise<ServerRecord | null> {
   try {
     const record: unknown = JSON.parse(await readFile(join(stateDir, "server.json"), "utf8"));

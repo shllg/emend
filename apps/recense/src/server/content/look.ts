@@ -3,8 +3,9 @@ import { join } from "node:path";
 import { LIMITS, pubStylesheetSafe } from "@recense/contract";
 import { regularFile } from "../http/pages.ts";
 
+// emend-file is the layer of pages that `emend look` styled before the rename; the real sheet declares it too.
 export const FALLBACK_PUB_CSS =
-  "@layer recense-file,recense;@layer recense{:root{color-scheme:light dark;background:Canvas;color:CanvasText}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}}";
+  "@layer recense-file,emend-file,recense;@layer recense{:root{color-scheme:light dark;background:Canvas;color:CanvasText}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}}";
 const stylesheets = new Map<string, Promise<string>>();
 
 /** The installed web build is trusted only after confinement, size and raw-text checks. */

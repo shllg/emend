@@ -1,24 +1,29 @@
-const LEGACY_PREFIX = "emend.";
-const PREFIX = "recense.";
+const MOVES: [legacy: string, current: string][] = [
+  ["emend.", "recense."],
+  ["emend:", "recense:"],
+];
 
 /**
- * Moves every `emend.*` entry to its `recense.*` name, once per key: the value is copied when the new
- * key is missing, then the old key goes. Storage that cannot be read or written stays as it is.
+ * Copies every `emend.*` and `emend:*` entry to its `recense` name, once per key, when the new key is missing.
+ * The old keys stay: a tab still on the old build reads and writes them, and a copy never overwrites a newer
+ * value. Storage that cannot be reached, read or written is left as it is, and the app starts with defaults.
  */
-export function moveLegacyStorage(storage: Storage = localStorage): void {
+export function moveLegacyStorage(storage?: Storage): void {
   try {
+    const target = storage ?? localStorage;
     const legacy: string[] = [];
-    for (let index = 0; index < storage.length; index++) {
-      const key = storage.key(index);
-      if (key?.startsWith(LEGACY_PREFIX)) legacy.push(key);
+    for (let index = 0; index < target.length; index++) {
+      const key = target.key(index);
+      if (key && MOVES.some(([old]) => key.startsWith(old))) legacy.push(key);
     }
     for (const key of legacy) {
-      const next = PREFIX + key.slice(LEGACY_PREFIX.length);
-      const value = storage.getItem(key);
-      if (value !== null && storage.getItem(next) === null) storage.setItem(next, value);
-      storage.removeItem(key);
+      const [old, current] = MOVES.find(([prefix]) => key.startsWith(prefix)) ?? [];
+      if (old === undefined || current === undefined) continue;
+      const next = current + key.slice(old.length);
+      const value = target.getItem(key);
+      if (value !== null && target.getItem(next) === null) target.setItem(next, value);
     }
   } catch {
-    // Denied or full storage keeps the old keys; the app then starts with its defaults.
+    // Blocked, denied or full storage keeps what it has.
   }
 }

@@ -3,12 +3,11 @@
   let pick;
   let color;
   try {
-    // Entries kept under the name before the rename move over first (src/lib/legacy-storage.ts does the rest).
+    // Entries kept under the name before the rename are copied first, never removed (src/lib/legacy-storage.ts does the rest).
     for (const key of ["theme", "theme.custom"]) {
       const old = localStorage.getItem(`emend.${key}`);
       if (old === null) continue;
       if (localStorage.getItem(`recense.${key}`) === null) localStorage.setItem(`recense.${key}`, old);
-      localStorage.removeItem(`emend.${key}`);
     }
     pick = localStorage.getItem("recense.theme");
     if (pick?.startsWith("theme:")) {

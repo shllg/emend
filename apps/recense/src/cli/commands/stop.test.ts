@@ -11,6 +11,12 @@ import type { ServiceRunner } from "../service/common.ts";
 import * as markers from "../tailscale-marker.ts";
 import { provenTestServer } from "../test-support.ts";
 
+// The tests name their own pid as the server's; the process check reads /proc and would see a test runner.
+vi.mock("../server-client.ts", async (original) => ({
+  ...(await original<typeof import("../server-client.ts")>()),
+  pidMayBeServer: () => true,
+}));
+
 // A missing fixture helper must never fall back to the host Tailscale app.
 const executableDirs = new Set<string>();
 vi.mock("../executable.ts", async (original) => {

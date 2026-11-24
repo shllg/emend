@@ -83,8 +83,8 @@ never run claude plugin commands yourself, give them to me for my own terminal; 
 name; never retry a command through another program (for example script) to get a terminal; never
 list the devices on my tailnet; outside your sandbox run only recense service install (no new flags),
 recense service status, recense stop and recense skills install, and no other command; run no process listing
-yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[e]mend.mjs serve'; macOS: pgrep
--lf '[e]mend.mjs serve').
+yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep
+-lf '[r]ecense.mjs serve').
 Update recense on this machine. Follow
 https://github.com/shllg/recense/blob/release/docs/setup/update.md step by step. First ask me which
 parts I set up: the service, the agent skills, the Claude Code plugin, a hub, attached machines.
@@ -186,7 +186,7 @@ stores) or recense's state folder; outside your sandbox run only recense service
 recense service status and recense stop, and no other command; never pass --host or any flag this page
 does not name; never retry a command through another program (for example script) to get a
 terminal; run no process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af
-'[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+'[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 If I installed the recense service, run recense service install and recense service status and show me
 both outputs; it keeps its options and restarts the server. If I did not, run recense stop and show
 me the output; the next recense starts the new version. If recense stop says the server is from an

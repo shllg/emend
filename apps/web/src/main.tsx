@@ -1,13 +1,12 @@
+import "./lib/legacy-storage-boot.ts";
 import { configureBrowserValidation } from "@recense/contract/browser";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { appUpdate } from "./lib/app-update.ts";
-import { moveLegacyStorage } from "./lib/legacy-storage.ts";
 import { rememberPairingSecret } from "./lib/pairing-secret.ts";
 import { initializeTheme } from "./lib/theme.ts";
 import "./styles.css";
 
-moveLegacyStorage();
 initializeTheme();
 configureBrowserValidation();
 function capturePairingSecret() {

@@ -62,28 +62,34 @@
   .em-prose p {
     margin: 0 0 12px;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose p:is(.recense-example-rows, .emend-example-rows) {
     display: grid;
     grid-template-columns: fit-content(40%) minmax(0, 1fr);
     column-gap: 0.75rem;
     row-gap: 0.25rem;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-example-row, .emend-example-row) {
     display: contents;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-example-label, .emend-example-label) {
     min-width: 4.5em;
     overflow-wrap: anywhere;
     font-weight: 600;
     color: var(--fg-reading-strong);
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-example-value, .emend-example-value) {
     grid-column: 2;
     min-width: 0;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-example-line, .emend-example-line) {
     grid-column: 1 / -1;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose p:is(.recense-example-rows, .emend-example-rows) > br {
     display: none;
   }
@@ -159,6 +165,7 @@
     color: var(--fg-reading);
   }
   /* GitHub alert quotes from the server pipeline; note, tip and important share the note colours. */
+  /* legacy twin: remove with the emend alias */
   .em-prose blockquote:is(.recense-callout, .emend-callout) {
     padding: var(--space-3) var(--space-4);
     border-left: 3px solid var(--info-fg);
@@ -166,6 +173,7 @@
     background: var(--bg-sunken);
     color: var(--fg-reading);
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose
     blockquote:is(
       :is(.recense-callout-warning, .emend-callout-warning),
@@ -175,6 +183,7 @@
     background: var(--warning-bg);
   }
   /* The label is drawn, not text, so a callout keeps the block text and id of its quote. */
+  /* legacy twin: remove with the emend alias */
   .em-prose blockquote:is(.recense-callout, .emend-callout)::before {
     content: "Note";
     display: block;
@@ -184,18 +193,23 @@
     text-transform: uppercase;
     color: var(--info-fg);
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose blockquote:is(.recense-callout-tip, .emend-callout-tip)::before {
     content: "Tip";
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose blockquote:is(.recense-callout-important, .emend-callout-important)::before {
     content: "Important";
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose blockquote:is(.recense-callout-warning, .emend-callout-warning)::before {
     content: "Warning";
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose blockquote:is(.recense-callout-caution, .emend-callout-caution)::before {
     content: "Caution";
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose
     blockquote:is(
       :is(.recense-callout-warning, .emend-callout-warning),
@@ -257,6 +271,7 @@
   /* Writeup images: the server wraps each one with a caption and sends its pixel size, which the app
      copies into --recense-media-w and --recense-media-h. An image is never drawn above its own size
      or taller than half the visible screen, and its box is known before it loads. */
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-media, .emend-media) {
     --recense-media-fit: min(
       calc(var(--recense-media-w) * 1px),
@@ -268,6 +283,7 @@
     min-width: min(10rem, 100%);
     max-width: 100%;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-media, .emend-media) img {
     display: block;
     width: var(--recense-media-fit);
@@ -275,16 +291,21 @@
     height: auto;
     max-height: 50svh;
     /* If the size the server read differs from the decoded image, letterbox instead of distorting. */
+    /* legacy twin: remove with the emend alias */
     object-fit: contain;
     /* A ring, not a border, so the image keeps one image pixel per CSS pixel. */
+    /* legacy twin: remove with the emend alias */
     box-shadow: 0 0 0 1px var(--border-1);
     border-radius: var(--radius-md);
     /* The quiet placeholder until the image arrives. */
+    /* legacy twin: remove with the emend alias */
     background: var(--bg-sunken);
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-media-caption, .emend-media-caption) {
     display: block;
     /* Wraps at the image's width and never widens the box. */
+    /* legacy twin: remove with the emend alias */
     width: 0;
     min-width: 100%;
     margin-top: 6px;
@@ -292,24 +313,29 @@
     font: 400 12px / 1.4 var(--font-sans);
     color: var(--fg-3);
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-media, .emend-media) > img[role="button"] {
     cursor: zoom-in;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-term, .emend-term) {
     text-decoration-line: underline;
     text-decoration-style: dotted;
     text-underline-offset: 3px;
     cursor: help;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-term, .emend-term):focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
     border-radius: 2px;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-media, .emend-media) > img[role="button"]:focus-visible {
     outline: none;
     box-shadow: var(--focus-ring);
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose p:is(.recense-media-row, .emend-media-row) {
     display: flex;
     flex-wrap: wrap;
@@ -317,10 +343,12 @@
     gap: 0.75rem;
   }
   /* Side by side down to 18rem each, then wrap; never wider than the image or its caption minimum. */
+  /* legacy twin: remove with the emend alias */
   .em-prose p:is(.recense-media-row, .emend-media-row) > :is(.recense-media, .emend-media) {
     flex: 1 1 min(var(--recense-media-fit), 18rem);
     max-width: min(100%, max(var(--recense-media-fit), 10rem));
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose[data-pair-mode="before"]
     p:is(.recense-media-pair, .emend-media-pair)
     > :is(.recense-media, .emend-media)
@@ -336,6 +364,7 @@
     > :is(.recense-media, .emend-media):not(:is(.recense-media-diff, .emend-media-diff)) {
     display: none;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-media-effect, .emend-media-effect) {
     flex: 1 0 100%;
     min-width: 0;
@@ -343,6 +372,7 @@
     font: var(--type-prose);
     color: var(--fg-reading);
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose p:is(.recense-media-pair, .emend-media-pair) > br {
     display: none;
   }
@@ -352,10 +382,12 @@
   .em-prose > :last-child {
     margin-bottom: 0;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-callout, .emend-callout) > :last-child {
     margin-bottom: 0;
   }
   /* The marker stays in the text for comment anchors; only its display is hidden. */
+  /* legacy twin: remove with the emend alias */
   .em-prose :is(.recense-callout, .emend-callout) :is(.recense-callout-marker, .emend-callout-marker),
   .em-prose :is(.recense-callout, .emend-callout) br:is(.recense-callout-marker-break, .emend-callout-marker-break),
   .em-prose :is(.recense-callout, .emend-callout) > p:is(.recense-callout-marker-line, .emend-callout-marker-line) {

@@ -297,6 +297,7 @@
     max-width: 100%;
     overflow-x: auto;
   }
+  /* legacy twin: remove with the emend alias */
   .em-prose.em-comment-html blockquote:not(:is(.recense-callout, .emend-callout)) {
     margin: 0 0 6px;
     padding-left: 10px;

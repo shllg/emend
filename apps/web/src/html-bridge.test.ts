@@ -336,15 +336,27 @@ test("bridge sets each allowed preference and legacy layout leaves preferences a
               ["data-recense-width", width],
               ["data-recense-prose", String(prose)],
               ["data-recense-code", String(code)],
+              ["data-emend-layout", wide ? "wide" : "narrow"],
+              ["data-emend-width", width],
+              ["data-emend-prose", String(prose)],
+              ["data-emend-code", String(code)],
             ]);
             expect(set.mock.instances.every((element) => element === root)).toBe(true);
             expect(root.getAttribute("data-recense-width")).toBe(width);
             expect(root.getAttribute("data-recense-prose")).toBe(String(prose));
             expect(root.getAttribute("data-recense-code")).toBe(String(code));
+            // Pages that the emend command styled key their layout rules to the old names.
+            expect(root.getAttribute("data-emend-width")).toBe(width);
+            expect(root.getAttribute("data-emend-prose")).toBe(String(prose));
+            expect(root.getAttribute("data-emend-code")).toBe(String(code));
+            expect(root.getAttribute("data-emend-layout")).toBe(wide ? "wide" : "narrow");
           }
     set.mockClear();
     b.message({ type: "recense:layout", wide: true });
-    expect(set.mock.calls).toEqual([["data-recense-layout", "wide"]]);
+    expect(set.mock.calls).toEqual([
+      ["data-recense-layout", "wide"],
+      ["data-emend-layout", "wide"],
+    ]);
     expect(root.getAttribute("data-recense-width")).toBe("narrow");
     expect(root.getAttribute("data-recense-prose")).toBe("18");
     expect(root.getAttribute("data-recense-code")).toBe("15");

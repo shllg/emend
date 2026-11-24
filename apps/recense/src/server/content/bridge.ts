@@ -1393,6 +1393,8 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       const attributes = [["data-recense-layout", data.wide ? "wide" : "narrow"]];
       if (preferences) attributes.push(["data-recense-width", data.width],
         ["data-recense-prose", String(data.prose)], ["data-recense-code", String(data.code)]);
+      // legacy twin: remove with the emend alias. A page that emend look styled keys its layout rules to these.
+      for (const [name, value] of [...attributes]) attributes.push([name.replace("data-recense-", "data-emend-"), value]);
       const changed = attributes.some(([name, value]) => elementCall("getAttribute", root, name) !== value);
       holdPosition(() => {
         for (const [name, value] of attributes) elementCall("setAttribute", root, name, value);

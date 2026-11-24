@@ -13,7 +13,7 @@ async function fixture() {
 
 test("the fallback fixes each explicit root scheme within the recense layer", () => {
   expect(FALLBACK_PUB_CSS).toBe(
-    "@layer recense-file,recense;@layer recense{:root{color-scheme:light dark;background:Canvas;color:CanvasText}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}}",
+    "@layer recense-file,emend-file,recense;@layer recense{:root{color-scheme:light dark;background:Canvas;color:CanvasText}:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}}",
   );
 });
 

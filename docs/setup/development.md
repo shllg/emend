@@ -11,7 +11,7 @@ pnpm install:local
 
 If you linked `apps/recense/bin/recense` into a folder on your `PATH` before (the earlier development
 steps and `install.sh` did), remove that link, and stop every recense server that runs from a
-checkout: `pgrep -af '[e]mend.mjs serve'` lists them with their paths (`pgrep -lf` on macOS).
+checkout: `pgrep -af '[r]ecense.mjs serve'` lists them with their paths (`pgrep -lf` on macOS).
 Otherwise the commands your agents run, and the server that serves the review app, run the
 checkout's build, which agents can change.
 

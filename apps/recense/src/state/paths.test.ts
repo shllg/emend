@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
@@ -108,4 +108,22 @@ test("the test guard checks the value that is used, whichever name set it", () =
   // A safe RECENSE_HOME wins over an unsafe EMEND_HOME, and an unsafe RECENSE_HOME is never rescued by a safe EMEND_HOME.
   expect(defaultStateDir({ VITEST: "true", RECENSE_HOME: dir, EMEND_HOME: "/state" })).toBe(dir);
   expect(() => defaultStateDir({ VITEST: "true", RECENSE_HOME: "/state", EMEND_HOME: dir })).toThrow(/RECENSE_HOME/);
+});
+
+test("under a state override the config folder keeps its old name until a default run moves it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "recense-path-config-"));
+  try {
+    const env = { XDG_CONFIG_HOME: root, RECENSE_HOME: join(root, "state") };
+    // Neither folder: the new name. Only the old one: read in place. Both: the new one.
+    expect(configDir(env, "/u")).toBe(join(root, "recense"));
+    await mkdir(join(root, "emend"));
+    expect(configDir(env, "/u")).toBe(join(root, "emend"));
+    expect(configDir({ XDG_CONFIG_HOME: root, EMEND_HOME: join(root, "state") }, "/u")).toBe(join(root, "emend"));
+    // A default run never reads the old folder: it moves it first.
+    expect(configDir({ XDG_CONFIG_HOME: root }, "/u")).toBe(join(root, "recense"));
+    await mkdir(join(root, "recense"));
+    expect(configDir(env, "/u")).toBe(join(root, "recense"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

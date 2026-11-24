@@ -67,6 +67,18 @@ test("activate deletes only old app shell caches", async () => {
   expect(remove.mock.calls).toEqual([["recense-shell-old"]]);
 });
 
+test("activate also deletes every cache of the shell from before the rename", async () => {
+  const remove = vi.fn(async () => true);
+  await activateShell(
+    {
+      keys: async () => ["emend-shell-0.17.0", "recense-shell-new", "emend-other", "unrelated"],
+      delete: remove,
+    } as unknown as CacheStorage,
+    "recense-shell-new",
+  );
+  expect(remove.mock.calls).toEqual([["emend-shell-0.17.0"]]);
+});
+
 test("settings, sample and integrations hard loads use the app shell", () => {
   for (const path of [
     "/settings",

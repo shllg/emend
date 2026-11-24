@@ -1117,9 +1117,12 @@ Markdown docs are `{ path, kind: "markdown", title?, headings?, terms?: Glossary
 (`blocks` empty if unrendered). `terms` holds at most 50 entries `{ term, definition, blockId }` and
 is present only when the doc declares a glossary (see "Glossary in a Markdown doc"); `blockId` names
 the block that holds the entry in that doc.
-HTML docs are `{ path, kind: "html", contentUrl, look?: "recense" |`look?: "recense" | "custom", colorScheme?: "light", images?: FilePath[] }`. Wherever a `look` is
-read as input (an import bundle, a publish response read by a CLI), the earlier value `"emend"` is
-accepted and read as `"recense"`.
+HTML docs are `{ path, kind: "html", contentUrl, look?: "emend" | "custom", colorScheme?: "light", images?: FilePath[] }`.
+On the /api/v1 wire the recense look is spelled `"emend"`, as it was before the rename: every response
+(this view, `htmlLooks` of a publish response) and every request a CLI sends to a hub (the import bundle
+of attach, publish) carries `"emend"` or `"custom"`, so a 0.17 client or hub reads it. Wherever a `look`
+is read as input, `"recense"` and `"emend"` are both accepted and mean the recense look. Inside recense
+the look is `"recense"`; the mapping happens at the boundary (`wireHtmlLook` in `packages/contract`).
 The optional `images` lists the doc's own raster image assets linked through `doc_assets`,
 sorted by path, with at most `LIMITS.filesPerRevision` entries. Only `image/png`, `image/jpeg`,
 `image/gif`, `image/webp` and `image/avif` qualify. SVG, ICO and BMP assets stay in the frame;
@@ -1289,7 +1292,7 @@ without reloading the frame. Custom and legacy frames receive only `wide`.
 The bridge accepts layout only from its parent. When `width`, `prose` or `code` is present, all
 three must be present and valid; otherwise it ignores the whole message, `wide` included. It
 sets `data-recense-layout` to `wide` or `narrow` on the root element and, when supplied, sets
-`data-recense-width` to the width name, `data-recense-prose` and `data-recense-code` to the size strings.
+`data-recense-width` to the width name, `data-recense-prose` and `data-recense-code` to the size strings. It sets the same four values under the names from before the rename too (`data-emend-layout`, `-width`, `-prose`, `-code`), because pages that `emend look` styled key their layout rules to them.
 A message without preferences leaves the earlier width and size attributes alone. When these
 attributes change while a pinned position still holds, or any container on the reading heading's
 rendered path is scrolled (a nonzero `scrollTop`), the bridge returns to the same heading and
@@ -1742,7 +1745,7 @@ the individual secret links remain usable.
 
 `PublishResponse = { reviewId, revision, url, placed, unplaced, unrendered: FilePath[], htmlLooks? }`.
 An omitted `unrendered` field defaults to `[]`.
-`htmlLooks` is an optional array of `{ path: FilePath, look: "recense" | "custom", colorScheme?: "light" }`,
+`htmlLooks` is an optional array of `{ path: FilePath, look: "emend" | "custom", colorScheme?: "light" }` (`"emend"` is the recense look on the wire, see "HTML docs"),
 with at most `filesPerRevision` entries. It lists every rendered HTML doc's look in the new revision,
 using the same metadata stored for that revision, including unchanged re-publishes. A null stored
 look means `custom`. `colorScheme` is present only when that doc is stored as light-only, as in the

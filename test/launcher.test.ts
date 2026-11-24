@@ -373,6 +373,38 @@ test("the emend alias keeps status --line free of stderr output", async () => {
   });
 });
 
+test("the emend alias stays silent and exits 0 for status --line on its own errors, like bin/recense", async () => {
+  const first = join(root, "alias loop first");
+  const second = join(root, "alias loop second");
+  symlinkSync(second, first);
+  symlinkSync(first, second);
+  const text = readFileSync(join(repo, "apps/recense/bin/emend"), "utf8");
+  expect(await command("/bin/sh", ["-c", text, first, "status", "--line"])).toEqual({
+    status: 0,
+    stdout: "",
+    stderr: "",
+  });
+  // The same loop for another command still reports and fails.
+  const failed = await command("/bin/sh", ["-c", text, first, "status"]);
+  expect(failed.status).toBe(1);
+  expect(failed.stderr).toContain("emend: too many levels of symlinks");
+  // An unopenable stderr redirect stays silent too.
+  const redirected = text.replace("exec 2>/dev/null", "exec 2>/nonexistent-recense-dir/null");
+  expect(redirected).not.toBe(text);
+  expect(await command("/bin/sh", ["-c", redirected, first, "status", "--line"])).toEqual({
+    status: 0,
+    stdout: "",
+    stderr: "",
+  });
+});
+
+test("a closed stderr does not stop the emend alias before it runs the recense command", async () => {
+  const launcher = copyLauncher('console.log("ran");\n');
+  const alias = copyAlias(launcher);
+  const result = await command("/bin/sh", ["-c", 'exec 2>&-; exec "$0" "$@"', alias, "mcp"]);
+  expect(result).toMatchObject({ status: 0, stdout: "ran\n" });
+});
+
 test("the emend alias reports a missing build through the recense launcher", async () => {
   const result = await command(copyAlias(copyLauncher()), ["status"]);
   expect(result.status).toBe(1);

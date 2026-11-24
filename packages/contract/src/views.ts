@@ -32,6 +32,8 @@ export const PublishResponse = z.object({
     .optional(),
 });
 export type PublishResponse = z.infer<typeof PublishResponse>;
+/** The response as it travels: look values are spelled as on the wire (`wireHtmlLook`). */
+export type PublishResponseWire = z.input<typeof PublishResponse>;
 
 export const ReviewState = z.enum(["open", "approved", "settled"]);
 export type ReviewState = z.infer<typeof ReviewState>;

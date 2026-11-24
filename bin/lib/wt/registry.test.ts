@@ -24,6 +24,7 @@ import {
   readRegistry,
   registryPath,
   setPortRangeForTests,
+  stateDir,
   withRegistry,
 } from "./registry.ts";
 import { type Repo, resolveRepo } from "./repo.ts";
@@ -250,4 +251,19 @@ test("busyPorts finds a listener in the test range", async () => {
   } finally {
     await server.close();
   }
+});
+
+test("the folder of the name before the rename moves to the new name once, with its content", () => {
+  const folder = join(env.root, "old-state-repo");
+  mkdirSync(join(folder, "emend-wt"), { recursive: true });
+  writeFileSync(join(folder, "emend-wt", "registry.json"), "{}");
+  const fake = { commonDir: folder } as Repo;
+  assert.equal(stateDir(fake), join(folder, "recense-wt"));
+  assert.equal(readFileSync(join(folder, "recense-wt", "registry.json"), "utf8"), "{}");
+  assert.equal(existsSync(join(folder, "emend-wt")), false);
+  // A second call, and a call when both exist, change nothing.
+  mkdirSync(join(folder, "emend-wt"));
+  assert.equal(stateDir(fake), join(folder, "recense-wt"));
+  assert.equal(existsSync(join(folder, "emend-wt")), true);
+  assert.equal(readdirSync(join(folder, "recense-wt")).join(), "registry.json");
 });

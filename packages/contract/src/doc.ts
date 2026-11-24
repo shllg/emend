@@ -90,10 +90,18 @@ export const SourceContent = z.object({
 export type SourceContent = z.infer<typeof SourceContent>;
 
 /**
- * The look an HTML doc was published with. Input from before the rename may still say `"emend"`;
- * it is accepted and read as `"recense"`, so every parsed value is one of the two current names.
+ * The look an HTML doc was published with, as the code holds it: `"recense"` or `"custom"`.
+ *
+ * The /api/v1 wire keeps the name from before the rename, `"emend"` (see `wireHtmlLook`), so 0.17 clients and hubs
+ * still read every response and request. Input may say either name; both parse to `"recense"`.
  */
 export const HtmlLookValue = z
   .enum(["recense", "custom", "emend"])
   .transform((look) => (look === "emend" ? "recense" : look));
 export type HtmlLookValue = z.output<typeof HtmlLookValue>;
+
+/** What /api/v1 carries for a look: the recense look is spelled `"emend"`, as it was before the rename. */
+export type WireHtmlLook = "emend" | "custom";
+
+/** The wire spelling of a look; every response and every request a CLI sends goes through it. */
+export const wireHtmlLook = (look: HtmlLookValue): WireHtmlLook => (look === "recense" ? "emend" : look);

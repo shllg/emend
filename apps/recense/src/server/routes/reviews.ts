@@ -7,6 +7,7 @@ import {
   RevisionView,
   SourceContent,
   type ThreadView,
+  wireHtmlLook,
 } from "@recense/contract";
 import { blockHash } from "@recense/core";
 import {
@@ -788,6 +789,10 @@ export function reviewRoutes(app: Hono<AppEnv>, deps: AppDeps) {
       if (!/^[1-9]\d*$/.test(c.req.param("seq")) || !Number.isSafeInteger(seq)) throw new ApiError("not_found");
       return revisionView(ownerId, q, deps, reviewId, seq);
     });
-    return c.json(view);
+    // The wire spells the recense look as it was before the rename, so a 0.17 browser bundle still reads it.
+    return c.json({
+      ...view,
+      docs: view.docs.map((doc) => (doc.kind === "html" && doc.look ? { ...doc, look: wireHtmlLook(doc.look) } : doc)),
+    });
   });
 }

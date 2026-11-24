@@ -73,6 +73,7 @@ function childEnv(cmd: string, gitNoLazyFetch?: boolean): NodeJS.ProcessEnv {
   // GIT_DIFF_OPTS would override the diff context bin/wt pins.
   delete env.GIT_DIFF_OPTS;
   delete env.RECENSE_PRIVATE_TERMS;
+  delete env.EMEND_PRIVATE_TERMS;
   // The exempt identity must come from the user's own global or system config.
   for (const key of Object.keys(env))
     if (/^GIT_CONFIG_(?:PARAMETERS|COUNT|GLOBAL|SYSTEM|NOSYSTEM|KEY_.*|VALUE_.*)$/.test(key)) delete env[key];
@@ -87,7 +88,7 @@ function childEnv(cmd: string, gitNoLazyFetch?: boolean): NodeJS.ProcessEnv {
 
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
- * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST and RECENSE_PRIVATE_TERMS.
+ * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST, RECENSE_PRIVATE_TERMS and EMEND_PRIVATE_TERMS.
  * All children use the original Git objects and parents, without replace refs, grafts or a shallow-file override.
  * Git and gh children also discard repository-selection overrides and disable forced color/terminal output.
  * gitNoLazyFetch pins local Git reads or clears the inherited setting for remote commands.

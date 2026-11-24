@@ -172,7 +172,7 @@ async function waitForBootout(launchctl: ServiceTool, target: string, context: S
   }
 }
 
-function serviceField(output: string, field: string): string | undefined {
+export function serviceField(output: string, field: string): string | undefined {
   let depth = 0;
   for (const line of output.split("\n")) {
     const text = line.trim();

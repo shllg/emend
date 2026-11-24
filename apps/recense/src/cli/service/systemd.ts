@@ -61,12 +61,16 @@ WantedBy=default.target
 `;
 }
 
-export async function systemdService(action: ServiceAction, context: ServiceContext, username?: string) {
-  const { home, io, tool, stateDir } = context;
-  if (action === "install" && /[$"'\\]/.test(context.node))
+export function checkSystemdNode(node: string) {
+  if (/[$"'\\]/.test(node))
     throw new CliError(
       "the node path contains $, quotes or a backslash, which a systemd unit cannot run; use a node installed at a plain path.",
     );
+}
+
+export async function systemdService(action: ServiceAction, context: ServiceContext, username?: string) {
+  const { home, io, tool, stateDir } = context;
+  if (action === "install") checkSystemdNode(context.node);
   const systemctl = await tool("systemctl").catch((error) => {
     if (error instanceof CliError && error.message === "systemctl was not found on PATH")
       throw new CliError(unsupportedService);

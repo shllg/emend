@@ -26,6 +26,7 @@ import type { ServiceOptions, ServiceResult, ServiceRunner } from "../service/co
 import { writeService } from "../service/common.ts";
 import { waitForServer as waitForManagedServer } from "../service/takeover.ts";
 import { provenTestServer } from "../test-support.ts";
+import { serviceCommand } from "./service.ts";
 
 vi.mock("../service/common.ts", async (original) => {
   const actual = await original<typeof import("../service/common.ts")>();
@@ -1902,8 +1903,10 @@ describe.each(["linux", "darwin"])("%s service from before the rename", (platfor
       ? join(home, ".config/systemd/user/emend.service")
       : join(home, "Library/LaunchAgents/dev.emend.server.plist");
   const newPath = () => (platform === "linux" ? unitPath() : plistPath());
+  const defaultOldState = () =>
+    platform === "linux" ? join(home, ".local/share/emend") : join(home, "Library/Application Support/emend");
   // The words the old install wrote: ExecStart, or ProgramArguments, then the state folder it pinned.
-  const oldUnit = (options: string[] = [], stateDir = join(home, ".local/share/emend")) =>
+  const oldUnit = (options: string[] = [], stateDir = defaultOldState()) =>
     platform === "linux"
       ? `# written by emend
 [Unit]
@@ -1934,24 +1937,56 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
 </dict>
 </plist>
 `;
-  const stopOld = () =>
-    platform === "linux"
-      ? [systemctl("disable", "--now", "emend"), systemctl("daemon-reload")]
-      : [launchctl("bootout", "gui/501/dev.emend.server")];
+  const stopCall = () =>
+    platform === "linux" ? systemctl("stop", "emend") : launchctl("bootout", "gui/501/dev.emend.server");
+  const startCall = () =>
+    platform === "linux" ? systemctl("start", "emend") : launchctl("bootstrap", "gui/501", oldPath());
+  const removeCalls = () => (platform === "linux" ? [systemctl("disable", "emend"), systemctl("daemon-reload")] : []);
+  // The old server: running until it is stopped, and for `lag` more status checks after that.
+  let stopped: boolean;
+  let lag: number;
+  let holders: number[];
+  const oldPid = 123;
   beforeEach(() => {
     options.platform = platform;
+    stopped = false;
+    lag = 0;
+    holders = [];
+    recorded.mockImplementation(async (_file, args) => {
+      const line = args.join(" ");
+      if (line === "--user stop emend" || line === "bootout gui/501/dev.emend.server") {
+        stopped = true;
+        return ok;
+      }
+      const running = !stopped || lag-- > 0;
+      if (line === "--user is-active emend") return running ? ok : { ...failed, code: 3 };
+      if (line === "--user show --property=MainPID --value emend")
+        return { ...ok, stdout: `${running ? oldPid : 0}\n` };
+      if (line === "print gui/501/dev.emend.server")
+        return running ? { ...ok, stdout: `gui/501/dev.emend.server = {\n\tpid = ${oldPid}\n}\n` } : failed;
+      return args[0] === "print" ? failed : ok;
+    });
+    options.holders = () => holders;
   });
+  const oldFiles = async (folder = state) => {
+    await writeFile(join(folder, "emend.db"), "db");
+    await writeFile(join(folder, "emend.db-wal"), "wal");
+  };
 
-  test("install stops and removes the old service first, then installs the new one", async () => {
+  test("install stops the old service first, installs the new one, then removes the old one", async () => {
     await put(oldPath(), oldUnit());
     expect(await invoke("install")).toBe(0);
     await expect(lstat(oldPath())).rejects.toMatchObject({ code: "ENOENT" });
     expect(
       (await readFile(newPath(), "utf8")).startsWith(platform === "linux" ? "# written by recense\n" : "<?xml"),
     ).toBe(true);
-    expect(calls().slice(0, stopOld().length)).toEqual(stopOld());
-    expect(calls()).toContainEqual(["waitForServer"]);
-    expect(stdout[0]).toBe("recense: removed the old emend service; the recense service replaces it\n");
+    const log = calls().map((call) => call.join(" "));
+    const at = (call: string[]) => log.indexOf(call.join(" "));
+    expect(at(stopCall())).toBeGreaterThanOrEqual(0);
+    expect(at(stopCall())).toBeLessThan(log.indexOf("waitForServer"));
+    for (const call of removeCalls())
+      expect(log.lastIndexOf(call.join(" "))).toBeGreaterThan(log.indexOf("waitForServer"));
+    expect(stdout).toContain("recense: removed the old emend service; the recense service replaces it\n");
     expect(stderr).toEqual([]);
   });
 
@@ -1959,7 +1994,7 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
     await put(oldPath(), "# planted by someone else\n");
     expect(await invoke("install")).toBe(0);
     expect(await readFile(oldPath(), "utf8")).toBe("# planted by someone else\n");
-    expect(calls().slice(0, stopOld().length)).not.toEqual(stopOld());
+    expect(calls()).not.toContainEqual(stopCall());
   });
 
   test("status says that the old service is still installed, and changes nothing", async () => {
@@ -1967,25 +2002,106 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
     expect(await invoke("status")).toBe(0);
     expect(stdout.join("")).toContain("the old emend service is still installed; run recense service install");
     expect(await readFile(oldPath(), "utf8")).toBe(oldUnit());
-    expect(calls().flat().join(" ")).not.toMatch(/disable|bootout/);
+    expect(calls().flat().join(" ")).not.toMatch(/disable|bootout|stop/);
   });
 
   test("uninstall removes the old service too, also without a new one", async () => {
     await put(oldPath(), oldUnit());
     expect(await invoke("uninstall")).toBe(0);
     await expect(lstat(oldPath())).rejects.toMatchObject({ code: "ENOENT" });
-    expect(calls().slice(0, stopOld().length)).toEqual(stopOld());
+    expect(calls()).toContainEqual(stopCall());
+    for (const call of removeCalls()) expect(calls()).toContainEqual(call);
     expect(stdout.join("")).toContain("removed the old emend service");
     expect(stdout.join("")).toContain("the service is not installed");
   });
 
-  test("a failing stop of the old service is reported, and the old file is still removed", async () => {
+  test("an old service that does not stop is left as it was, and nothing moves", async () => {
     await put(oldPath(), oldUnit());
-    recorded.mockResolvedValueOnce(failed);
-    expect(await invoke("uninstall")).toBe(0);
+    await oldFiles();
+    lag = 10000;
+    expect(await invoke("install", "--port", "4000")).toBe(1);
+    expect(stderr.join("")).toContain("the old emend service did not stop; it was left as it was");
+    expect(await readFile(oldPath(), "utf8")).toBe(oldUnit());
+    await expect(lstat(newPath())).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(join(state, "emend.db"), "utf8")).toBe("db");
+  });
+
+  test("the handover waits for the old service to stop before it moves anything", async () => {
+    await put(oldPath(), oldUnit());
+    await oldFiles();
+    lag = 3;
+    // The old server's process holds the database until it is gone.
+    options.holders = () => (stopped && lag > 0 ? [oldPid] : []);
+    expect(await invoke("install")).toBe(0);
+    expect(sleep).toHaveBeenCalled();
+    expect(await readFile(join(state, "recense.db"), "utf8")).toBe("db");
+    expect(await readFile(join(state, "recense.db-wal"), "utf8")).toBe("wal");
+    await expect(lstat(join(state, "emend.db"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("another process that holds the old database stops the handover before the old service stops", async () => {
+    await put(oldPath(), oldUnit());
+    await oldFiles();
+    holders = [777];
+    expect(await invoke("install")).toBe(1);
+    expect(stderr.join("")).toContain("pid 777");
+    expect(calls()).not.toContainEqual(stopCall());
+    expect(await readFile(oldPath(), "utf8")).toBe(oldUnit());
+    expect(await readFile(join(state, "emend.db"), "utf8")).toBe("db");
+  });
+
+  test("the old service's own process may hold the database until it stops", async () => {
+    await put(oldPath(), oldUnit());
+    await oldFiles();
+    options.holders = () => (stopped ? [] : [oldPid]);
+    expect(await invoke("install")).toBe(0);
+    expect(await readFile(join(state, "recense.db"), "utf8")).toBe("db");
+  });
+
+  test("a move refused after the old service stopped starts the old service again", async () => {
+    await put(oldPath(), oldUnit(["--port", "4000"]));
+    await oldFiles();
+    // A holder shows up only after the old service is stopped.
+    options.holders = () => (stopped ? [888] : []);
+    expect(await invoke("install")).toBe(1);
+    expect(stderr.join("")).toContain("pid 888");
+    expect(calls()).toContainEqual(startCall());
+    expect(await readFile(oldPath(), "utf8")).toBe(oldUnit(["--port", "4000"]));
+    await expect(lstat(newPath())).rejects.toMatchObject({ code: "ENOENT" });
+    // A rerun, once the holder is gone, still finds the old options.
+    resetOutput();
+    options.holders = () => [];
+    expect(await invoke("install")).toBe(0);
+    expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(["--port", "4000"]);
+  });
+
+  test("a failure before the new unit is written starts the old service again, and a rerun keeps the options", async () => {
+    await put(oldPath(), oldUnit(["--port", "4000", "--tailscale"]));
+    vi.mocked(writeService).mockRejectedValueOnce(new CliError("synthetic write failure"));
+    expect(await invoke("install")).toBe(1);
+    expect(calls()).toContainEqual(startCall());
+    expect(await readFile(oldPath(), "utf8")).toBe(oldUnit(["--port", "4000", "--tailscale"]));
+    await expect(lstat(newPath())).rejects.toMatchObject({ code: "ENOENT" });
+    resetOutput();
+    expect(await invoke("install")).toBe(0);
+    expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(["--port", "4000", "--tailscale"]);
     await expect(lstat(oldPath())).rejects.toMatchObject({ code: "ENOENT" });
-    expect(stderr).toHaveLength(1);
-    expect(stderr[0]).toContain("first failure");
+  });
+
+  test("a failure after the new unit is written leaves it with the old options, and a rerun keeps them", async () => {
+    await put(oldPath(), oldUnit(["--port", "4000", "--tailscale"]));
+    waitForServer.mockResolvedValueOnce(null);
+    expect(await invoke("install")).toBe(1);
+    // The new unit exists with the inherited options; the old service is not started again.
+    expect(await readFile(newPath(), "utf8")).toContain("4000");
+    expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(["--port", "4000", "--tailscale"]);
+    expect(calls()).not.toContainEqual(startCall());
+    expect(await readFile(oldPath(), "utf8")).toBe(oldUnit(["--port", "4000", "--tailscale"]));
+    resetOutput();
+    expect(await invoke("install")).toBe(0);
+    expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(["--port", "4000", "--tailscale"]);
+    expect(await readFile(newPath(), "utf8")).toContain("tailscale");
+    await expect(lstat(oldPath())).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("an install without options keeps the options of the old service", async () => {
@@ -2006,9 +2122,9 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
     expect(stdout).toContain(
       "recense: keeping the options of the old emend service: --port 4000 --tailscale --tailscale-port 8443\n",
     );
-    // The old service is stopped and gone before the new one starts, so its port is free.
+    // The old service is stopped before the new one starts, so its port is free.
     const calling = calls().flat().join(" ");
-    expect(calling.indexOf(platform === "linux" ? "disable --now emend" : "dev.emend.server")).toBeLessThan(
+    expect(calling.indexOf(platform === "linux" ? "stop emend" : "dev.emend.server")).toBeLessThan(
       calling.indexOf(platform === "linux" ? "start recense" : "bootstrap"),
     );
   });
@@ -2047,10 +2163,37 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
     await expect(lstat(oldPath())).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  test("a state folder pinned by the old service that differs from this one is named", async () => {
+  test("a node path a systemd unit cannot run leaves the old service running", async () => {
+    if (platform !== "linux") return;
+    await put(oldPath(), oldUnit(["--port", "4000"]));
+    options.node = join(home, "no'de");
+    await writeFile(options.node, "synthetic node");
+    expect(await invoke("install")).toBe(1);
+    expect(stderr.join("")).toContain("node path contains");
+    expect(calls()).not.toContainEqual(stopCall());
+    expect(await readFile(oldPath(), "utf8")).toBe(oldUnit(["--port", "4000"]));
+  });
+
+  test("a state folder pinned by the old service is named when the shell chooses another", async () => {
     await put(oldPath(), oldUnit([], join(root, "custom-old-state")));
     expect(await invoke("install")).toBe(0);
     expect(stdout.join("")).toContain(`the old emend service used the state folder ${join(root, "custom-old-state")}`);
     expect(stdout.join("")).toContain(`set RECENSE_HOME=${join(root, "custom-old-state")}`);
+  });
+
+  test("a state folder pinned by the old service carries over as RECENSE_HOME, with its database renamed", async () => {
+    const custom = join(root, "custom-old-state");
+    await mkdir(custom, { mode: 0o700 });
+    await oldFiles(custom);
+    await put(oldPath(), oldUnit(["--port", "4000"], custom));
+    delete io.env.RECENSE_HOME;
+    await serviceCommand(join(root, "default-state"), ["install"], io);
+    const unit = await readFile(newPath(), "utf8");
+    expect(unit).toContain(platform === "linux" ? `RECENSE_HOME=${custom}` : `<string>${custom}</string>`);
+    expect(unit).not.toContain("default-state");
+    expect(JSON.parse(await readFile(join(custom, "service.json"), "utf8"))).toEqual(["--port", "4000"]);
+    expect(await readFile(join(custom, "recense.db"), "utf8")).toBe("db");
+    await expect(lstat(join(custom, "emend.db"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(stdout.join("")).toContain("keeps using it");
   });
 });

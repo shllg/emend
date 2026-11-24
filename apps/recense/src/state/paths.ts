@@ -34,8 +34,24 @@ export function stateDir(env: Env, platform: string, home: string): string {
   return namedStateDir("recense", env, platform, home);
 }
 
+/**
+ * The config folder. With a state override (RECENSE_HOME or EMEND_HOME) nothing moves it, so a folder
+ * that only has the old name is read in place; a default run moves it first (`state/legacy.ts`).
+ */
 export function configDir(env: Env, home: string): string {
-  return namedConfigDir("recense", env, home);
+  const current = namedConfigDir("recense", env, home);
+  if (!homeOverride(env)) return current;
+  const old = namedConfigDir("emend", env, home);
+  return !pathExists(current) && pathExists(old) ? old : current;
+}
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function defaultConfigDir(env: Env = process.env): string {
@@ -49,7 +65,7 @@ export function defaultConfigDir(env: Env = process.env): string {
   return dir;
 }
 
-const inside = (root: string, path: string) => {
+export const inside = (root: string, path: string) => {
   const suffix = relative(root, path);
   return suffix !== "" && suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix);
 };
@@ -69,7 +85,7 @@ export function defaultStateDir(env: Env = process.env): string {
 }
 
 // A test home may not exist yet; resolve symlinks in its nearest existing ancestor.
-function canonicalPath(path: string): string {
+export function canonicalPath(path: string): string {
   try {
     lstatSync(path);
   } catch (error) {

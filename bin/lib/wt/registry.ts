@@ -62,8 +62,34 @@ export function emptyRegistry(): Registry {
   return { version: 1, worktrees: {} };
 }
 
+/**
+ * The folder bin/wt keeps its registry, lock and findings in. On first use it takes over the folder of the
+ * name before the rename (`emend-wt`) with one atomic rename, when the new one is missing. Nothing is deleted.
+ */
 export function stateDir(repo: Repo): string {
-  return join(repo.commonDir, "recense-wt");
+  const current = join(repo.commonDir, "recense-wt");
+  try {
+    lstatSync(current);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+    const old = join(repo.commonDir, "emend-wt");
+    let present = true;
+    try {
+      lstatSync(old);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      present = false;
+    }
+    if (present) {
+      try {
+        renameSync(old, current);
+      } catch (error) {
+        // Another bin/wt run moved it first: either way there is nothing left to do.
+        if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      }
+    }
+  }
+  return current;
 }
 
 export function registryPath(repo: Repo): string {

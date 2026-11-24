@@ -19,7 +19,7 @@ devices yourself, give me the command instead; never pass --host or any flag thi
 name; never retry a command through another program (for example script) to get a terminal; never
 list the devices on my tailnet; outside your sandbox run only recense skills install, and no other
 command; run no process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af
-'[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+'[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Attach this machine to my recense hub (https://github.com/shllg/recense). Follow
 https://github.com/shllg/recense/blob/release/docs/setup/attach.md step by step. recense must already be
 installed here (https://github.com/shllg/recense/blob/release/docs/setup/local.md). Tell me what to

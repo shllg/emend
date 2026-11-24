@@ -41,7 +41,8 @@ to it. Any change here needs `recense-security-reviewer`.
   `wide` or `narrow`), `prose` (15 to 18) and `code` (12 to 15), all three or none; a message
   with only some of them, or any invalid, is ignored whole, `wide` included. The bridge checks
   each against that list and sets only `data-recense-layout` (`wide` or `narrow`),
-  `data-recense-width`, `data-recense-prose` and `data-recense-code` on the root. When they change while
+  `data-recense-width`, `data-recense-prose` and `data-recense-code` on the root, and their `data-emend-*`
+  twins for pages styled before the rename. When they change while
   a pinned position still holds (every `recense:goto` pins, and so does the bridge's own return after
   a layout change) or the reading heading's scroll path is scrolled, it returns to the same declared
   heading and fraction; a doc with nothing scrolled and no pin stays where it is.

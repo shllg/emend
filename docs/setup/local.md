@@ -20,7 +20,7 @@ does not name; never retry a command through another program (for example script
 terminal; never list the devices on my tailnet; outside your sandbox run only recense service
 install, recense service status, recense service uninstall and recense skills install, and no other
 command; run no process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af
-'[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+'[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Set me up with recense on this one machine (https://github.com/shllg/recense). Follow
 https://github.com/shllg/recense/blob/release/docs/setup/local.md step by step. Ask me which
 optional steps I want: the service, the agent skills, and docRoots folders. For the final check,
@@ -249,7 +249,7 @@ stores) or recense's state folder; outside your sandbox run only recense service
 service status, since they need the service manager, 127.0.0.1 and recense's state folder; never
 pass any flag; never retry a command through another program (for example script) to get a
 terminal; run no process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af
-'[e]mend.mjs serve'; macOS: pgrep -lf '[e]mend.mjs serve').
+'[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Install the recense service: run recense service install and recense service status and show me the
 output of both. If install reports a server it cannot ask to stop, ask me to run the pgrep command
 for my system and to end that server, then run install again. If install prints the sudo loginctl
@@ -335,7 +335,7 @@ Remove what this page set up, in this order. Skip a line for a part you did not 
 
 1. The service: `recense service uninstall`.
 2. A server that `recense` started without the service keeps running. Find it with
-   `pgrep -af '[e]mend.mjs serve'` on Linux or `pgrep -lf '[e]mend.mjs serve'` on macOS and end
+   `pgrep -af '[r]ecense.mjs serve'` on Linux or `pgrep -lf '[r]ecense.mjs serve'` on macOS and end
    the process it lists.
 3. The agent parts: follow the Undo section of [agents.md](agents.md#undo).
 4. The package: `npm uninstall -g @shllg/recense`, or with mise

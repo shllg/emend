@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILT_IN_FONTS } from "../apps/web/src/lib/built-in-fonts.ts";
+import { isolatedEnvironment } from "./isolated-env.ts";
 import { cleanPackageDocs } from "./package-docs.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -139,11 +140,9 @@ try {
   const globalconfig = join(work, "globalconfig");
   writeFileSync(userconfig, "");
   writeFileSync(globalconfig, "");
-  // Isolate npm's config, cache and install prefix, including config supplied through the environment.
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^npm_config_/i.test(key)));
-  env.RECENSE_HOME = join(work, "state");
-  env.HOME = join(work, "home");
-  mkdirSync(env.HOME);
+  // Isolate npm's config, cache and install prefix, including config supplied through the environment, and pin
+  // HOME, every XDG folder and the state folder under the work folder: the CLI may move config and state.
+  const env = isolatedEnvironment(work);
   command(
     "offline npm install",
     "npm",

@@ -56,6 +56,7 @@ const SCRUBBED_PREFIXES = [
   "NODE_OPTIONS",
   "WT_",
   "RECENSE_PRIVATE_TERMS",
+  "EMEND_PRIVATE_TERMS",
 ];
 
 function findOnPath(name: string, pathValue: string): string | null {
