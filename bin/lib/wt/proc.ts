@@ -8,6 +8,9 @@ const FIXED: Record<string, string> = {
   GIT_PAGER: "cat",
   PAGER: "cat",
   LC_ALL: "C.UTF-8",
+  GIT_NO_REPLACE_OBJECTS: "1",
+  // Grafts still rewrite parents with replace refs disabled. Git cannot open a file below /dev/null.
+  GIT_GRAFT_FILE: "/dev/null/wt-no-grafts",
 };
 
 export const gitRuntime = {
@@ -48,6 +51,8 @@ export interface RunBytesResult {
 
 function childEnv(cmd: string, gitNoLazyFetch?: boolean): NodeJS.ProcessEnv {
   const env = { ...process.env, ...FIXED };
+  delete env.GIT_REPLACE_REF_BASE;
+  delete env.GIT_SHALLOW_FILE;
   if (cmd === "gh" || cmd === "git") {
     // Select the repository from cwd, including git calls made internally by gh.
     delete env.GIT_DIR;
@@ -83,6 +88,7 @@ function childEnv(cmd: string, gitNoLazyFetch?: boolean): NodeJS.ProcessEnv {
 /**
  * Runs a program without a shell, with the caller's environment plus FIXED (no prompts, no pager),
  * excluding Git config overrides, GIT_DIFF_OPTS, GH_REPO, GH_HOST and EMEND_PRIVATE_TERMS.
+ * All children use the original Git objects and parents, without replace refs, grafts or a shallow-file override.
  * Git and gh children also discard repository-selection overrides and disable forced color/terminal output.
  * gitNoLazyFetch pins local Git reads or clears the inherited setting for remote commands.
  * Exit 127 means not found; 124 means it ran past the timeout.

@@ -8,13 +8,15 @@ import {
   readPushDestination,
   readPushRemote,
 } from "../../../scripts/check-public.ts";
+import { readApproval } from "./approval.ts";
 import type { Command, CommandTable } from "./command.ts";
 import { gitLocalDiagnostic, repoDiagnostic } from "./diagnostics.ts";
+import { changeDigest } from "./digest.ts";
 import { htmlEntityNames, legacyEntities, legacyEntityNames, namedEntities } from "./entities.ts";
 import { checkIssue, githubRepository, originRepository } from "./issues.ts";
 import { type RunResult, run } from "./proc.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
-import { fetchOrigin, gitTry, type Repo, requireGlobalIdentity } from "./repo.ts";
+import { assertNoHistoryOverrides, fetchOrigin, gitTry, type Repo, requireGlobalIdentity } from "./repo.ts";
 import { hasTerminal, readTerminalLine } from "./terminal.ts";
 import {
   branchName,
@@ -153,6 +155,7 @@ export function push(
 ): void {
   if (o.acceptNewMarkers && (!markerTerminal.stdinTTY() || !markerTerminal.stderrTTY() || !markerTerminal.available()))
     throw new WtError(1, MARKER_TERMINAL_MESSAGE);
+  assertNoHistoryOverrides(repo, "Nothing was pushed.");
   requireGlobalIdentity(repo, top);
   const head = gitTry(repo, ["symbolic-ref", "--quiet", "HEAD"], { cwd: top });
   if (head.code !== 0 || head.stdout === "") throw new WtError(2, "HEAD is detached. Nothing was pushed.");
@@ -1176,11 +1179,12 @@ function deleteRemoteBranch(repo: Repo, head: unknown, mergedHead: string, ident
  */
 export function prMerge(
   repo: Repo,
-  o: { pr?: string; matchHead: string; subject: string; body: string },
+  o: { pr?: string; matchHead: string; approvedHead?: string; subject: string; body: string },
   now: () => number = Date.now,
 ): string {
   const sha = commitSha(o.matchHead);
   const subject = oneLine(o.subject, "subject");
+  assertNoHistoryOverrides(repo, "Nothing was merged.");
   requirePublicText(repo, { message: `${subject}\n\n${o.body}`, branch: repo.callerBranch ?? undefined });
   const identity = originRepository(repo);
   const n = o.pr !== undefined ? prNumber(o.pr) : requireOpenPr(repo, [], identity).number;
@@ -1210,6 +1214,25 @@ export function prMerge(
   closingGuard(repo, branch, `${prText(pr, "title")}\n\n${prText(pr, "body")}`, false);
   closingGuard(repo, branch, `${subject}\n\n${o.body}`, false);
   checkMergeBase(repo, n, sha);
+  const approved = commitSha(o.approvedHead ?? sha);
+  const approval = readApproval(repo, branch, approved);
+  if (!approval.ok) {
+    throw new WtError(
+      1,
+      `emend shows no approval of ${approved} on ${branch}: ${approval.reason}. Nothing was merged.`,
+    );
+  }
+  if (approved !== sha) {
+    const head = gitTry(repo, ["--no-replace-objects", "cat-file", "-t", approved]);
+    if (head.code !== 0 || head.stdout !== "commit") {
+      throw new WtError(1, "The approved head commit is not available locally. Nothing was merged.");
+    }
+    if (
+      changeDigest(repo, "refs/remotes/origin/main", approved) !== changeDigest(repo, "refs/remotes/origin/main", sha)
+    ) {
+      throw new WtError(1, "The pull request head changes the approved change. Nothing was merged.");
+    }
+  }
   const closingPr = githubClosingGuard(repo, branch, n, "merge", identity, now);
   const closingBody = prText(closingPr, "body");
   requirePublicText(repo, { title: prText(pr, "title"), body: closingBody, branch });
@@ -1381,6 +1404,7 @@ const prCommand: Command = ({ repo, args }) => {
       const { flags } = parseFlags(rest, {
         pr: "string",
         "match-head": "string",
+        "approved-head": "string",
         subject: "string",
         "subject-file": "string",
         body: "string",
@@ -1390,6 +1414,7 @@ const prCommand: Command = ({ repo, args }) => {
         prMerge(repo, {
           pr: str(flags.pr),
           matchHead: need(flags["match-head"]),
+          approvedHead: str(flags["approved-head"]),
           subject: textArg(str(flags.subject), str(flags["subject-file"]), "subject", true) as string,
           body: textArg(str(flags.body), str(flags["body-file"]), "body", true) as string,
         }),

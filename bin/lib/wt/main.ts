@@ -27,6 +27,7 @@ const OWNERS: Record<string, string> = {
   fetch: "github.ts",
   push: "github.ts",
   pr: "github.ts",
+  approval: "approval.ts",
   rebase: "history.ts",
   restack: "history.ts",
   land: "history.ts",
@@ -42,6 +43,8 @@ Local:
   setup [<branch>] [--from <ref>] [--issue <n>]
                                                create a worktree with a port and an EMEND_HOME;
                                                    copies the gitignored files .worktreeinclude lists
+  approval [--head <sha>]                          emend's approval on this worktree's branch
+  approval --branch <name> --head <sha>            check a branch and head from the main checkout
   list [--json]  (alias: status)                   one row per worktree
                                                    JSON pr: {number,state}, "?" (lookup skipped), or null (no PR)
   cleanup [--discard] [--close-workspace] [<branch|path>]
@@ -72,13 +75,15 @@ Remote:
   pr number [--branch <b>] [--state open|merged]
   pr create (--title <text> | --title-file <path>) (--body <text> | --body-file <path>) [--draft]
   pr edit [--pr <n>] [--title <text> | --title-file <path>] [--body <text> | --body-file <path>]
-  pr merge [--pr <n>] --match-head <sha> (--subject <text> | --subject-file <path>)
+  pr merge [--pr <n>] --match-head <sha> [--approved-head <sha>] (--subject <text> | --subject-file <path>)
            (--body <text> | --body-file <path>)
 
 History:
   rebase  restack  sync-main  digest
-  land --match-head <sha> (--subject <text> | --subject-file <path>)
+  land --match-head <sha> [--approved-head <sha>] (--subject <text> | --subject-file <path>)
        (--body <text> | --body-file <path>)
+
+pr merge, land and approval ask emend for the approval: emend on PATH, or the absolute path in EMEND_BIN.
 
 No arguments: an action menu on a terminal with fzf, otherwise "list".
 Exit codes: 0 done, 1 failed or unconfirmed, 2 invalid input, 3 already exists,

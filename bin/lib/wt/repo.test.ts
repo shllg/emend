@@ -19,6 +19,7 @@ import { gitRuntime, run, runBytes } from "./proc.ts";
 import {
   assertNoGitlinks,
   assertNoGitlinksInRef,
+  assertNoHistoryOverrides,
   fetchOrigin,
   GIT_BASE,
   git,
@@ -29,10 +30,12 @@ import {
   resolveRepo,
 } from "./repo.ts";
 import {
+  approvedReview,
   type Fixture,
   fakeCalls,
   gitIn,
   installFake,
+  installFakeEmend,
   makeFixture,
   makeTestEnv,
   runLauncher,
@@ -59,6 +62,19 @@ async function scenario(
 function expectCode(fn: () => unknown, code: number): void {
   assert.throws(fn, (e: unknown) => e instanceof WtError && e.code === code, `expected exit ${code}`);
 }
+
+test("failed history override lookups refuse without disclosing diagnostics", () =>
+  scenario({}, ({ env, repo }) => {
+    rmSync(join(env.fakeBin, "git"));
+    const failure = { code: 128, stderr: "synthetic detail" };
+    for (const rules of [[failure], [{ match: ["for-each-ref"] }, failure]]) {
+      installFake(env, "git", rules);
+      assert.throws(() => assertNoHistoryOverrides(repo, "Nothing was merged."), {
+        code: 1,
+        message: "Could not check for history overrides. Nothing was merged.",
+      });
+    }
+  }));
 
 test("R8.4: global identity works in linked worktrees with the extension unset, false or true", () =>
   scenario({}, ({ fx, repo }) => {
@@ -461,19 +477,26 @@ for (const supported of [true, false])
   ]) {
     test(`R3.3/R4.11: ${failure} diagnostics use protected Git command sequences (lazy-fetch pin ${supported})`, (t) => {
       t.mock.method(gitRuntime, "supportsNoLazyFetch", () => supported);
-      const repo = { mainRoot: "/synthetic-unused", commonDir: "/synthetic-unused/.git" } as Repo;
+      const env = failure === "commit-tree" ? makeTestEnv({ ports: false }) : undefined;
+      const mainRoot = env ? join(env.home, "repo") : "/synthetic-unused";
+      if (env) mkdirSync(mainRoot, { recursive: true });
+      const repo = { mainRoot, commonDir: join(mainRoot, ".git") } as Repo;
       const old = "a".repeat(40),
         target = "b".repeat(40);
+      if (env) installFakeEmend(env, old, [approvedReview("emend-fixture", old)]);
+      const spawnSync = childProcess.spawnSync;
       const token = ["gh", "p_", "Ab01".repeat(9)].join("");
       const calls: { command: string; env: NodeJS.ProcessEnv; args: string[] }[] = [];
       const child = t.mock.method(
         childProcess,
         "spawnSync",
-        (_cmd: string, args: string[], options: { env: NodeJS.ProcessEnv; encoding?: string }) => {
+        (cmd: string, args: string[], options: { env: NodeJS.ProcessEnv; encoding?: string }) => {
+          if (env && cmd === join(env.fakeBin, "emend")) return spawnSync(cmd, args, { ...options, encoding: "utf8" });
           const command = args.find((arg) =>
             [
               "config",
               "symbolic-ref",
+              "for-each-ref",
               "rev-parse",
               "ls-files",
               "ls-tree",
@@ -513,6 +536,7 @@ for (const supported of [true, false])
             const ref = args.at(-1) ?? "";
             if (ref.startsWith("refs/wt-backup/")) status = 1;
             else if (ref === "--git-dir") stdout = repo.commonDir;
+            else if (args.includes("--git-path")) stdout = ".git/info";
             else stdout = ref.includes("main") || ref === `${target}^{tree}` ? target : old;
           } else if (command === "merge-base") {
             if (args.includes("--is-ancestor")) status = failure === "commit-tree" ? 0 : 1;
@@ -565,6 +589,7 @@ for (const supported of [true, false])
         reader.mock.restore();
         exists.mock.restore();
         syncBuiltinESMExports();
+        env?.cleanup();
       }
     });
   }

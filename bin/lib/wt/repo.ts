@@ -64,6 +64,34 @@ function rawGit(args: string[], cwd: string, input?: string, timeoutMs?: number)
   return run("git", [...GIT_BASE, ...args], { cwd, input, timeoutMs, gitNoLazyFetch: localCommand(args) });
 }
 
+/** Refuse when the public scan or the review publisher could see a different history from bin/wt. */
+export function assertNoHistoryOverrides(repo: Repo, outcome: string): void {
+  const refuse = (source: string): never => {
+    throw new WtError(
+      1,
+      `Found ${source}. bin/wt does not push, merge or land while history overrides exist. Remove them first. ${outcome}`,
+    );
+  };
+  for (const key of ["GIT_REPLACE_REF_BASE", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE"]) {
+    if (process.env[key]) refuse(key);
+  }
+  const checkFailed = `Could not check for history overrides. ${outcome}`;
+  const refs = gitTry(repo, ["for-each-ref", "--count=1", "--format=%(refname)", "refs/replace/"]);
+  if (refs.code !== 0) throw new WtError(1, checkFailed);
+  if (refs.stdout) refuse("replace refs");
+
+  // --git-path info/grafts would return the child's pinned GIT_GRAFT_FILE. Ask for its directory instead.
+  const info = gitTry(repo, ["rev-parse", "--git-path", "info"]);
+  if (info.code !== 0 || !info.stdout) throw new WtError(1, checkFailed);
+  try {
+    lstatSync(resolve(repo.mainRoot, info.stdout, "grafts"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new WtError(1, checkFailed);
+  }
+  refuse("a graft file");
+}
+
 /** Only the owner's global/system identity may exempt commit identities from the public gate. */
 export function requireGlobalIdentity(repo: Repo, top: string): void {
   const refuse = (scope: string): never => {
@@ -174,6 +202,13 @@ export function resolveRepo(cwd: string): Repo {
     if (head.code === 0 && head.stdout.trim() !== "") callerBranch = head.stdout.trim();
   }
   return { mainRoot, commonDir, worktreesDir: join(mainRoot, ".claude", "worktrees"), callerTop, callerBranch };
+}
+
+export function linkedTop(repo: Repo): string {
+  if (repo.callerTop === null || repo.callerTop === repo.mainRoot) {
+    throw new WtError(2, "Run this from inside a linked worktree.");
+  }
+  return repo.callerTop;
 }
 
 // These commands must be able to fetch missing blobs in partial clones; filter their diagnostics.

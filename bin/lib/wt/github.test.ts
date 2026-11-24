@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import {
   commands,
   markerTerminal,
@@ -13,8 +14,9 @@ import {
   pushDiagnostic,
   requireCheckedPush,
 } from "./github.ts";
-import { type Repo, resolveRepo } from "./repo.ts";
+import { GIT_BASE, type Repo, resolveRepo } from "./repo.ts";
 import {
+  approvedReview,
   branchPrPage,
   commitFile,
   type FakeRule,
@@ -23,6 +25,7 @@ import {
   fakeGithubOrigin,
   gitIn,
   installFake,
+  installFakeEmend,
   issueRules,
   makeFixture,
   makeTestEnv,
@@ -122,6 +125,11 @@ const NO_PR: FakeRule = {
   match: ["api", "graphql", `head=${BRANCH}`],
   stdout: branchPrPage([]),
 };
+
+const NO_HISTORY_OVERRIDES = [
+  { match: ["for-each-ref", "--count=1", "--format=%(refname)", "refs/replace/"] },
+  { match: ["rev-parse", "--git-path", "info"], stdout: ".git/info\n" },
+] satisfies FakeRule[];
 
 function prJson(extra: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -304,6 +312,7 @@ test("R7.H: PR edit and merge check a different remote head name before side eff
     const realGit = realpathSync(join(env.fakeBin, "git"));
     rmSync(join(env.fakeBin, "git"));
     installFake(env, "git", [
+      ...NO_HISTORY_OVERRIDES,
       { match: ["remote", "get-url", "origin"], stdout: "https://github.com/owner/repo.git" },
       { code: 128, stderr: "unexpected git call" },
     ]);
@@ -324,7 +333,12 @@ test("R7.H: PR edit and merge check a different remote head name before side eff
       );
       assert.equal(fakeCalls(env, "gh").length, 1);
       assert.deepEqual(fakeCalls(env, "gh")[0]?.slice(0, 3), ["pr", "view", "7"]);
-      assert.ok(fakeCalls(env, "git").every((args) => args.slice(-3).join(" ") === "remote get-url origin"));
+      const allowed = [["remote", "get-url", "origin"], ...NO_HISTORY_OVERRIDES.map((rule) => rule.match)];
+      assert.ok(
+        fakeCalls(env, "git").every((args) =>
+          allowed.some((lookup) => isDeepStrictEqual(args, [...GIT_BASE, ...lookup])),
+        ),
+      );
     }
     rmSync(join(env.fakeBin, "git"));
     symlinkSync(realGit, join(env.fakeBin, "git"));
@@ -358,6 +372,7 @@ for (const failure of ["reflog", "merge-base"]) {
     scenario(({ fx, repo, env }) => {
       rmSync(join(env.fakeBin, "git"));
       installFake(env, "git", [
+        ...NO_HISTORY_OVERRIDES,
         { match: ["--version"], stdout: "git version 2.44.0\n" },
         { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
         { match: ["rev-parse"], stdout: `${SHA}\n` },
@@ -886,6 +901,7 @@ let headSha = SHA;
 function publishHead(ctx: Ctx): void {
   headSha = gitIn(ctx.fx.main, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "pr head");
   gitIn(ctx.fx.main, "push", "--quiet", "--force", "origin", `${headSha}:refs/pull/7/head`);
+  installFakeEmend(ctx.env, headSha, [approvedReview(BRANCH, headSha)]);
 }
 
 /** A scenario whose HEAD already has a published PR head. */
@@ -904,6 +920,53 @@ const MERGE_ARGS = {
   subject: "Add the thing",
   body: "Squash body",
 };
+
+for (const source of ["replace refs", "a graft file", "GIT_REPLACE_REF_BASE", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE"]) {
+  test(`push, pr merge and land refuse ${source} before side effects`, () =>
+    scenario(
+      async ({ env, fx, repo }) => {
+        const top = join(env.root, "linked");
+        gitIn(fx.main, "worktree", "add", "--quiet", "-b", BRANCH, top, "main");
+        const main = gitIn(fx.main, "rev-parse", "main");
+        const head = commitFile(top, "feature.txt", "reviewed\n");
+        const trace = join(env.root, "git.trace");
+        const caller: Record<string, string> = { GIT_TRACE: trace };
+        if (source === "replace refs") {
+          gitIn(top, "replace", head, main);
+          gitIn(top, "pack-refs", "--all");
+        } else if (source === "a graft file") {
+          mkdirSync(join(repo.commonDir, "info"), { recursive: true });
+          writeFileSync(join(repo.commonDir, "info", "grafts"), "");
+        } else {
+          caller[source] = "synthetic-override";
+        }
+        const objects = gitIn(top, "count-objects", "-v");
+        installFake(env, "gh", []);
+        const message = ["--match-head", head, "--subject", "Reviewed", "--body", ""];
+        for (const [args, outcome] of [
+          [["push"], "Nothing was pushed."],
+          [["pr", "merge", "--pr", "7", ...message], "Nothing was merged."],
+          [["land", ...message], "Nothing was changed."],
+        ] as const) {
+          const result = await runWt(join(fx.main, "bin", "wt"), [...args], { cwd: top, env: caller });
+          assert.deepEqual(result, {
+            code: 1,
+            stdout: "",
+            stderr: `Found ${source}. bin/wt does not push, merge or land while history overrides exist. Remove them first. ${outcome}\n`,
+          });
+        }
+        const calls = readFileSync(trace, "utf8");
+        assert.match(calls, /built-in: git rev-parse /);
+        assert.doesNotMatch(calls, /built-in: git (?:fetch|ls-remote|push|update-ref|commit-tree)\b/);
+        assert.deepEqual(fakeCalls(env, "gh"), []);
+        assert.equal(gitIn(fx.origin, "for-each-ref", `refs/heads/${BRANCH}`), "");
+        assert.equal(gitIn(top, "for-each-ref", "refs/wt-backup/"), "");
+        assert.equal(gitIn(top, "count-objects", "-v"), objects);
+        assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+      },
+      { withBin: true, branch: null },
+    ));
+}
 
 test("e: pr merge scans the reviewed head tree even when origin already has its private file", () =>
   scenario((ctx) => {
@@ -995,6 +1058,81 @@ test("pr merge happy path squashes with the reviewed head", () =>
     ]);
     assert.deepEqual(capturedBodies(bodies), ["Squash body"]);
   }));
+
+test("pr merge refuses an unapproved head before the GitHub merge call", () =>
+  mscenario((ctx) => {
+    installFake(ctx.env, "gh", mergeOkRules());
+    installFakeEmend(ctx.env, headSha, [approvedReview("another-branch", headSha)]);
+    assert.throws(() => prMerge(ctx.repo, MERGE_ARGS), {
+      code: 1,
+      message: `emend shows no approval of ${headSha} on ${BRANCH}: the review of this commit names another branch. Nothing was merged.`,
+    });
+    assert.deepEqual(mergeCalls(ctx.env), []);
+  }));
+
+test("pr merge needs the original approved commit locally to compare the change", () =>
+  mscenario((ctx) => {
+    installFake(ctx.env, "gh", mergeOkRules());
+    installFakeEmend(ctx.env, OTHER_SHA, [approvedReview(BRANCH, OTHER_SHA)]);
+    assert.throws(() => prMerge(ctx.repo, { ...MERGE_ARGS, approvedHead: OTHER_SHA }), {
+      code: 1,
+      message: "The approved head commit is not available locally. Nothing was merged.",
+    });
+    assert.deepEqual(mergeCalls(ctx.env), []);
+  }));
+
+for (const changed of [false, true]) {
+  test(`pr merge checks the approved change after a rebase once replace refs are removed (changed: ${changed})`, () =>
+    scenario(async (ctx) => {
+      const { main } = ctx.fx;
+      const approved = commitFile(main, "feature.txt", "reviewed\n");
+      gitIn(main, "checkout", "-q", "main");
+      commitFile(main, "other.txt", "main advanced\n");
+      gitIn(main, "push", "-q", "origin", "main");
+      gitIn(main, "checkout", "-q", BRANCH);
+      gitIn(main, "rebase", "main");
+      if (changed) commitFile(main, "extra.txt", "extra change\n");
+      headSha = gitIn(main, "rev-parse", "HEAD");
+      assert.notEqual(headSha, approved);
+      gitIn(main, "push", "-q", "origin", `${headSha}:refs/pull/7/head`);
+      // A local history graft hides the merge base from a replacement-aware diff.
+      gitIn(main, "replace", "--graft", approved);
+      installFake(ctx.env, "gh", mergeOkRules());
+      installFakeEmend(ctx.env, approved, [approvedReview(BRANCH, approved)]);
+      const invoke = () =>
+        commands.pr?.({
+          repo: ctx.repo,
+          args: [
+            "merge",
+            "--pr",
+            "7",
+            "--match-head",
+            headSha,
+            "--approved-head",
+            approved,
+            "--subject",
+            "Reviewed",
+            "--body",
+            "",
+          ],
+        });
+      assert.throws(invoke, { code: 1, message: /^Found replace refs\..*Nothing was merged\.$/ });
+      assert.deepEqual(mergeCalls(ctx.env), []);
+      gitIn(main, "replace", "-d", approved);
+      if (changed) {
+        await assert.rejects(async () => invoke(), {
+          code: 1,
+          message: "The pull request head changes the approved change. Nothing was merged.",
+        });
+        assert.deepEqual(mergeCalls(ctx.env), []);
+      } else {
+        await invoke();
+        const [call] = mergeCalls(ctx.env);
+        assert.ok(call);
+        assert.equal(call[call.indexOf("--match-head-commit") + 1], headSha);
+      }
+    }));
+}
 
 function remoteHas(ctx: Ctx): boolean {
   return gitIn(ctx.fx.origin, "for-each-ref", `refs/heads/${BRANCH}`) !== "";
@@ -1128,6 +1266,7 @@ test("pr merge --pr works from a matching linked worktree", () =>
   mscenario(
     (ctx) => {
       const wt = setup(ctx.repo, { branch: "feat-b", busy: new Set<number>() }).path;
+      installFakeEmend(ctx.env, headSha, [approvedReview("feat-b", headSha)]);
       installFake(
         ctx.env,
         "gh",
@@ -1415,6 +1554,7 @@ for (const branch of ["fixturecorp-feature", PRIVATE_FIXTURE_HOST]) {
         installFake(ctx.env, "gh", [{ stdout: "unexpected call" }]);
         rmSync(join(ctx.env.fakeBin, "git"));
         installFake(ctx.env, "git", [
+          ...NO_HISTORY_OVERRIDES,
           { match: ["symbolic-ref"], stdout: `refs/heads/${branch}\n` },
           { match: ["rev-parse"], stdout: `${SHA}\n` },
         ]);
@@ -1448,6 +1588,7 @@ test("regression: missing terms fail closed before network calls", () =>
     installFake(ctx.env, "gh", [{ stdout: "unexpected call" }]);
     rmSync(join(ctx.env.fakeBin, "git"));
     installFake(ctx.env, "git", [
+      ...NO_HISTORY_OVERRIDES,
       { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
       { match: ["rev-parse"], stdout: `${SHA}\n` },
     ]);
@@ -1726,6 +1867,7 @@ for (const failure of ["reflog", "merge-base"]) {
       writeFileSync(join(fx.main, ".private-terms"), "alice example");
       rmSync(join(env.fakeBin, "git"));
       installFake(env, "git", [
+        ...NO_HISTORY_OVERRIDES,
         { match: ["--version"], stdout: "git version 2.44.0\n" },
         { match: ["symbolic-ref"], stdout: `refs/heads/${BRANCH}\n` },
         { match: ["rev-parse"], stdout: `${SHA}\n` },

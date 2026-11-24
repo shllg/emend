@@ -1,18 +1,21 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { checkPublicChange } from "../../../scripts/check-public.ts";
+import { readApproval } from "./approval.ts";
 import type { CommandTable } from "./command.ts";
 import { gitLocalDiagnostic, repoDiagnostic } from "./diagnostics.ts";
+import { changeDigest } from "./digest.ts";
 import { closingGuard } from "./github.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
 import { withRegistry } from "./registry.ts";
 import {
   assertNoGitlinks,
+  assertNoHistoryOverrides,
   fetchOrigin,
   git,
   gitBytes,
   gitTry,
+  linkedTop,
   listGitWorktrees,
   type Repo,
   requireGlobalIdentity,
@@ -26,6 +29,8 @@ import {
   textArg,
   WtError,
 } from "./validate.ts";
+
+export { changeDigest };
 
 export type Onto = "origin/main" | "main";
 
@@ -384,7 +389,7 @@ function checkMessage(subject: string, body: string): string {
 
 /**
  * Squashes the branch into one signed commit on top of local main and moves main there. Never pushes.
- * `matchHead` is the approved head commit: the tree that lands is that commit's tree, never a later HEAD.
+ * `matchHead` pins the tree to land. A replay must have the same change digest as the approved head.
  */
 export function land(
   repo: Repo,
@@ -392,13 +397,15 @@ export function land(
   subject: string,
   body: string,
   matchHead: string,
+  approvedHead?: string,
 ): { commit: string; backups: string[] } {
+  assertNoHistoryOverrides(repo, "Nothing was changed.");
   requireGlobalIdentity(repo, top);
   const branch = currentBranch(repo, top);
   if (issueFromBranch(branch) !== null) throw new WtError(1, "Issue branches must land through a pull request.");
-  const approved = commitSha(matchHead);
+  commitSha(matchHead);
   const head = requireRef(repo, top, "HEAD");
-  if (head !== approved) throw new WtError(1, "HEAD is not the approved head commit.");
+  if (head !== matchHead) throw new WtError(1, "HEAD is not the approved head commit.");
   const message = checkMessage(subject, body);
   requirePublicText(repo, { message, branch });
   closingGuard(repo, branch, message);
@@ -413,6 +420,15 @@ export function land(
     throw new WtError(1, "There is nothing to land: the branch tree equals main.");
   }
   requirePublic(() => checkPublicChange(top, main, tree, { root: repo.mainRoot, requireTerms: true }));
+  const approved = approvedHead ?? matchHead;
+  const approval = readApproval(repo, branch, approved);
+  if (!approval.ok) throw new WtError(1, `emend shows no approval of ${approved} on ${branch}: ${approval.reason}.`);
+  if (
+    approved !== matchHead &&
+    changeDigest(repo, "refs/heads/main", approved) !== changeDigest(repo, "refs/heads/main", matchHead)
+  ) {
+    throw new WtError(1, "HEAD changes the approved change.");
+  }
   const backups = [writeBackup(repo, branch, head), writeBackup(repo, "main", main)];
   const names = backups.join(" ");
   const made = hgTry(repo, top, ["commit-tree", "-S", tree, "-p", main], message);
@@ -443,50 +459,7 @@ export function land(
 }
 
 // ---------------------------------------------------------------------------------------------
-// digest
-
-/**
- * A hash of the change itself: the diff from the merge base to `head` with three lines of context, hunk
- * headers reduced to `@@` plus their function-context text (no line numbers) and blob ids removed. File paths and mode lines stay. A pure
- * line shift keeps it; a changed line, or the same change at another place or in another file, changes it.
- */
-export function changeDigest(repo: Repo, base: string, head: string): string {
-  const cwd = repo.callerTop ?? repo.mainRoot;
-  const diff = git(
-    repo,
-    [
-      "diff",
-      "--unified=3",
-      "--binary",
-      "--no-renames",
-      "--no-color",
-      "--no-ext-diff",
-      "--no-textconv",
-      "--ignore-submodules=none",
-      "--diff-algorithm=myers",
-      "--src-prefix=a/",
-      "--dst-prefix=b/",
-      `${base}...${head}`,
-      "--",
-    ],
-    { cwd },
-  );
-  const kept = diff
-    .split("\n")
-    .filter((line) => !line.startsWith("index "))
-    .map((line) => (line.startsWith("@@ ") ? line.replace(/^@@ [^@]*@@/, "@@") : line));
-  return createHash("sha256").update(kept.join("\n")).digest("hex");
-}
-
-// ---------------------------------------------------------------------------------------------
 // Commands
-
-function linkedTop(repo: Repo): string {
-  if (repo.callerTop === null || repo.callerTop === repo.mainRoot) {
-    throw new WtError(2, "Run this from inside a linked worktree.");
-  }
-  return repo.callerTop;
-}
 
 function ontoFlag(value: string | boolean | undefined): Onto {
   if (value === undefined) return "origin/main";
@@ -526,6 +499,7 @@ export const commands: CommandTable = {
   land: ({ repo, args }) => {
     const { flags } = parseFlags(args, {
       "match-head": "string",
+      "approved-head": "string",
       subject: "string",
       "subject-file": "string",
       body: "string",
@@ -550,7 +524,8 @@ export const commands: CommandTable = {
     ) as string;
     const subject = checkOneLine(subjectText, "subject");
     const top = linkedTop(repo);
-    const { commit, backups } = land(repo, top, subject, body, matchHead);
+    const approvedHead = flags["approved-head"] === undefined ? undefined : String(flags["approved-head"]);
+    const { commit, backups } = land(repo, top, subject, body, matchHead, approvedHead);
     process.stdout.write(`${backupLines(backups)}landed ${commit}\n`);
   },
   "sync-main": ({ repo, args }) => {

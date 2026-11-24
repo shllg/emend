@@ -6,7 +6,16 @@ import { changeDigest, checkRebased, commands, conflictLines, land, rebase, rest
 import { run, runBytes } from "./proc.ts";
 import { readRegistry } from "./registry.ts";
 import { type Repo, resolveRepo } from "./repo.ts";
-import { commitFile, type Fixture, gitIn, makeFixture, makeTestEnv, type TestEnv } from "./test-support.ts";
+import {
+  approvedReview,
+  commitFile,
+  type Fixture,
+  gitIn,
+  installFakeEmend,
+  makeFixture,
+  makeTestEnv,
+  type TestEnv,
+} from "./test-support.ts";
 import { WtError } from "./validate.ts";
 import { setup } from "./worktree.ts";
 
@@ -868,16 +877,17 @@ test("sync-main when main is not checked out", () =>
   }));
 
 test("land makes one signed commit on main", () =>
-  scenario(({ fx, repo }) => {
+  scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     commitFile(wt, "a.txt", "a\n");
     commitFile(wt, "b.txt", "b\n");
-    commitFile(wt, "a.txt", "a2\n");
+    const head = commitFile(wt, "a.txt", "a2\n");
+    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
     const wtRepo = resolveRepo(wt);
     const oldMain = gitIn(fx.main, "rev-parse", "main");
     const originMain = gitIn(fx.origin, "rev-parse", "main");
 
-    const { commit, backups } = land(wtRepo, wt, "feat: add a and b", "Body line.", gitIn(wt, "rev-parse", "HEAD"));
+    const { commit, backups } = land(wtRepo, wt, "feat: add a and b", "Body line.", head);
     assert.equal(backups.length, 2);
     assert.match(backups[0] as string, /^refs\/wt-backup\/feat-a\//);
     assert.match(backups[1] as string, /^refs\/wt-backup\/main\//);
@@ -892,6 +902,66 @@ test("land makes one signed commit on main", () =>
     assert.equal(gitIn(fx.origin, "rev-parse", "main"), originMain, "nothing was pushed");
     assert.equal(readFileSync(join(fx.main, "a.txt"), "utf8"), "a2\n", "the main checkout follows");
   }));
+
+test("land refuses an unapproved head before writing backup refs or a commit", () =>
+  scenario(({ env, fx, repo }) => {
+    const wt = worktree(repo, "feat-a");
+    const head = commitFile(wt, "a.txt", "review me\n");
+    const main = gitIn(fx.main, "rev-parse", "main");
+    const objects = gitIn(wt, "count-objects", "-v");
+    installFakeEmend(env, head, []);
+    assert.throws(() => land(resolveRepo(wt), wt, "feat: a", "", head), {
+      code: 1,
+      message: `emend shows no approval of ${head} on feat-a: no review of this commit.`,
+    });
+    assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+    assert.equal(gitIn(wt, "count-objects", "-v"), objects);
+    assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+  }));
+
+for (const override of ["refs/replace", "info/grafts"]) {
+  for (const changed of [false, true]) {
+    const outcome = changed ? "refuses the changed replay" : "lands the original rebased tree";
+    test(`land ${outcome} once ${override} is removed`, () =>
+      scenario(async ({ env, fx, repo }) => {
+        const wt = worktree(repo, "feat-a");
+        const approved = commitFile(wt, "feature.txt", "reviewed\n");
+        installFakeEmend(env, approved, [approvedReview("feat-a", approved)]);
+        const main = commitFile(fx.main, "other.txt", "main advanced\n");
+        gitIn(wt, "rebase", "main");
+        const replay = gitIn(wt, "rev-parse", "HEAD");
+        const head = changed ? commitFile(wt, "extra.txt", "extra change\n") : replay;
+        const originalTree = gitIn(wt, "rev-parse", `${head}^{tree}`);
+        if (override === "refs/replace") {
+          gitIn(wt, "replace", head, changed ? replay : approved);
+        } else {
+          // The graft makes the rebased head appear parentless to a reader that honors it.
+          const info = join(repo.commonDir, "info");
+          mkdirSync(info, { recursive: true });
+          writeFileSync(join(info, "grafts"), `${head}\n`);
+        }
+        const invoke = () =>
+          commands.land?.({
+            repo: resolveRepo(wt),
+            args: ["--match-head", head, "--approved-head", approved, "--subject", "feat: reviewed", "--body", ""],
+          });
+        assert.throws(invoke, { code: 1, message: /history overrides exist\..*Nothing was changed\.$/ });
+        if (override === "refs/replace") gitIn(wt, "replace", "-d", head);
+        else rmSync(join(repo.commonDir, "info", "grafts"));
+        if (changed) {
+          const objects = gitIn(wt, "count-objects", "-v");
+          assert.throws(invoke, { code: 1, message: "HEAD changes the approved change." });
+          assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+          assert.equal(gitIn(wt, "count-objects", "-v"), objects);
+          assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+        } else {
+          const out = await capture(invoke);
+          assert.ok(out.endsWith(`landed ${gitIn(fx.main, "rev-parse", "main")}\n`));
+          assert.equal(gitIn(fx.main, "rev-parse", "main^{tree}"), originalTree);
+        }
+      }));
+  }
+}
 
 test("land refuses issue branches before creating a commit, even without closing text or metadata", () =>
   scenario(({ env, fx, repo }) => {
@@ -957,13 +1027,14 @@ test("land refuses a branch behind main", () =>
   }));
 
 test("land refuses when the main checkout has overlapping uncommitted work", () =>
-  scenario(({ fx, repo }) => {
+  scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
-    commitFile(wt, "README.md", "from branch\n");
+    const head = commitFile(wt, "README.md", "from branch\n");
+    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
     writeFileSync(join(fx.main, "README.md"), "mine\n");
     const main = gitIn(fx.main, "rev-parse", "main");
     assert.throws(
-      () => land(resolveRepo(wt), wt, "feat: a", "", gitIn(wt, "rev-parse", "HEAD")),
+      () => land(resolveRepo(wt), wt, "feat: a", "", head),
       (e: unknown) =>
         e instanceof WtError &&
         e.code === 1 &&
@@ -1013,10 +1084,11 @@ test("rebase, restack and land refuse a gitlink before touching anything", () =>
   }));
 
 test("land lands a change to former trusted paths without any prompt", () =>
-  scenario(({ fx, repo }) => {
+  scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     commitFile(wt, "bin/x", "x\n");
     const tip = commitFile(wt, ".claude/skills/y/SKILL.md", "y\n");
+    installFakeEmend(env, tip, [approvedReview("feat-a", tip)]);
     const { commit } = land(resolveRepo(wt), wt, "feat: a", "", tip);
     assert.equal(gitIn(fx.main, "rev-parse", "main"), commit);
   }));
@@ -1041,18 +1113,21 @@ test("digest: the same edit in an identical block of another function changes it
     assert.notEqual(digestOf("alpha"), digestOf("beta"));
   }));
 
-test("digest --head hashes the given commit, not the local HEAD", () =>
+test("digest --head and the default HEAD hash the original commit objects", () =>
   scenario(async ({ repo }) => {
     const wt = worktree(repo, "feat-a");
     const wtRepo = resolveRepo(wt);
     const first = commitFile(wt, "a.txt", "a\n");
     const atFirst = changeDigest(wtRepo, "origin/main", "HEAD");
-    commitFile(wt, "b.txt", "b\n");
-    assert.notEqual(changeDigest(wtRepo, "origin/main", "HEAD"), atFirst);
+    const second = commitFile(wt, "b.txt", "b\n");
+    const atSecond = changeDigest(wtRepo, "origin/main", "HEAD");
+    assert.notEqual(atSecond, atFirst);
+    gitIn(wt, "replace", second, first);
+    assert.equal(changeDigest(wtRepo, "origin/main", "HEAD"), atSecond);
     const out = await capture(() => commands.digest?.({ repo: wtRepo, args: ["--head", first] }));
     assert.equal(out, `${atFirst}\n`);
     const dflt = await capture(() => commands.digest?.({ repo: wtRepo, args: [] }));
-    assert.equal(dflt, `${changeDigest(wtRepo, "origin/main", "HEAD")}\n`);
+    assert.equal(dflt, `${atSecond}\n`);
     expectCode(() => commands.digest?.({ repo: wtRepo, args: ["--head", "-x"] }), 2);
   }));
 
@@ -1107,10 +1182,10 @@ test("digest: a pure shift keeps it; the same change at another place or in anot
   }));
 
 test("land lands only the approved head and refuses any other HEAD", () =>
-  scenario(({ fx, repo }) => {
+  scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const approved = commitFile(wt, "a.txt", "a\n");
-    commitFile(wt, "sneaky.txt", "later\n");
+    const current = commitFile(wt, "sneaky.txt", "later\n");
     const wtRepo = resolveRepo(wt);
     const main = gitIn(fx.main, "rev-parse", "main");
     assert.throws(
@@ -1123,7 +1198,8 @@ test("land lands only the approved head and refuses any other HEAD", () =>
     assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
     assert.equal(readRegistry(repo).worktrees["feat-a"]?.landedAs, undefined);
     // With the right head, the landed tree is that commit's tree.
-    const { commit } = land(wtRepo, wt, "feat: a", "", gitIn(wt, "rev-parse", "HEAD"));
+    installFakeEmend(env, current, [approvedReview("feat-a", current)]);
+    const { commit } = land(wtRepo, wt, "feat: a", "", current);
     assert.equal(gitIn(fx.main, "rev-parse", `${commit}^{tree}`), gitIn(wt, "rev-parse", "HEAD^{tree}"));
   }));
 
@@ -1158,6 +1234,7 @@ test("a failed signature in land names the backups and changes nothing", () =>
   scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const head = commitFile(wt, "a.txt", "a\n");
+    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
     gitIn(wt, "config", "user.signingkey", join(env.root, "no-such-key"));
     const main = gitIn(fx.main, "rev-parse", "main");
     assert.throws(
@@ -1221,6 +1298,7 @@ test("land prints its backups, then landed <sha> as the last line", () =>
   scenario(async ({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const head = commitFile(wt, "a.txt", "a\n");
+    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
     const bodyFile = join(env.root, "body.md");
     writeFileSync(bodyFile, "Body.\n");
     const wtRepo = resolveRepo(wt);
@@ -1353,9 +1431,10 @@ for (const scope of ["--local", "--worktree"]) {
 }
 
 test("land accepts prose mentioning an issue without a closing instruction", () =>
-  scenario(({ fx, repo }) => {
+  scenario(({ env, fx, repo }) => {
     const wt = worktree(repo, "feat-a");
     const head = commitFile(wt, "a.txt", "a\n");
+    installFakeEmend(env, head, [approvedReview("feat-a", head)]);
     const { commit } = land(resolveRepo(wt), wt, "Fixes see #9", "Body", head);
     assert.equal(gitIn(fx.main, "rev-parse", "main"), commit);
     assert.equal(gitIn(fx.main, "log", "-1", "--format=%s", commit), "Fixes see #9");
