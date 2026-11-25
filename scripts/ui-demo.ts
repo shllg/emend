@@ -1,14 +1,14 @@
 // A worktree's long-running copy of the screenshot round. Only its start process replaces the
 // served build. The port, CLI, database and signed-in browser sessions survive a web rebuild.
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync,
-  writeFileSync,
+  cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync,
+  rmSync, writeFileSync,
 } from "node:fs";
 import { get } from "node:http";
 import { constants, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { type DemoRound, startSealedDemo } from "./screenshots/demo.ts";
 import {
@@ -20,8 +20,19 @@ import { worktreePort } from "./ui-browser-mcp.ts";
 
 const checkout = resolve(import.meta.dirname, "..");
 
-interface DemoState {
+interface DemoOwner {
   pid: number;
+  started: string;
+}
+
+interface StartingDemo extends DemoOwner {
+  phase: "starting";
+  port: number;
+  root?: string;
+}
+
+interface RunningDemo extends DemoOwner {
+  phase: "running";
   port: number;
   origin: string;
   root: string;
@@ -29,6 +40,8 @@ interface DemoState {
   build: number;
   result?: { request: string; error?: string };
 }
+
+type DemoState = StartingDemo | RunningDemo;
 
 const stateFile = (top: string) => join(top, ".wt", "ui-demo.json");
 const webDist = (top: string) => join(top, "apps", "web", "dist");
@@ -49,30 +62,74 @@ function readState(top: string): DemoState {
   return JSON.parse(readFileSync(stateFile(top), "utf8"));
 }
 
-function writeJson(file: string, value: object): void {
+function existingState(top: string): DemoState | undefined {
+  try {
+    return readState(top);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+function processInfo(args: string[]): string | undefined {
+  const result = spawnSync("ps", args, {
+    env: { PATH: "/usr/bin:/bin", LC_ALL: "C", TZ: "UTC" }, encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  if (result.status === 1 && !result.stderr.trim()) return;
+  if (result.status !== 0)
+    throw new Error(`Could not inspect the UI demo process: ${result.stderr}`);
+  return result.stdout.trim() || undefined;
+}
+
+function processStarted(pid: number): string | undefined {
+  return processInfo(["-o", "lstart=", "-p", String(pid)]);
+}
+
+function liveOwner({ pid, started }: DemoOwner): boolean {
+  return isAlive(pid) && typeof started === "string" && processStarted(pid) === started;
+}
+
+function ownedRecord(top: string, owner: DemoOwner): DemoState | undefined {
+  const current = existingState(top);
+  if (current && current.pid === owner.pid && current.started === owner.started) return current;
+}
+
+function removeRecord(top: string, owner: DemoOwner): void {
+  if (ownedRecord(top, owner)) rmSync(stateFile(top), { force: true });
+}
+
+function writeJson(file: string, value: object, publish = renameSync): void {
   const temp = `${file}.${randomUUID()}`;
   try {
     writeFileSync(temp, JSON.stringify(value), { flag: "wx", mode: 0o600 });
-    renameSync(temp, file);
+    publish(temp, file);
   } finally {
     rmSync(temp, { force: true });
   }
 }
 
-function runningDemo(top: string, port = worktreePort(top), state = readState(top)) {
-  if (state.port !== port || state.origin !== sealedOrigin(port) || !isAlive(state.pid))
-    throw new Error("Expected a live demo on this worktree's port");
-  const { root } = state;
+function demoFolder(root: string) {
   const tmpDir = realpathSync(tmpdir());
+  if (root !== join(tmpDir, basename(root)) || !basename(root).startsWith("recense-ui-demo-"))
+    throw new Error("Expected a private UI demo folder");
   const env = childEnvironment(root, process.platform);
   assertSealedPaths({
     root, tmpDir, recenseHome: env.RECENSE_HOME, realStateDirs: currentProtectedStateDirs(),
   }, canonicalPath);
-  const info = lstatSync(root);
-  if (dirname(root) !== tmpDir || !basename(root).startsWith("recense-ui-demo-") ||
-      !info.isDirectory() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)
+  const info = lstatSync(root, { throwIfNoEntry: false });
+  if (!info) return;
+  if (!info.isDirectory() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)
     throw new Error("Expected a private UI demo folder");
-  // A stale pid can be reused. Check that the controller still owns the live sealed server.
+  return env;
+}
+
+function runningDemo(top: string, port = worktreePort(top), state = readState(top)) {
+  if (state.phase !== "running" || state.port !== port || state.origin !== sealedOrigin(port) ||
+      !liveOwner(state))
+    throw new Error("Expected a live demo on this worktree's port");
+  const { root } = state;
+  const env = demoFolder(root);
+  if (!env) throw new Error("Expected a private UI demo folder");
   const server = JSON.parse(readFileSync(join(env.RECENSE_HOME, "server.json"), "utf8"));
   if (server.url !== state.origin || !Number.isSafeInteger(server.pid) || server.pid <= 0)
     throw new Error("The UI demo process no longer owns this server");
@@ -114,25 +171,93 @@ async function waitForIndex(origin: string, expected: Buffer): Promise<void> {
   throw new Error("Timed out waiting for the demo to serve the rebuilt index.html");
 }
 
+async function stopOrphan(root: string, home: string, controllerPid: number): Promise<void> {
+  let server;
+  try {
+    server = JSON.parse(readFileSync(join(home, "server.json"), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  const { pid } = server;
+  if (pid === controllerPid || !isAlive(pid)) return;
+  const started = processStarted(pid);
+  const matches = () => processInfo(["-ww", "-o", "args=", "-p", String(pid)])
+    ?.includes(join(root, "app", "recense.mjs"));
+  if (!started || !matches()) return;
+  const owner = { pid, started };
+  try {
+    process.kill(pid, "SIGTERM");
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline && liveOwner(owner)) await delay(100);
+    if (liveOwner(owner) && matches()) {
+      process.kill(pid, "SIGKILL");
+      const killDeadline = Date.now() + 10_000;
+      while (liveOwner(owner)) {
+        if (Date.now() >= killDeadline)
+          throw new Error(`Timed out waiting for UI demo server pid ${pid} to exit after SIGKILL`);
+        await delay(100);
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+async function cleanStale(top: string, state: DemoState): Promise<void> {
+  if (state.root !== undefined) {
+    const env = demoFolder(state.root);
+    if (env) {
+      await stopOrphan(state.root, env.RECENSE_HOME, state.pid);
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+  removeRecord(top, state);
+  console.log("Cleaned up a stale UI demo.");
+}
+
 export async function startDemo(top: string, round?: DemoRound, port = worktreePort(top)) {
   assertSafePort(port);
-  if (existsSync(stateFile(top)) && isAlive(readState(top).pid))
-    throw new Error("This worktree already has a live UI demo");
+  const previousState = existingState(top);
+  if (previousState) {
+    if (liveOwner(previousState)) throw new Error("This worktree already has a live UI demo");
+    await cleanStale(top, previousState);
+  }
   const cliDist = join(top, "apps", "recense", "dist");
   if (!existsSync(join(cliDist, "recense.mjs")) || !existsSync(join(webDist(top), "index.html")))
     throw new Error("Run pnpm build first.");
 
+  const started = processStarted(process.pid);
+  if (!started) throw new Error("Could not identify the UI demo controller");
+  const starting: StartingDemo = { phase: "starting", pid: process.pid, started, port };
+  function forgetState() {
+    process.off("exit", forgetState);
+    removeRecord(top, starting);
+  }
+  try {
+    writeJson(stateFile(top), starting, linkSync);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST")
+      throw new Error("This worktree already has a live UI demo");
+    throw error;
+  }
+  process.once("exit", forgetState);
+
   const demo = await startSealedDemo({
     keep: false, port, out: join(top, ".wt", "ui"),
     entry(root) {
+      writeJson(stateFile(top), { ...starting, root });
       const app = join(root, "app");
       cpSync(cliDist, app, { recursive: true, filter: (path) => path !== join(cliDist, "web") });
       copyWeb(webDist(top), join(app, "web"));
       return join(app, "recense.mjs");
     },
-  }, round);
+  }, round).catch((error) => {
+    forgetState();
+    throw error;
+  });
   const { root, origin, reviewId } = demo;
-  const state: DemoState = { pid: process.pid, port, root, origin, reviewId, build: 0 };
+  const state: RunningDemo = { ...starting, phase: "running", root, origin, reviewId, build: 0 };
 
   // The requester holds rebuild/ until it receives its result. Take ownership of the complete
   // build before the first await, so even a requester timeout cannot remove files being installed.
@@ -182,14 +307,10 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
       process.exitCode = 1;
     }).finally(() => { installing = undefined; });
   }
-  function forgetState() {
-    if (existsSync(stateFile(top)) && readState(top).root === root) rmSync(stateFile(top));
-  }
   async function stop() {
     clearInterval(poll);
     await demo.stop();
     forgetState();
-    process.off("exit", forgetState);
   }
   try {
     if (demo.browser) {
@@ -197,7 +318,6 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
       await demo.browser.close();
     }
     poll = setInterval(pollRebuild, 200).unref();
-    process.once("exit", forgetState);
     writeJson(stateFile(top), state);
     return { root, origin, reviewId, stop };
   } catch (error) {
@@ -207,24 +327,25 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
 }
 
 export async function stop(top: string, port?: number): Promise<void> {
-  const file = stateFile(top);
-  if (!lstatSync(file, { throwIfNoEntry: false })) {
+  const state = existingState(top);
+  if (!state) {
     console.log("No UI demo runs in this worktree.");
     return;
   }
-  const state = readState(top);
-  if (!isAlive(state.pid)) {
-    rmSync(file);
+  if (!liveOwner(state)) {
+    await cleanStale(top, state);
     return;
   }
-  runningDemo(top, port, state);
+  if (state.phase !== "starting") runningDemo(top, port, state);
   process.kill(state.pid, "SIGINT");
-  const deadline = Date.now() + 15_000;
-  do {
-    if (!isAlive(state.pid) && !existsSync(file)) return;
+  const deadline = Date.now() + (state.phase === "starting" ? 30_000 : 15_000);
+  while (liveOwner(state)) {
+    if (Date.now() >= deadline)
+      throw new Error("Timed out waiting for the UI demo to exit and remove its state file");
     await delay(100);
-  } while (Date.now() < deadline);
-  throw new Error("Timed out waiting for the UI demo to exit and remove its state file");
+  }
+  const remaining = ownedRecord(top, state);
+  if (remaining) await cleanStale(top, remaining);
 }
 
 export function buildWeb(
@@ -369,16 +490,17 @@ export async function rebuild(
     do {
       await delay(100);
       const ack = readState(top);
-      if (ack.root !== state.root || !isAlive(state.pid))
+      if (ack.phase !== "running" || ack.root !== state.root || !liveOwner(state))
         throw new Error("The UI demo stopped during rebuild");
       if (ack.result?.request === request) {
-        if (ack.result.error) throw new Error(ack.result.error);
-        if (ack.build !== state.build + 1 || ack.reviewId !== state.reviewId)
-          throw new Error("Unexpected demo rebuild result");
+        if (ack.result.error !== undefined) throw new Error(ack.result.error);
+        if (ack.reviewId !== state.reviewId) throw new Error("Unexpected demo rebuild result");
         return state.origin;
       }
     } while (Date.now() < deadline);
-    throw new Error("Timed out waiting for the UI demo to restart and verify the rebuilt index.html");
+    throw new Error(
+      "Timed out waiting for the UI demo to restart and verify the rebuilt index.html",
+    );
   } finally {
     for (const signal of signals) process.off(signal, interrupt);
     release();

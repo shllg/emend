@@ -42,9 +42,10 @@ mutation, an install or any other browser. Never commit.
   palette wherever they apply.
 - Read the accessibility snapshot of the changed area. Check the console for errors and the
   network log for failed requests. Check each applicable section of `docs/ui.md`.
+- The browser's file tools write only to `.wt/ui/` and its own temporary folder.
 - Save screenshots to `.wt/ui/`. If the browser tool refuses that path, report it under the needs
   you could not meet.
 
-Before returning, run `node scripts/ui-demo.ts stop`, including when a check fails. Return the
-changed files with the `docs/ui.md` section each follows, the screenshot paths and any needs you
-could not meet.
+Before returning, stop every background command you started, then run
+`node scripts/ui-demo.ts stop`, including when a check fails. Return the changed files with the
+`docs/ui.md` section each follows, the screenshot paths and any needs you could not meet.

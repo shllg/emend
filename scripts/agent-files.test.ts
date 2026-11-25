@@ -165,7 +165,7 @@ test("only the UI finisher has an inline MCP server and only its tools are avail
 test("the orchestrator snapshots and checks each finisher pass with the committed checker", () => {
   const skill = (name: string) =>
     readFileSync(path.join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
-  const work = skill("e-work");
+  const work = skill("e-work").replace(/\s+/g, " ");
   const steps = [
     "Run `mktemp -d` once",
     "git rev-parse --verify <build>^{commit}",
@@ -175,11 +175,23 @@ test("the orchestrator snapshots and checks each finisher pass with the committe
     "mktemp --suffix=.mts <temp>/check-XXXXXXXX",
     "git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <fresh>",
     "node <fresh> --since <full-id> --snapshot <temp>/ignored.json --snapshot-sha256 <digest>",
-    "Report every printed path as a blocker",
+    "Report every printed line as a blocker",
+    "For `head moved`, `index flag`, `ignored changed`, `ignored removed`, `git changed` " +
+      "or `main changed`, or any exit other than 0 or 1",
     "`<main>/bin/wt notify blocked`",
-    "Delete each printed untracked file and each `ignored new` file",
-    "run the check again with the same arguments. Continue only at exit 0",
-    "Remove the temp folder and `node_modules/.vitest-cache`, then run `pnpm verify`",
+    "Never put a printed path on a command line",
+    "xargs -0 -r rm -f -- < <temp>/delete.nul",
+    "test ! -s <temp>/restore.nul || git --no-replace-objects --literal-pathspecs " +
+      "-c core.fsmonitor=false restore --source=<full-id> --staged --worktree " +
+      "--pathspec-from-file=<temp>/restore.nul --pathspec-file-nul",
+    "Run the check again after cleanup. Continue only at exit 0",
+    "Run `node scripts/ui-demo.ts stop`",
+    "If `.wt/ui-demo.json` still exists, run `<main>/bin/wt notify blocked` and wait for the owner",
+    "Then run the check again",
+    "Remove `node_modules/.vitest-cache`, `.tsbuild`, `apps/*/.tsbuild` and `packages/*/.tsbuild`",
+    "then run `pnpm verify`",
+    "Stage the finish and run the check once more right before the commit",
+    "Commit the finish separately, then remove the temp folder",
   ];
   let index = -1;
   for (const step of steps) {
@@ -207,6 +219,9 @@ test("the manager tags fixes and the finisher uses the checked stop and screensh
   const finisher = body("recense-ui-finisher");
   assert.match(finisher, /Read `scripts\/check-ui-scope.ts` for the allowed and refused paths/);
   assert.match(finisher, /Save screenshots to `\.wt\/ui\/`.*refuses that path, report it/);
+  assert.ok(finisher.includes("browser's file tools write only to `.wt/ui/` " +
+    "and its own temporary folder"));
+  assert.match(finisher, /stop every background command you started, then run/);
   assert.match(finisher, /run `node scripts\/ui-demo.ts stop`, including when a check fails/);
   assert.doesNotMatch(finisher, /\bkill\b/);
 });

@@ -1,12 +1,15 @@
-// Stdio belongs to the MCP child. Wrapper diagnostics go to stderr.
+// Stdout belongs to the MCP child. Wrapper diagnostics go to stderr.
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { constants, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { pipeline, Transform } from "node:stream";
 import { promisify } from "node:util";
 import { findChromium } from "./screenshots/browser.ts";
-import { childEnvironment } from "./screenshots/safety.ts";
+import {
+  assertTempParent, canonicalPath, childEnvironment, currentProtectedStateDirs,
+} from "./screenshots/safety.ts";
 
 function checkPort(port: unknown): number {
   if (typeof port !== "number" || !Number.isInteger(port) || port < 3637 || port > 3656)
@@ -20,18 +23,78 @@ export function worktreePort(top: string): number {
   return checkPort(JSON.parse(readFileSync(join(top, ".wt", "worktree.json"), "utf8")).port);
 }
 
-export function browserArgs({ port, chromium }: { port: number; chromium: string }): string[] {
+export function browserWorkspace(top: string): string {
+  let folder = realpathSync(top);
+  for (const name of [".wt", "ui"]) {
+    folder = join(folder, name);
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    if (!lstatSync(folder).isDirectory() || realpathSync(folder) !== folder)
+      throw new Error("Expected a real directory for the UI browser workspace");
+  }
+  return folder;
+}
+
+export function browserScratch(): string {
+  const parent = realpathSync(tmpdir());
+  assertTempParent(parent, currentProtectedStateDirs(), canonicalPath);
+  return mkdtempSync(join(parent, "recense-ui-browser-"));
+}
+
+export function browserArgs(
+  { port, chromium, workspace }: { port: number; chromium: string; workspace: string },
+): string[] {
   checkPort(port);
   if (!isAbsolute(chromium)) throw new Error("Expected an absolute Chromium path");
+  if (!isAbsolute(workspace)) throw new Error("Expected an absolute workspace path");
   return [
     "--headless",
     "--isolated",
     `--executablePath=${chromium}`,
     `--allowedUrlPattern=http://127.0.0.1:${port}/*`,
     "--chromeArg=--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+    "--chromeArg=--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    `--workspace=${workspace}`,
     "--viewport=1600x1000",
     "--no-performance-crux",
   ];
+}
+
+function filterLine(line: Buffer): Buffer | string {
+  let parsed;
+  try {
+    parsed = JSON.parse(line.toString("utf8"));
+  } catch {
+    return line;
+  }
+  let hasInitialize = false;
+  for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
+    if (message?.method !== "initialize") continue;
+    delete message.params?.capabilities?.roots;
+    hasInitialize = true;
+  }
+  return hasInitialize ? `${JSON.stringify(parsed)}\n` : line;
+}
+
+// MCP asks for the client's worktree roots only if initialize advertises the capability.
+export function filterClientRoots(): Transform {
+  const parts: Buffer[] = [];
+  return new Transform({
+    transform(chunk: Buffer, _encoding, done) {
+      let start = 0;
+      for (let end = chunk.indexOf(0x0a); end !== -1; end = chunk.indexOf(0x0a, start)) {
+        const line = chunk.subarray(start, end + 1);
+        this.push(filterLine(parts.length ? Buffer.concat([...parts, line]) : line));
+        parts.length = 0;
+        start = end + 1;
+      }
+      if (start < chunk.length) parts.push(chunk.subarray(start));
+      done();
+    },
+    flush(done) {
+      if (parts.length) this.push(filterLine(Buffer.concat(parts)));
+      done();
+    },
+  });
 }
 
 export function browserEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -88,19 +151,27 @@ export async function main(top: string): Promise<number> {
   }
   for (const signal of signals) process.on(signal, interrupt);
   try {
-    scratch = mkdtempSync(join(realpathSync(tmpdir()), "recense-ui-browser-"));
+    scratch = browserScratch();
     const env = sealedBrowserEnv(scratch);
     const version = await promisify(execFile)(chromium, ["--version"], {
       env, signal: probe.signal, timeout: 10_000, killSignal: "SIGKILL",
     });
     chromiumMajor(version.stdout);
-    child = spawn(process.execPath, [bin, ...browserArgs({ port, chromium })], {
-      cwd: top, env, stdio: "inherit",
+    const workspace = browserWorkspace(top);
+    const server = spawn(process.execPath, [bin, ...browserArgs({ port, chromium, workspace })], {
+      cwd: top, env, stdio: ["pipe", "inherit", "inherit"],
+    });
+    child = server;
+    pipeline(process.stdin, filterClientRoots(), server.stdin, (error) => {
+      if (error && error.code !== "EPIPE" && error.code !== "ERR_STREAM_PREMATURE_CLOSE")
+        console.error(error.message);
     });
     const [code, signal] = await once(child, "exit") as [number | null, NodeJS.Signals | null];
     return code ?? (signal ? 128 + constants.signals[signal] : 1);
   } finally {
     try {
+      // The client may keep its stdin pipe open after the MCP child exits.
+      if (child) process.stdin.destroy();
       cleanup();
     } finally {
       for (const signal of signals) process.off(signal, interrupt);

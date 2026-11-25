@@ -1,5 +1,6 @@
 // The demo owns its signal handlers. Run the test round in a child so stop can wait for its exit.
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,7 +9,7 @@ import {
 } from "../screenshots/safety.ts";
 import { startDemo } from "../ui-demo.ts";
 
-const [top, port] = process.argv.slice(2);
+const [top, port, hold] = process.argv.slice(2);
 // Use the demo's SIGINT cleanup even if the parent disappears during startup.
 process.once("disconnect", () => process.kill(process.pid, "SIGINT"));
 if (!process.connected) process.exit(0);
@@ -20,6 +21,10 @@ const demo = await startDemo(top, async ({ sealed, sealedRoot, env, server }) =>
     root: sealedRoot, tmpDir, recenseHome: env.RECENSE_HOME,
     realStateDirs: currentProtectedStateDirs(),
   }, canonicalPath);
+  if (hold === "hold") {
+    process.send?.({ root: sealedRoot });
+    await once(process, "message");
+  }
   const repo = join(sealedRoot, "example");
   mkdirSync(repo);
   sealed.git(repo, env, "init", "-q");

@@ -70,8 +70,9 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    - Run `mktemp -d` once and resolve the build commit once with
      `git rev-parse --verify <build>^{commit}`. Write the printed path and full commit id literally
      in place of `<temp>` and `<full-id>` in each later command. Bash calls share no variables.
-   - Copy the checker from that commit and take the ignored file snapshot before dispatch.
-     Keep its printed sha256 for `<digest>`. Resolve any error or blocker before dispatch.
+   - Copy the checker from that commit and take the snapshot before dispatch. The snapshot covers
+     the ignored files, the git settings and the main checkout. Keep its printed sha256 for
+     `<digest>`. Resolve any error or blocker before dispatch.
 
      ```sh
      git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts
@@ -80,23 +81,35 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
 
    - Dispatch `recense-ui-finisher` (`model: "sonnet"`) with the task file, the base and the build
      commit. Give it a clean tree and a built app.
-   - When it returns, make a new file with `mktemp --suffix=.mts <temp>/check-XXXXXXXX`.
-     Use its printed path for `<fresh>`. Extract the checker again and run it from the worktree
-     root, passing the literal digest printed before dispatch.
+   - When it returns, run the check. For every check, make a new file with
+     `mktemp --suffix=.mts <temp>/check-XXXXXXXX`. Use its printed path for `<fresh>`. Extract
+     the checker again and run it from the worktree root with the literal digest from the snapshot.
 
      ```sh
      git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <fresh> &&
        node <fresh> --since <full-id> --snapshot <temp>/ignored.json --snapshot-sha256 <digest>
      ```
 
-   - Report every printed path as a blocker. For `index flag`, `ignored changed` or
-     `ignored removed`, run `<main>/bin/wt notify blocked`, name the path and wait for the owner.
-     Restore other tracked paths to the full commit id in both the index and the worktree.
-     Delete each printed untracked file and each `ignored new` file. After restoring and deleting,
-     run the check again with the same arguments. Continue only at exit 0.
-   - Remove the temp folder and `node_modules/.vitest-cache`, then run `pnpm verify`. Clearing
-     the skipped cache keeps Vitest from running entries the pass left there. Commit the finish
-     separately.
+   - Report every printed line as a blocker. For `head moved`, `index flag`, `ignored changed`,
+     `ignored removed`, `git changed` or `main changed`, or any exit other than 0 or 1, run
+     `<main>/bin/wt notify blocked`, name the line and wait for the owner. A merge on main by the
+     work loop also moves the main checkout's HEAD. The owner decides how to proceed.
+     For other findings, delete then restore from the lists. Never put a printed path on a command
+     line.
+
+     ```sh
+     xargs -0 -r rm -f -- < <temp>/delete.nul
+     test ! -s <temp>/restore.nul || git --no-replace-objects --literal-pathspecs -c core.fsmonitor=false restore --source=<full-id> --staged --worktree --pathspec-from-file=<temp>/restore.nul --pathspec-file-nul
+     ```
+
+     Run the check again after cleanup. Continue only at exit 0.
+   - Run `node scripts/ui-demo.ts stop`. If `.wt/ui-demo.json` still exists, run
+     `<main>/bin/wt notify blocked` and wait for the owner. Then run the check again.
+   - Remove `node_modules/.vitest-cache`, `.tsbuild`, `apps/*/.tsbuild` and `packages/*/.tsbuild`,
+     then run `pnpm verify`. Clearing the Vitest cache and TypeScript build folders keeps
+     verification from reading entries the pass left there.
+   - Stage the finish and run the check once more right before the commit. Commit the finish
+     separately, then remove the temp folder.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
    Before each review round, with the change committed and `pnpm verify` green at that commit,

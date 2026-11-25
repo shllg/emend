@@ -1,32 +1,117 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import {
-  existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
+import { buffer } from "node:stream/consumers";
 import { test } from "node:test";
-import { browserArgs, browserEnv, chromiumMajor, main, sealedBrowserEnv, worktreePort }
-  from "./ui-browser-mcp.ts";
+import {
+  browserArgs, browserEnv, browserScratch, browserWorkspace, chromiumMajor, filterClientRoots,
+  main, sealedBrowserEnv, worktreePort,
+} from "./ui-browser-mcp.ts";
 
 test("the browser is isolated, headless and sealed to the exact worktree port", () => {
+  const paths = { chromium: "/synthetic/chromium", workspace: "/synthetic/.wt/ui" };
   for (const port of [3637, 3656]) {
-    const args = browserArgs({ port, chromium: "/synthetic/chromium" });
+    const args = browserArgs({ port, ...paths });
     assert.deepEqual(args, [
       "--headless",
       "--isolated",
       "--executablePath=/synthetic/chromium",
       `--allowedUrlPattern=http://127.0.0.1:${port}/*`,
       "--chromeArg=--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+      "--chromeArg=--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+      "--workspace=/synthetic/.wt/ui",
       "--viewport=1600x1000",
       "--no-performance-crux",
     ]);
     assert(args.includes("--no-performance-crux"));
     assert(!args.some((arg) => /headless=false|--no-headless/.test(arg)));
   }
-  assert.throws(() => browserArgs({ port: 3637, chromium: "chromium" }));
+  assert.throws(() => browserArgs({ port: 3637, ...paths, chromium: "chromium" }));
+  assert.throws(() => browserArgs({ port: 3637, ...paths, workspace: ".wt/ui" }));
   for (const port of [3636, 3600, 3657, 3637.5])
-    assert.throws(() => browserArgs({ port, chromium: "/synthetic/chromium" }));
+    assert.throws(() => browserArgs({ port, ...paths }));
+});
+
+function filtered(...chunks: Buffer[]): Promise<Buffer> {
+  return buffer(Readable.from(chunks).pipe(filterClientRoots()));
+}
+
+test("initialize loses only the roots capability across three input chunks", async () => {
+  const request = {
+    jsonrpc: "2.0", id: 7, method: "initialize",
+    params: { clientInfo: { name: "café" }, capabilities: { roots: {}, sampling: {} } },
+  };
+  const line = Buffer.from(`${JSON.stringify(request)}\r\n`);
+  const split = line.indexOf("é") + 1;
+  const result = await filtered(
+    line.subarray(0, split), line.subarray(split, -1), line.subarray(-1),
+  );
+  const expected = { ...request, params: { ...request.params, capabilities: { sampling: {} } } };
+  assert.equal(result.toString(), `${JSON.stringify(expected)}\n`);
+});
+
+test("other messages, invalid bytes, CRLF and trailing bytes pass through verbatim", async () => {
+  const input = Buffer.concat([
+    Buffer.from(' { "method": "ping", "params": { "capabilities": { "roots": {} } } }\r\n'),
+    Buffer.from('[ { "id": 3, "result": {} } ]\n\n'),
+    Buffer.from([0xff, 0x0a]),
+    Buffer.from("unfinished"),
+  ]);
+  assert.deepEqual(await filtered(input), input);
+});
+
+test("a final batch without a newline filters every initialize request", async () => {
+  const init = { method: "initialize", params: { capabilities: { roots: {} } } };
+  const ping = { method: "ping", params: { capabilities: { roots: {} } } };
+  const clean = { method: "initialize", params: { capabilities: {} } };
+  const result = await filtered(Buffer.from(JSON.stringify([init, ping, init])));
+  assert.equal(result.toString(), `${JSON.stringify([clean, ping, clean])}\n`);
+});
+
+test("the browser workspace is private and accepts only real directories", (t) => {
+  const top = mkdtempSync(join(tmpdir(), "recense-browser-test-"));
+  t.after(() => rmSync(top, { recursive: true, force: true }));
+  const wt = join(realpathSync(top), ".wt");
+  const ui = join(wt, "ui");
+  assert.equal(browserWorkspace(top), ui);
+  assert.equal(statSync(ui).mode & 0o777, 0o700);
+  assert.equal(browserWorkspace(top), ui);
+  rmSync(ui, { recursive: true });
+  symlinkSync(top, ui, "dir");
+  assert.throws(() => browserWorkspace(top));
+  rmSync(ui);
+  writeFileSync(ui, "");
+  assert.throws(() => browserWorkspace(top));
+  rmSync(wt, { recursive: true });
+  symlinkSync(top, wt, "dir");
+  assert.throws(() => browserWorkspace(top));
+  assert(!existsSync(join(top, "ui")));
+});
+
+test("a temp parent inside protected state gets no scratch folder", (t) => {
+  const state = mkdtempSync(join(tmpdir(), "recense-browser-test-"));
+  t.after(() => rmSync(state, { recursive: true, force: true }));
+  const parent = join(state, "tmp");
+  mkdirSync(parent);
+  const previous = { TMPDIR: process.env.TMPDIR, RECENSE_HOME: process.env.RECENSE_HOME };
+  try {
+    process.env.RECENSE_HOME = state;
+    process.env.TMPDIR = parent;
+    assert.throws(() => browserScratch(), /temporary directory overlaps real recense state/);
+    assert.deepEqual(readdirSync(parent), []);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
 
 test("the MCP child cannot discover config, report statistics or check for updates", () => {
@@ -115,8 +200,13 @@ test("the version probe and MCP share a seal that is cleaned up on exit and fail
     'const { existsSync, writeFileSync } = require("node:fs");',
     'if (!existsSync(process.env.HOME + "/probe")) process.exit(2);',
     'if (process.env.CHROMIUM_PATH || !process.env.TMPDIR) process.exit(3);',
-    'writeFileSync("launched", "yes");',
-    'process.exit(17);',
+    'require("node:readline").createInterface({ input: process.stdin }).once("line", line => {',
+    "  const msg = JSON.parse(line);",
+    '  if (msg.method !== "initialize" || "roots" in msg.params.capabilities) process.exit(4);',
+    '  writeFileSync("launched", "yes");',
+    '  if (msg.id === "exit-after-initialize") process.exit(17);',
+    '  process.stdin.once("data", () => process.exit(17));',
+    "});",
   ].join("\n"));
   const version = (text: string, extra = "") => writeFileSync(chromium, [
     "#!/bin/sh", '[ "$1" = "--version" ] || exit 2', '[ -z "$CHROMIUM_PATH" ] || exit 3',
@@ -142,10 +232,28 @@ test("the version probe and MCP share a seal that is cleaned up on exit and fail
     assert(!existsSync(join(top, "launched")));
     clean();
     version("Google Chrome 149.1.2.3");
-    assert.equal(await main(top), 17);
+    // The child exits while the wrapper is still writing the large second line to its pipe.
+    const init = { method: "initialize", params: { capabilities: { roots: {} } } };
+    const wrapperArgs = [
+      "--input-type=module", "-e",
+      "process.exitCode = await (await import(process.argv[1])).main(process.argv[2])", module, top,
+    ];
+    const launched = spawnSync(process.execPath, wrapperArgs, {
+      input: `${JSON.stringify(init)}\n${" ".repeat(4 * 1024 * 1024)}\n`,
+      timeout: 20_000, encoding: "utf8",
+    });
+    assert.equal(launched.status, 17, launched.stderr);
     assert(existsSync(join(top, "launched")));
     clean();
-    // Moving the synthetic cwd after the probe makes the MCP spawn itself fail.
+    await t.test("the wrapper exits with the child while client stdin stays open", async () => {
+      const wrapper = spawn(process.execPath, wrapperArgs, {
+        stdio: ["pipe", "ignore", "inherit"], timeout: 20_000, killSignal: "SIGKILL",
+      });
+      const exited = once(wrapper, "exit");
+      wrapper.stdin.write(`${JSON.stringify({ ...init, id: "exit-after-initialize" })}\n`);
+      assert.deepEqual(await exited, [17, null]);
+    });
+    // The worktree disappears between the version probe and the MCP launch.
     version("Chromium 150.1.2.3", 'mv "$0.tree" "$0.moved" || exit 5');
     await assert.rejects(main(top), { code: "ENOENT" });
     clean();
