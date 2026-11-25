@@ -305,6 +305,8 @@ Below 768 px; check at 390×844.
   collapse and the pin drag grip.
 - Diffs are always Unified; long lines follow Scroll or Wrap; a path truncates from its start and
   keeps the file name.
+- In a diff, swipe from a line number to scroll or tap it to comment on that line. To comment on
+  a range, hold a line number for about half a second, then drag.
 - Touch targets at least 40×40 px (`--touch-min`); menu, palette and list rows 44 px on coarse
   pointers; tabs 48 px. Buttons in the composer and the Send sheet use `lg`.
 - Text entry is 16 px on touch screens (`styles/touch-fields.css`) so iOS does not zoom; a field
