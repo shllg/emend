@@ -50,6 +50,7 @@ import {
 import { diffShadowCSS } from "./shadow.ts";
 import type { FileLocation } from "./targets.ts";
 import { diffTheme } from "./theme.ts";
+import { holdToSelectLines } from "./touch-lines.ts";
 import { DiffWorkersHold } from "./worker-hold.ts";
 
 export type ParsedDiff = FileDiffMetadata;
@@ -112,6 +113,10 @@ export function DiffView({
   onSlots?: (slots: SlotState) => void;
 }) {
   const readOnly = useReadOnlyReview();
+  const code = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!readOnly && code.current) return holdToSelectLines(code.current);
+  }, [readOnly]);
   const [commentLines] = useState(createCommentLines);
   const hoveredLine = useRef<GetHoveredLineResult<"diff"> | undefined>(undefined);
   const expansionState = useRef<{
@@ -218,7 +223,7 @@ export function DiffView({
     [selected?.side, selected?.endSide, selected?.start, selected?.end],
   );
   return (
-    <div className="em-diff-code">
+    <div ref={code} className="em-diff-code">
       <CommentLinesContext value={commentLines}>
         <PierreFileDiff<string>
           className="em-diff-host"

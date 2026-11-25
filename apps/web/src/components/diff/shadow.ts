@@ -54,6 +54,17 @@ export const diffShadowCSS = `
   --diffs-computed-hovered-line-bg: var(--diff-select-bg);
   color: var(--fg-1);
 }
+/* Let gutter swipes scroll and reserve a long press for line selection. */
+[data-interactive-line-numbers] [data-column-number],
+[data-gutter-utility-slot] {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+}
+[data-column-number][data-touch-hold] {
+  background: var(--diff-select-bg);
+  color: var(--fg-1);
+}
 [data-column-number][data-comment-active] {
   box-shadow: inset 2px 0 0 var(--accent);
 }

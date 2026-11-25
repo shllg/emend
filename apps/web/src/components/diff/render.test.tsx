@@ -78,6 +78,26 @@ test.each([
   },
 );
 
+test.each(["split", "unified"] as const)("real %s gutter selects on tap and cancels on pan", async (style) => {
+  const parsed = parsePair({ oldFile: null, newFile: { name: "sample.txt", contents: "first\nsecond\n" } });
+  const select = vi.fn();
+  const view = render(
+    <DiffView fileDiff={parsed} diffStyle={style} selected={null} annotations={[]} onSelect={select} />,
+  );
+  const shadow = view.container.querySelector("diffs-container")?.shadowRoot;
+  const selector = 'pre[data-interactive-line-numbers] [data-column-number="2"]';
+  await waitFor(() => expect(shadow?.querySelector(selector)).toBeTruthy());
+  const cell = shadow?.querySelector(selector) as HTMLElement;
+  const pan = { pointerType: "touch", pointerId: 1 };
+  fireEvent.pointerDown(cell, pan);
+  fireEvent.pointerCancel(cell, pan);
+  expect(select).not.toHaveBeenCalled();
+  const tap = { pointerType: "touch", pointerId: 2 };
+  fireEvent.pointerDown(cell, tap);
+  fireEvent.pointerUp(cell, tap);
+  expect(select).toHaveBeenCalledExactlyOnceWith({ start: 2, end: 2, side: "additions" });
+});
+
 test.each([
   { style: "split", index: 0, line: 8, stillHidden: 80 },
   { style: "split", index: 1, line: 80, stillHidden: 8 },
