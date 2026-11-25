@@ -20,6 +20,7 @@ const idTables = [
   t.topics,
   t.files,
   t.agentNotes,
+  t.diffImages,
   t.writeups,
   t.changedBlocks,
   t.threads,
@@ -240,6 +241,7 @@ export async function importReview(principal: Principal, bundle: ImportBundle, d
             };
           },
         );
+        await insert(t.diffImages, bundle.diffImages ?? [], (row) => ({ ...row, ownerId }));
         await insert(t.agentNotes, bundle.agentNotes ?? [], (note) => ({
           ...note,
           ownerId,

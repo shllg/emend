@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { basename, dirname, extname, posix, resolve, sep } from "node:path";
 import {
+  type DiffImage,
+  diffImageBlobs,
+  diffImageType,
   docViewOf,
   isRenderedHtmlDoc,
   LIMITS,
@@ -22,6 +25,7 @@ import { CliError } from "../http.ts";
 import { collectAssets, docAssetSizeError, docImageWarning, type WalkedSecretPaths } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
 import { codeRoot } from "./context.ts";
+import { readImageSide } from "./image.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
   checkPublishedFolders,
@@ -303,6 +307,41 @@ async function resolveWithWorker(
         resolved.oldBlob = resolved.newBlob = null;
         for (const hash of blobs.keys()) if (!before.has(hash)) blobs.delete(hash);
         totalBytes = beforeBytes;
+      }
+      const present = (["old", "new"] as const).filter((side) =>
+        side === "old" ? change.status !== "added" : change.status !== "deleted",
+      );
+      if (present.every((side) => diffImageType(side === "old" ? (change.oldPath ?? change.path) : change.path))) {
+        const head = manifest.head;
+        const image: DiffImage = { old: null, new: null };
+        const beforeImage = new Set(blobs.keys());
+        const beforeImageBytes = totalBytes;
+        for (const side of present) {
+          const read = () => readImageSide(root, head, change, side, git, gitDirs);
+          const value = await read();
+          if (!value) break;
+          if ("flag" in value) image[side] = value;
+          else {
+            const hash = add(value.bytes, async () => {
+              const next = await read();
+              if (!next || !("bytes" in next)) throw new CliError("image changed before upload");
+              return next.bytes;
+            });
+            if (!hash) break;
+            image[side] = { blob: hash };
+          }
+        }
+        if (present.every((side) => image[side])) resolved.image = image;
+        else {
+          for (const hash of diffImageBlobs(image)) {
+            if (beforeImage.has(hash)) rechecks.get(hash)?.pop();
+            else {
+              blobs.delete(hash);
+              rechecks.delete(hash);
+            }
+          }
+          totalBytes = beforeImageBytes;
+        }
       }
       files.push(resolved);
       continue;

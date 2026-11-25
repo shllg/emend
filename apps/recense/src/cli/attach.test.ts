@@ -14,7 +14,18 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, onTestFinished, test, vi } from "vitest";
 import { openDb } from "../db/client.ts";
 import { listBin } from "../db/repo/lifecycle.ts";
-import { comments, deliveries, devices, docAssets, instances, owners, reviews, sends, threads } from "../db/schema.ts";
+import {
+  comments,
+  deliveries,
+  devices,
+  diffImages,
+  docAssets,
+  instances,
+  owners,
+  reviews,
+  sends,
+  threads,
+} from "../db/schema.ts";
 import { run } from "../main.ts";
 import { createApp } from "../server/app.ts";
 import { createToken, SESSION_MS } from "../server/auth/tokens.ts";
@@ -870,6 +881,59 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
     const inbox = InboxList.parse(await response.json());
     const instance = JSON.parse(await readFile(join(f.stateDir, "instance.json"), "utf8"));
     expect(inbox.items.find((r) => r.id === local.result.reviewId)?.origin).toEqual(instance);
+  });
+
+  test("attach exports diff image rows and uploads bytes referenced only by those rows", async () => {
+    const f = await fixture();
+    const local = await f.reviewer();
+    const png = Buffer.from("89504e470d0a1a0a0001", "hex");
+    const blob = await local.blobs.put(local.ownerId, png, "application/octet-stream");
+    await apiRequest(f.stateDir, await localTarget(f.stateDir, f.laptop.url), "/publish", {
+      method: "POST",
+      body: {
+        reviewKey: "c".repeat(64),
+        repo: null,
+        branch: null,
+        title: "Synthetic image",
+        base: null,
+        head: null,
+        topics: [],
+        writeup: { overview: "Image", tldr: "", decisions: null, topics: {} },
+        files: [
+          {
+            role: "diff",
+            path: "icon.png",
+            status: "modified",
+            oldPath: null,
+            oldBlob: null,
+            newBlob: null,
+            flag: "binary",
+            image: { old: { flag: "oversized" }, new: { blob } },
+          },
+        ],
+      },
+    });
+    const requests = vi.spyOn(globalThis, "fetch");
+    const out = await f.command(["attach", f.pairing.url]);
+    expect(out.code, out.text).toBe(0);
+    const sent = requests.mock.calls.find(([url]) => String(url) === `${f.hub.url}/api/v1/import`);
+    expect(JSON.parse(String(sent?.[1]?.body)).diffImages).toEqual(
+      expect.arrayContaining([
+        { fileId: expect.any(String), side: "new", blob, flag: null },
+        { fileId: expect.any(String), side: "old", blob: null, flag: "oversized" },
+      ]),
+    );
+    expect(
+      requests.mock.calls.some(
+        ([url, init]) => String(url) === `${f.hub.url}/api/v1/blobs/${blob}` && init?.method === "PUT",
+      ),
+    ).toBe(true);
+    const hub = await initializeServerState(f.hubDir);
+    f.cleanup.push(() => hub.db.close());
+    expect(
+      await hub.db.read((q) => q.select().from(diffImages).where(eq(diffImages.ownerId, hub.ownerId))),
+    ).toHaveLength(2);
+    expect(await hub.blobs.get(hub.ownerId, blob)).toEqual(new Uint8Array(png));
   });
 
   test("copy preserves HTML asset associations and ignores other origins", async () => {

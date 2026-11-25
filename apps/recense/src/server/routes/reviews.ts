@@ -1,4 +1,6 @@
 import {
+  type DiffImageView,
+  diffImageType,
   type HtmlDocChanges,
   InboxList,
   LIMITS,
@@ -40,6 +42,7 @@ import {
   changedBlocks,
   comments,
   deliveries,
+  diffImages,
   docAssets,
   files,
   instances,
@@ -422,22 +425,33 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
     .where(and(eq(files.ownerId, ownerId), eq(files.revisionId, revisionId), ne(files.role, "asset")))
     .orderBy(files.ord, files.id)
     .all();
-  // Probe notes by this revision's file IDs, avoiding a scan of the owner's note history.
+  const fileIds = q
+    .select({ id: files.id })
+    .from(files)
+    .where(and(eq(files.ownerId, ownerId), eq(files.revisionId, revisionId)));
+  const imageSides = await q
+    .select()
+    .from(diffImages)
+    .where(and(eq(diffImages.ownerId, ownerId), inArray(diffImages.fileId, fileIds)));
+  const sidesByFile = Map.groupBy(imageSides, (row) => row.fileId);
+  function fileImage(file: typeof files.$inferSelect): DiffImageView | undefined {
+    const rows = sidesByFile.get(file.id);
+    if (file.role !== "diff" || !rows) return undefined;
+    const image: DiffImageView = { old: null, new: null };
+    let previousHash: string | null = null;
+    for (const row of rows) {
+      const mediaType = diffImageType(row.side === "old" ? (file.oldPath ?? file.path) : file.path);
+      if (!mediaType) return undefined;
+      image[row.side] = { mediaType, flag: row.flag };
+      if (row.blob && previousHash === row.blob) image.unchanged = true;
+      previousHash = row.blob;
+    }
+    return image;
+  }
   const noteRows = await q
     .select({ note: agentNotes })
     .from(agentNotes)
-    .where(
-      and(
-        eq(agentNotes.ownerId, ownerId),
-        inArray(
-          agentNotes.fileId,
-          q
-            .select({ id: files.id })
-            .from(files)
-            .where(and(eq(files.ownerId, ownerId), eq(files.revisionId, revisionId))),
-        ),
-      ),
-    )
+    .where(and(eq(agentNotes.ownerId, ownerId), inArray(agentNotes.fileId, fileIds)))
     .orderBy(agentNotes.fileId, agentNotes.ord);
   const notesByFile = new Map<string, ReturnType<typeof noteView>[]>();
   for (const { note } of noteRows) {
@@ -638,7 +652,9 @@ async function revisionView(ownerId: string, q: Queries, deps: AppDeps, reviewId
     topics: topicRows.map(topicView),
     files: fileRows.map((file) => {
       const mark = file.role === "diff" ? marksByPath.get(file.path) : undefined;
+      const image = fileImage(file);
       return {
+        ...(image && { image }),
         id: file.id,
         path: file.path,
         oldPath: file.oldPath,

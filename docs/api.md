@@ -121,6 +121,8 @@ a machine token reaches only reviews from its own instance.
 | PUT | `/api/v1/reviews/:id/viewed` | Reviewer | Mark or unmark diff files as viewed; return 204. |
 | GET | `/api/v1/files/:fileId/old` | Reviewer | Read the old file side. |
 | GET | `/api/v1/files/:fileId/new` | Reviewer | Read the new file side. |
+| GET, HEAD | `/api/v1/files/:fileId/old/image` | Reviewer | Read the old image side. |
+| GET, HEAD | `/api/v1/files/:fileId/new/image` | Reviewer | Read the new image side. |
 | GET | `/api/v1/media/:sha256` | Reviewer | Read a writeup or Markdown doc image by content hash. |
 | GET | `/api/v1/events` | Reviewer | Subscribe to owner-wide review events using SSE. |
 | GET | `/api/v1/reviews/:id/events` | Reviewer | Subscribe to review events using SSE. |
@@ -181,6 +183,25 @@ An unknown or foreign file, a doc or asset, a flagged file, or an absent side
 returns `404 not_found`. `HEAD` applies the same authorization and headers, with
 no response body. File and blob lookups filter the authenticated owner's id;
 the number of queries is bounded independently of revision size.
+
+### Diff file images
+
+A reviewer session can read the old or new image of a diff file by file UUID.
+The old side uses the extension of `oldPath ?? path`, the new side that of `path`.
+PNG, JPG/JPEG, GIF, WebP, AVIF and SVG map to `image/png`, `image/jpeg`, `image/gif`,
+`image/webp`, `image/avif` and `image/svg+xml`, case-insensitively. A binned review
+returns `review_in_bin` unless moved. An unknown, malformed or foreign file id, another
+role, an unsupported extension, an absent or oversized side or missing bytes give `404 not_found`.
+
+`GET` streams the stored bytes with that `Content-Type`, `Content-Length`,
+`Content-Disposition: inline`, `Cache-Control: no-store`, `Cross-Origin-Resource-Policy: same-origin`
+and `X-Content-Type-Options: nosniff`. The image response replaces the app CSP with
+`sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`
+and retains the other app headers including `X-Frame-Options: DENY`. This disables SVG
+scripts and event handlers even on direct navigation. `HEAD` returns the same status
+and headers with an empty body. For sides within the size limit the CLI checks raster
+signatures and accepts SVG only as valid UTF-8 with an SVG start tag and no NUL byte.
+Symlinks, submodules and unrecognized sides cause the CLI to omit the image for the file.
 
 ### Writeup and Markdown doc media
 
@@ -1090,7 +1111,12 @@ on the revision; revisions predating these fields read as `main: null`, `writeup
 Without an explicit visible `tab` in the URL, the app opens the main page when set; otherwise
 it opens Writeup if it has text, the first doc in manifest order, Diff if any file has role
 `diff`, or Writeup when there is nothing. A main doc opens Docs scrolled to that document.
-`FileView = { id, path, oldPath, role, status, topic, order, mediaType, flag, hasOld, hasNew, counts?, viewed?, viewedOn?, notes?, view?: "source" }`.
+`FileView = { id, path, oldPath, role, status, topic, order, mediaType, flag, hasOld, hasNew, counts?, viewed?, viewedOn?, notes?, image?, view?: "source" }`.
+
+On a diff file, `image` contains `old` and `new`. Each present side has its own
+`mediaType` and a `flag` of null or `"oversized"`. An absent side is null.
+`image.unchanged: true` appears only when both sides share a stored blob.
+Reviews published before this change have no image data.
 
 `counts` is `{ additions, deletions }` lines, counted at publish with the same line diff the app uses.
 It is absent for flagged files, for docs, for a file whose diff exceeded the per-file time limit
@@ -1871,7 +1897,7 @@ separately. Each addition checks the remaining budget first; excess stops with `
 and no database rows.
 
 Bundle fields are required arrays (empty where appropriate), except the additive `agentNotes`
-array, which may be omitted by older exports. UUID row ids are kept. All dates
+and `diffImages` arrays, which may be omitted by older exports. UUID row ids are kept. All dates
 are ISO UTC strings; nullable fields are explicitly null. Arrays preserve durable insertion order
 for comments, threads and Sends; revisions are complete and ordered by sequence starting at 1.
 Unknown keys, including owner ids, moved-to URLs, content keys, media types, `placements` and
@@ -1884,6 +1910,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 | `topics` | `id, revisionId` plus `TopicMeta` (optional door and blastRadius) |
 | `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView, look?: "recense" \| "custom" \| null, colorScheme?: "light" \| null`; nullable sides, status, topic, flag, parent |
 | `docAssets` | `revisionId, docId, assetId` |
+| `diffImages` | `fileId, side, blob, flag` per image side of a diff row in `files`. Each old or new side occurs once per file and carries either a SHA-256 blob or the oversized flag, with the other field null. |
 | `agentNotes` | `id, fileId, ord` plus `AgentNote`; optional array, ordered per file, at most 8 per file and 64 per revision |
 | `writeups` | `id, revisionId, sourceBlob, renderedBlob` |
 | `threads` | `id, reviewId, target, state, createdRevisionId, createdAt, updatedAt` |
@@ -1975,7 +2002,13 @@ The keys are lowercase 64-character SHA-256 hex; `reviewId` is a UUID. Repo name
 There are at most `topicsPerReview` declared topics plus the optional generated Other changes
 topic (importance 100, last); at most `filesPerRevision` files. Base and head are null together.
 `PublishFile = { path, oldPath: FilePath | null, role, status?, topic?, title?, view?: DocView, oldBlob: sha256 | null,
-newBlob: sha256 | null, flag: FileFlag | null, parent?: FilePath, assets?: FilePath[], notes?: AgentNote[] }`. Paths and topic slugs are
+newBlob: sha256 | null, flag: FileFlag | null, parent?: FilePath, assets?: FilePath[], notes?: AgentNote[], image?: DiffImage }`.
+Only a diff file with a status may carry `image: { old, new }`. The old side is null exactly for
+an addition, the new side exactly for a deletion. Each present side requires a supported extension
+on its own path and contains either `{ blob: sha256 }` or `{ flag: "oversized" }`. Image blobs
+are limited to `assetBytes` (25 MiB) each and count once per distinct hash across all inputs
+toward `revisionBytes`. An older server drops the image field. Text flags, blobs and their
+1 MiB limit apply independently. Paths and topic slugs are
 unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup,
 newInRevision and needsYou topics must be declared. Verdict topics are not checked against them.
 `assets` is required for rendered HTML docs (including an empty array), optional for rendered Markdown
@@ -1993,7 +2026,7 @@ HTML doc lists it in `assets`; Markdown docs may list the same row without dupli
 A request holds at most `mediaPerRevision` (50) of them. Media have
 no `FileRole` of their own; they use `role: "asset"` and never appear in file lists, counts or
 viewed progress. Only assets have parents. Docs and assets have a new blob, no old side and no flag; flagged
-diffs have no blobs. Source filenames never leave the CLI.
+diffs have null text blobs. Source filenames never leave the CLI.
 
 `HEAD /api/v1/blobs/:sha256` returns 204 for an owner's blob whose content is stored at the recorded
 size, otherwise 404 `not_found` (a row without its file counts as missing, so the client uploads it again).
@@ -2865,14 +2898,14 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `headingTextChars` | 200 characters per cleaned heading label |
 | `headingIdChars` | 256 characters per declared Markdown heading ID, including its prefix |
 | `headingLookupBytesPerRevision` | 33554432 bytes (32 MiB) across distinct heading lookup maps: UTF-8 name and target ID bytes plus 32 bytes per entry |
-| `diffSideBytes` | 1048576 bytes shown per side |
+| `diffSideBytes` | 1048576 bytes per text diff side |
 | `markdownDocBytes` | 1048576 bytes |
 | `htmlDocBytes` | 8388608 bytes |
 | `pubStylesheetBytes` | 1048576 UTF-8 bytes for the built-in HTML pub stylesheet |
 | `downloadInlineBytes` | 134217728 bytes (128 MiB) of emitted built-in content per download, and the same read budget for stored assets, selected doc bodies and selected diff blobs; both shared by all files of a ZIP |
 | `downloadCommentBytes` | 32 MiB of thread cards per download, shared by all files of a ZIP, separate from the built-in content budget |
 | `downloadDocs` | 50 docs added to one download |
-| `assetBytes` | 26214400 bytes per asset, including Markdown doc images |
+| `assetBytes` | 26214400 bytes per asset or diff image side |
 | `htmlDocWithAssetsBytes` | 52428800 bytes per HTML or Markdown doc plus its listed assets |
 | `revisionBytes` | 268435456 bytes for writeup source JSON and unique referenced blobs; checked before reading content |
 | `blocksPerRevision` | 100000 rendered blocks across every path, including the writeup |

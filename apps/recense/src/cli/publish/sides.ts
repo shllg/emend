@@ -20,14 +20,15 @@ export async function readWorktree(
   root: string,
   path: string,
   gitDirs = [join(root, ".git")],
+  limit: number = LIMITS.diffSideBytes,
 ): Promise<{ bytes: Buffer; mode: string } | null> {
   const file = join(root, path);
   const info = await statWorktree(root, path, gitDirs);
   if (!info) return null;
-  if (info.size > LIMITS.diffSideBytes) throw new OversizedFile();
+  if (info.size > limit) throw new OversizedFile();
   if (info.isSymbolicLink()) return { bytes: await readlink(file, { encoding: "buffer" }), mode: "120000" };
   return {
-    bytes: await readRegular(file, LIMITS.diffSideBytes, [root], undefined, gitDirs),
+    bytes: await readRegular(file, limit, [root], undefined, gitDirs),
     mode: info.mode & 0o100 ? "100755" : "100644",
   };
 }
@@ -57,13 +58,23 @@ export async function readSide(
       throw error;
     }
   }
+  const value = await readGitBlob(root, run, oid, LIMITS.diffSideBytes);
+  return "flag" in value ? value : classify(value.bytes);
+}
+
+export async function readGitBlob(
+  root: string,
+  run: GitRunner,
+  oid: string | undefined,
+  limit: number,
+): Promise<{ bytes: Buffer } | { flag: "oversized" }> {
   if (!oid) throw new CliError("missing git object id");
   const size = Number((await run(root, ["cat-file", "-s", oid])).toString().trim());
   if (!Number.isSafeInteger(size) || size < 0) throw new CliError("invalid git object size");
-  if (size > LIMITS.diffSideBytes) return { flag: "oversized" };
+  if (size > limit) return { flag: "oversized" };
   const bytes = await run(root, ["cat-file", "blob", oid]);
   if (bytes.length !== size) throw new CliError("git object size changed");
-  return classify(bytes);
+  return { bytes };
 }
 export async function readSides(
   root: string,

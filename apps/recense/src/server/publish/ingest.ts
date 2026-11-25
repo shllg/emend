@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
   type DocView,
+  diffImageBlobs,
   docViewOf,
   isRenderedHtmlDoc,
   isRenderedMarkdownDoc,
@@ -17,6 +18,7 @@ import { DuplicateReviewKeyError } from "../../db/repo/reviews.ts";
 import {
   agentNotes,
   blobs as blobRows,
+  diffImages,
   docAssets,
   files,
   placements,
@@ -140,7 +142,9 @@ async function computePublish(
         : undefined;
       let history: (typeof revisions.$inferSelect)[] = [];
       const sizes = new Map<string, number>();
-      for (const sha of new Set(input.files.flatMap((f) => [f.oldBlob, f.newBlob]).filter((s): s is string => !!s))) {
+      for (const sha of new Set(
+        input.files.flatMap((f) => [f.oldBlob, f.newBlob, ...diffImageBlobs(f.image)]).filter((s): s is string => !!s),
+      )) {
         const blob = await q
           .select()
           .from(blobRows)
@@ -268,7 +272,12 @@ async function computePublish(
     )
       throw new ApiError("too_large");
     // Inspect metadata before reading any referenced blob, including cumulative HTML assets.
+    const imageHashes = new Set<string>();
     for (const file of input.files) {
+      for (const hash of diffImageBlobs(file.image)) {
+        if ((sizes.get(hash) ?? 0) > LIMITS.assetBytes) throw new ApiError("too_large");
+        imageHashes.add(hash);
+      }
       const type = fileMediaType(file);
       const limit =
         file.role === "diff"
@@ -297,6 +306,10 @@ async function computePublish(
         if (size > LIMITS.htmlDocWithAssetsBytes) throw new ApiError("too_large");
       }
     const checkedSources = new Set<string>();
+    for (const hash of imageHashes) {
+      checkPublishSignal(deps.signal);
+      if (!(await deps.blobs.hasContent(ownerId, hash, sizes.get(hash) ?? 0))) throw new ApiError("blob_missing");
+    }
     if (!prepared)
       for (const file of input.files) {
         if (file.role !== "doc" || docViewOf(file) !== "source" || !file.newBlob || checkedSources.has(file.newBlob))
@@ -620,6 +633,10 @@ async function computePublish(
               ref: note.ref,
               ord: noteOrd,
             });
+          for (const side of ["old", "new"] as const) {
+            const value = file.image?.[side];
+            if (value) await q.insert(diffImages).values({ ownerId, fileId, side, ...value });
+          }
           if (++inserted % 100 === 0) await yieldToLoop("publish-files");
         }
         let associations: (typeof docAssets.$inferInsert)[] = [];

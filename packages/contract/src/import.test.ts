@@ -82,6 +82,40 @@ test("bundle strips authority and capability fields while preserving row identit
   expect(result).toEqual(expected);
 });
 
+test("optional diff image rows count toward the import budget and reference unique diff sides", () => {
+  const input = bundle();
+  const file = {
+    id: randomUUID(),
+    revisionId: input.revisions[0]?.id,
+    path: "a.png",
+    oldPath: null,
+    role: "diff",
+    status: "modified",
+    topicSlug: null,
+    ord: 0,
+    oldBlob: null,
+    newBlob: null,
+    renderedBlob: null,
+    flag: "binary",
+    parentDocId: null,
+  };
+  const old = { fileId: file.id, side: "old", blob: "a".repeat(64), flag: null };
+  const next = { fileId: file.id, side: "new", blob: null, flag: "oversized" };
+  const legacy = ImportBundle.parse({ ...input, files: [file] });
+  expect(legacy.diffImages).toBeUndefined();
+  const parsed = ImportBundle.parse({ ...legacy, diffImages: [old, next] });
+  expect(parsed.diffImages).toEqual([old, next]);
+  expect(importRowCount(parsed)).toBe(importRowCount(legacy) + 2);
+  for (const rows of [
+    [old, old],
+    [{ ...old, blob: null }],
+    [{ ...next, blob: old.blob }],
+    [{ ...old, fileId: randomUUID() }],
+  ])
+    expect(ImportBundle.safeParse({ ...legacy, diffImages: rows }).success).toBe(false);
+  expect(ImportBundle.safeParse({ ...parsed, files: [{ ...file, role: "asset" }] }).success).toBe(false);
+});
+
 test("bundle intent review can name another review but never itself", () => {
   const input = bundle();
   const intentReviewId = randomUUID();

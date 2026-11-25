@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, chmod, mkdir, mkdtemp, rename, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -71,6 +72,110 @@ async function repo(format = "sha1") {
     throw error;
   }
 }
+
+async function resolveImages(f: Awaited<ReturnType<typeof repo>>, base: string) {
+  return resolvePublish(
+    {
+      version: 1,
+      title: "Images",
+      base,
+      head: "worktree",
+      files: [],
+      topics: [],
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+    },
+    { manifest: "synthetic" },
+    f.state,
+    f.configDir,
+    "instance",
+    f.root,
+    () => {},
+  );
+}
+
+const png = (value: number) => Buffer.from([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10, 0, value]);
+const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+test("resolves image sides independently of the text flags and rechecks worktree images at upload", async () => {
+  const f = await repo();
+  try {
+    const write = (path: string, bytes: Buffer | string) => writeFile(join(f.root, path), bytes);
+    const oldSvg = "<svg><title>before</title></svg>",
+      newSvg = "<svg><title>after</title></svg>";
+    const removed = Buffer.alloc(9 * 1024 * 1024);
+    png(3).copy(removed);
+    await write("modified.png", png(1));
+    await write("deleted.png", removed);
+    await write("icon.svg", oldSvg);
+    await f.run("add", ".");
+    await f.run("commit", "-m", "synthetic images");
+    const base = (await f.run("rev-parse", "HEAD")).stdout.trim();
+    await rm(join(f.root, "deleted.png"));
+    await write("modified.png", png(2));
+    await write("added.png", png(4));
+    await write("icon.svg", newSvg);
+    const large = Buffer.alloc(5 * 1024 * 1024);
+    png(5).copy(large);
+    await write("large.png", large);
+    await write("huge.png", png(6));
+    await truncate(join(f.root, "huge.png"), LIMITS.assetBytes + 1);
+    await write("font.woff2", png(7));
+    await write("invalid.png", Buffer.from([1, 0, 2]));
+    await symlink("added.png", join(f.root, "link.png"));
+    const { request, blobs } = await resolveImages(f, base);
+    const file = (path: string) => request.files.find((row) => row.path === path);
+    expect(file("modified.png")).toMatchObject({
+      flag: "binary",
+      oldBlob: null,
+      newBlob: null,
+      image: { old: { blob: digest(png(1)) }, new: { blob: digest(png(2)) } },
+    });
+    expect(file("added.png")?.image).toEqual({ old: null, new: { blob: digest(png(4)) } });
+    expect(file("deleted.png")?.image).toEqual({ old: { blob: digest(removed) }, new: null });
+    expect(file("icon.svg")).toMatchObject({
+      flag: null,
+      oldBlob: digest(oldSvg),
+      newBlob: digest(newSvg),
+      image: { old: { blob: digest(oldSvg) }, new: { blob: digest(newSvg) } },
+    });
+    expect(file("huge.png")).toMatchObject({ flag: "oversized", image: { old: null, new: { flag: "oversized" } } });
+    expect(file("large.png")).toMatchObject({ flag: "oversized", image: { old: null, new: { blob: digest(large) } } });
+    expect(digest((await blobs.get(digest(large))?.read()) ?? "")).toBe(digest(large));
+    for (const path of ["invalid.png", "link.png", "font.woff2"]) {
+      expect(file(path)).toBeDefined();
+      expect(file(path)).not.toHaveProperty("image");
+    }
+    await write("added.png", Buffer.from("not an image"));
+    await expect(blobs.get(digest(png(4)))?.read()).rejects.toThrow("image changed before upload");
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a second image side over the revision budget rolls back just that file's image bytes", async () => {
+  const f = await repo();
+  const limit = LIMITS.revisionBytes;
+  try {
+    await writeFile(join(f.root, "b.png"), png(1));
+    await f.run("add", ".");
+    await f.run("commit", "-m", "synthetic base");
+    const base = (await f.run("rev-parse", "HEAD")).stdout.trim();
+    await writeFile(join(f.root, "b.png"), png(2));
+    await writeFile(join(f.root, "note.txt"), "text");
+    const writeupSize = Buffer.byteLength(JSON.stringify({ overview: "", tldr: "", decisions: null, topics: {} }));
+    Object.assign(LIMITS, { revisionBytes: writeupSize + png(1).length + 4 });
+    const { request, blobs } = await resolveImages(f, base);
+    expect(request.files.find((file) => file.path === "b.png")).toMatchObject({
+      flag: "binary",
+      oldBlob: null,
+      newBlob: null,
+    });
+    expect(request.files.find((file) => file.path === "b.png")).not.toHaveProperty("image");
+    expect([...blobs.keys()]).toEqual([digest("text")]);
+  } finally {
+    Object.assign(LIMITS, { revisionBytes: limit });
+    await f.cleanup();
+  }
+});
 
 test("SHA-256 repositories collect a committed range using the matching empty tree", async () => {
   const f = await repo("sha256");

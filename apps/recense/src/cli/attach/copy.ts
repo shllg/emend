@@ -96,6 +96,7 @@ async function copy(
         const hashes = new Set(
           [
             ...result.bundle.files.flatMap((f) => [f.oldBlob, f.newBlob, f.renderedBlob]),
+            ...(result.bundle.diffImages ?? []).map((row) => row.blob),
             ...result.bundle.writeups.flatMap((w) => [w.sourceBlob, w.renderedBlob]),
           ].filter((hash): hash is string => hash !== null),
         );

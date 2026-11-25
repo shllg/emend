@@ -68,6 +68,7 @@ test("migrations apply to an empty file and a second run applies nothing", async
       "comments",
       "deliveries",
       "devices",
+      "diff_images",
       "doc_assets",
       "files",
       "instances",

@@ -29,7 +29,7 @@ test.each([false, true])("settings migration preserves existing data (previous=%
     const snapshot = () =>
       db.read((q) =>
         q.values(
-          sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'settings%' AND name <> 'reviews' AND name != 'reviews_owner_intent_idx' AND name != 'doc_assets_owner_asset_idx' AND name NOT LIKE 'review_group%' AND name NOT LIKE 'review_pins%' ORDER BY name`,
+          sql`SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE 'settings%' AND name NOT LIKE 'diff_images%' AND name <> 'reviews' AND name != 'reviews_owner_intent_idx' AND name != 'doc_assets_owner_asset_idx' AND name NOT LIKE 'review_group%' AND name NOT LIKE 'review_pins%' ORDER BY name`,
         ),
       );
     const before = await snapshot();

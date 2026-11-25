@@ -104,6 +104,8 @@ export const ENDPOINTS = [
   { method: "PUT", path: "/api/v1/reviews/:id/viewed", scope: "comment" },
   { method: "GET", path: "/api/v1/files/:fileId/old", scope: "read" },
   { method: "GET", path: "/api/v1/files/:fileId/new", scope: "read" },
+  { method: "GET", path: "/api/v1/files/:fileId/old/image", scope: "read" },
+  { method: "GET", path: "/api/v1/files/:fileId/new/image", scope: "read" },
   { method: "GET", path: "/api/v1/media/:sha256", scope: "read" },
   { method: "GET", path: "/api/v1/events", scope: "read" },
   { method: "GET", path: "/api/v1/reviews/:id/events", scope: "read" },

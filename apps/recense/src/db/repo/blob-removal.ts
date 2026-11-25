@@ -14,6 +14,7 @@ export function removeUnreferencedBlob(db: Db, ownerId: string, sha: string) {
         WHERE owner_id = ${ownerId} AND sha256 = ${sha}
           AND NOT EXISTS (SELECT 1 FROM files WHERE owner_id = ${ownerId}
             AND (old_blob = ${sha} OR new_blob = ${sha} OR rendered_blob = ${sha}))
+          AND NOT EXISTS (SELECT 1 FROM diff_images WHERE owner_id = ${ownerId} AND blob = ${sha})
           AND NOT EXISTS (SELECT 1 FROM writeups WHERE owner_id = ${ownerId}
             AND (source_blob = ${sha} OR rendered_blob = ${sha}))
           AND NOT EXISTS (SELECT 1 FROM viewed_files WHERE owner_id = ${ownerId}

@@ -5,6 +5,7 @@ import {
   agentNotes,
   comments,
   deliveries,
+  diffImages,
   docAssets,
   files,
   repos,
@@ -103,21 +104,19 @@ export async function snapshot(
     .where(and(eq(files.ownerId, ownerId), inArray(files.revisionId, revisionIds)))
     .orderBy(sql`${files}.rowid`);
   // Export every revision of this review, probing notes only for those revisions' file IDs.
+  const fileIds = q
+    .select({ id: files.id })
+    .from(files)
+    .where(and(eq(files.ownerId, ownerId), inArray(files.revisionId, revisionIds)));
+  const imageRows = await q
+    .select({ fileId: diffImages.fileId, side: diffImages.side, blob: diffImages.blob, flag: diffImages.flag })
+    .from(diffImages)
+    .where(and(eq(diffImages.ownerId, ownerId), inArray(diffImages.fileId, fileIds)))
+    .orderBy(diffImages.fileId, diffImages.side);
   const noteRows = await q
     .select({ note: agentNotes })
     .from(agentNotes)
-    .where(
-      and(
-        eq(agentNotes.ownerId, ownerId),
-        inArray(
-          agentNotes.fileId,
-          q
-            .select({ id: files.id })
-            .from(files)
-            .where(and(eq(files.ownerId, ownerId), inArray(files.revisionId, revisionIds))),
-        ),
-      ),
-    )
+    .where(and(eq(agentNotes.ownerId, ownerId), inArray(agentNotes.fileId, fileIds)))
     .orderBy(agentNotes.fileId, agentNotes.ord);
   const assetRows = await q
     .select()
@@ -171,6 +170,7 @@ export async function snapshot(
     })),
     agentNotes: noteRows.map(({ note }) => ({ ...noteView(note), fileId: note.fileId, ord: note.ord })),
     docAssets: assetRows,
+    ...(imageRows.length ? { diffImages: imageRows } : {}),
     writeups: writeupRows,
     threads: threadRows.map(dates),
     comments: commentRows.map(dates),

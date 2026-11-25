@@ -66,6 +66,7 @@ test("the lifecycle migration adds columns, an index and the tombstone table wit
     ).toEqual(
       [
         "blobs_sha256_idx",
+        "diff_images_owner_blob_idx",
         "files_owner_new_blob_idx",
         "files_owner_old_blob_idx",
         "files_owner_rendered_blob_idx",

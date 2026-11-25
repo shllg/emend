@@ -1,0 +1,219 @@
+import type { FileView } from "@recense/contract";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { diffLoads } from "../../lib/diff-loads.ts";
+import { FileDiff, type ParsedDiff } from "./FileDiff.tsx";
+import { parsePair } from "./parse.worker.ts";
+
+vi.mock("@pierre/diffs/react", () => ({
+  WorkerPoolContextProvider: ({ children }: { children: ReactNode }) => children,
+  FileDiff: ({ fileDiff }: { fileDiff: ParsedDiff }) => (
+    <pre data-testid="text-diff">{fileDiff.additionLines.join("")}</pre>
+  ),
+}));
+
+const png = { mediaType: "image/png", flag: null } as const;
+const svg = { mediaType: "image/svg+xml", flag: null } as const;
+const file: FileView = {
+  id: "11111111-1111-4111-8111-111111111111",
+  path: "icons/leaf.png",
+  oldPath: null,
+  role: "diff",
+  status: "modified",
+  topic: null,
+  order: 0,
+  mediaType: "image/png",
+  flag: "binary",
+  hasOld: false,
+  hasNew: false,
+  image: { old: png, new: png },
+};
+const base = `/api/v1/files/${file.id}`;
+const svgSource = '<svg onload=""><script>/* fixture */</script></svg>';
+let client: QueryClient;
+let fetchText: ReturnType<typeof vi.fn<(path: string) => Promise<Response>>>;
+beforeEach(() => {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  fetchText = vi.fn(async (path: string) => new Response(path.endsWith("/old") ? "<svg/>" : svgSource));
+  vi.stubGlobal("fetch", fetchText);
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+});
+afterEach(() => {
+  cleanup();
+  client.clear();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+function mount(values: Partial<FileView> = {}) {
+  const entry = { ...file, ...values };
+  const onActive = vi.fn();
+  const ui = (topicCollapsed: boolean, revealed: boolean) => (
+    <QueryClientProvider client={client}>
+      <FileDiff
+        file={entry}
+        topicCollapsed={topicCollapsed}
+        revealedFile={revealed ? entry.id : undefined}
+        reviewId="22222222-2222-4222-8222-222222222222"
+        revision={1}
+        threads={[]}
+        changedBlocks={[]}
+        active={null}
+        onActive={onActive}
+        parser={parsePair}
+        fileForTarget={() => entry}
+        diffStyle="unified"
+        counts={new Map()}
+        onParsed={vi.fn()}
+        collapsedFiles={new Set()}
+        toggleFile={vi.fn()}
+        onContentRendered={vi.fn()}
+      />
+    </QueryClientProvider>
+  );
+  const { container, rerender } = render(ui(false, false));
+  return { container, onActive, show: (collapsed: boolean, revealed: boolean) => rerender(ui(collapsed, revealed)) };
+}
+const button = (name: string) => screen.getByRole("button", { name });
+
+test("modified PNG opens side by side and switches between its stored sides", () => {
+  const { onActive } = mount();
+  const modes = within(screen.getByRole("group", { name: "Compare images" }));
+  expect(modes.getAllByRole("button").map((control) => control.textContent)).toEqual([
+    "Before",
+    "After",
+    "Side by side",
+  ]);
+  expect(modes.getByRole("button", { name: "Side by side", pressed: true })).toBeTruthy();
+  expect(screen.queryByRole("group", { name: "Show as" })).toBeNull();
+  for (const [name, side] of [
+    ["Before", "old"],
+    ["After", "new"],
+  ] as const) {
+    const picture = screen.getByRole("img", { name });
+    expect(picture.getAttribute("src")).toBe(`${base}/${side}/image`);
+    expect(picture.getAttribute("loading")).toBe("lazy");
+    expect(picture.getAttribute("decoding")).toBe("async");
+  }
+  for (const [name, hidden] of [
+    ["Before", "After"],
+    ["After", "Before"],
+  ] as const) {
+    fireEvent.click(button(name));
+    expect(modes.getByRole("button", { name, pressed: true })).toBeTruthy();
+    expect(screen.getByRole("img", { name })).toBeTruthy();
+    expect(screen.queryByRole("img", { name: hidden })).toBeNull();
+  }
+  fireEvent.click(button("Comment on file"));
+  expect(onActive).toHaveBeenCalledWith({ kind: "file", path: file.path });
+  expect(fetchText).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["added", { old: null, new: png }, "After", "After"],
+  ["deleted", { old: png, new: null }, "Before", "Before"],
+  ["renamed", { old: png, new: png, unchanged: true }, "After", "Unchanged image"],
+] as const)("%s image shows one labelled picture", (status, image, name, label) => {
+  mount({ status, image });
+  expect(screen.queryByRole("group", { name: "Compare images" })).toBeNull();
+  expect(screen.getByText(label)).toBeTruthy();
+  expect(screen.getAllByRole("img")).toEqual([screen.getByRole("img", { name })]);
+  expect(screen.getByRole("img", { name }).getAttribute("src")).toBe(
+    `${base}/${name === "Before" ? "old" : "new"}/image`,
+  );
+});
+
+test("oversized and failed sides show their reason in place of the picture", () => {
+  mount({ image: { old: { ...png, flag: "oversized" }, new: png } });
+  expect(screen.getByText("Not shown: larger than 25 MiB")).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "Before" })).toBeNull();
+  fireEvent.click(button("Open After image"));
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.queryByRole("button", { name: "Previous image" })).toBeNull();
+  fireEvent.click(dialog.getByRole("button", { name: "Close" }));
+  fireEvent.error(screen.getByRole("img", { name: "After" }));
+  expect(screen.getByText("Not shown: the image could not be loaded")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Open After image" })).toBeNull();
+});
+
+test("SVG pictures use only img, and only Text loads the text body", async () => {
+  const suffix = "HTML";
+  const writes = vi.spyOn(Element.prototype, `inner${suffix}`, "set");
+  const hold = vi.spyOn(diffLoads(client), "hold");
+  const { container, show } = mount({
+    path: "icons/leaf.svg",
+    flag: null,
+    hasOld: true,
+    hasNew: true,
+    image: { old: svg, new: svg },
+    notes: [{ id: crypto.randomUUID(), side: "new", start: 1, end: 1, summary: "Inspect the outline." }],
+  });
+  const section = screen.getByRole("region", { name: "File icons/leaf.svg" });
+  const body = section.querySelector(".em-diff-body");
+  expect(section.style.minHeight).toBe("");
+  expect(screen.getByRole("button", { name: "Pictures", pressed: true })).toBeTruthy();
+  expect(body?.querySelectorAll("img")).toHaveLength(2);
+  expect(body?.querySelector("svg, script, object, embed, iframe, [onload], [onerror]")).toBeNull();
+  expect(writes).not.toHaveBeenCalled();
+  fireEvent.click(button("Before"));
+  show(true, false);
+  expect(client.getQueryCache().getAll()).toHaveLength(0);
+  show(false, true);
+  expect(screen.getByRole("button", { name: "Before", pressed: true })).toBeTruthy();
+  expect(section.hasAttribute("data-diff-loading")).toBe(false);
+  expect(container.querySelector("[data-slot-pending]")).toBeNull();
+  expect(hold).not.toHaveBeenCalled();
+  expect(fetchText).not.toHaveBeenCalled();
+
+  fireEvent.click(button("Text"));
+  expect(screen.getByRole("button", { name: "Text", pressed: true })).toBeTruthy();
+  expect(screen.queryByRole("img", { name: "Before" })).toBeNull();
+  expect((await screen.findByTestId("text-diff")).textContent).toContain(svgSource);
+  expect(fetchText.mock.calls.map(([path]) => path).sort()).toEqual([`${base}/new`, `${base}/old`]);
+  fireEvent.click(button("Pictures"));
+  expect(screen.queryByTestId("text-diff")).toBeNull();
+  expect(screen.getByRole("img", { name: "Before" })).toBeTruthy();
+  expect(section.hasAttribute("data-diff-loading")).toBe(false);
+  expect(container.querySelector("[data-slot-pending]")).toBeNull();
+});
+
+test("an SVG on either side offers Text even when the text diff is flagged", () => {
+  mount({ oldPath: "icons/leaf.svg", image: { old: svg, new: png } });
+  fireEvent.click(button("Text"));
+  expect(screen.getByText("Not shown: binary file")).toBeTruthy();
+  expect(screen.getByRole("group", { name: "Compare images" })).toBeTruthy();
+  fireEvent.click(button("Pictures"));
+  expect(screen.getAllByRole("img")).toHaveLength(2);
+  expect(fetchText).not.toHaveBeenCalled();
+});
+
+test("lightbox opens at the clicked side and includes both stored sides in order", () => {
+  const oldPath = "icons/seed.png";
+  mount({ oldPath, status: "renamed" });
+  fireEvent.click(button("After"));
+  fireEvent.click(button("Open After image"));
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.getByRole("heading").textContent).toBe(`After · ${file.path}`);
+  expect(dialog.getByText("2 of 2")).toBeTruthy();
+  expect(dialog.getByAltText(`After · ${file.path}`).getAttribute("src")).toBe(`${base}/new/image`);
+  expect(dialog.queryByRole("button", { name: /Comment/ })).toBeNull();
+  fireEvent.click(dialog.getByRole("button", { name: "Previous image" }));
+  expect(dialog.getByRole("heading").textContent).toBe(`Before · ${oldPath}`);
+  expect(dialog.getByAltText(`Before · ${oldPath}`).getAttribute("src")).toBe(`${base}/old/image`);
+  expect(dialog.getByRole("button", { name: "Next image" })).toBeTruthy();
+});
+
+test("a binary file without image metadata keeps its summary", () => {
+  mount({ image: undefined });
+  expect(screen.getByText("Not shown: binary file")).toBeTruthy();
+  expect(screen.queryByRole("img")).toBeNull();
+  expect(screen.queryByRole("group", { name: "Compare images" })).toBeNull();
+});

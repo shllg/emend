@@ -63,6 +63,7 @@ function buildIndex(bundle: ImportBundle) {
     sendsByDelivery: group(bundle.sends, (s) => s.deliveryId),
     assetsByDoc: group(bundle.docAssets, (a) => a.docId),
     notesByFile: group(bundle.agentNotes ?? [], (note) => note.fileId),
+    imagesByFile: group(bundle.diffImages ?? [], (image) => image.fileId),
   };
 }
 export type ImportIndex = ReturnType<typeof buildIndex>;

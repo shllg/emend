@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentNoteView, validateAgentNotes } from "./agent-note.ts";
+import type { DiffImage } from "./diff-image.ts";
 import { DocTitle, DocView, HtmlLookValue, isRenderedHtmlDoc, isRenderedMarkdownDoc, validateDocView } from "./doc.ts";
 import { indexImportBundle } from "./import-index.ts";
 import { LIMITS } from "./limits.ts";
@@ -71,6 +72,19 @@ const ImportRows = z.object({
       .superRefine(validateDocView),
   ),
   docAssets: z.array(z.object({ revisionId: id, docId: id, assetId: id })),
+  diffImages: z
+    .array(
+      z
+        .object({
+          fileId: id,
+          side: z.enum(["old", "new"]),
+          blob: Sha256.nullable(),
+          flag: z.literal("oversized").nullable(),
+        })
+        .refine((row) => (row.blob === null) !== (row.flag === null), "image side requires exactly one blob or flag"),
+    )
+    .max(2 * LIMITS.filesPerRevision * LIMITS.importRevisions)
+    .optional(),
   agentNotes: z
     .array(
       AgentNoteView.safeExtend({
@@ -141,6 +155,10 @@ export const ImportBundle = BundleRows.superRefine((bundle, ctx) => {
   if (new Set(all.map((r) => r.id)).size !== all.length) issue("duplicate row id");
   const index = indexImportBundle(bundle);
   const { revisions, threads, files, sends, deliveries } = index;
+  for (const [fileId, images] of index.imagesByFile) {
+    if (files.get(fileId)?.role !== "diff") issue("image must reference a diff file");
+    if (new Set(images.map((row) => row.side)).size !== images.length) issue("duplicate image side");
+  }
   for (const note of bundle.agentNotes ?? [])
     if (files.get(note.fileId)?.role !== "diff") issue("agent note must reference a diff file");
   for (const [fileId, notes] of index.notesByFile) {
@@ -252,6 +270,13 @@ export function importPublishInput(
       title: f.title ?? undefined,
       topic: f.topicSlug ?? undefined,
       notes: index.notesByFile.get(f.id)?.toSorted((a, b) => a.ord - b.ord),
+      image: index.imagesByFile.get(f.id)?.reduce<DiffImage>(
+        (image, row) => {
+          image[row.side] = row.blob !== null ? { blob: row.blob } : { flag: "oversized" };
+          return image;
+        },
+        { old: null, new: null },
+      ),
       parent: f.parentDocId === null ? undefined : index.files.get(f.parentDocId)?.path,
       assets:
         isRenderedHtmlDoc(f) || (isRenderedMarkdownDoc(f) && index.assetsByDoc.has(f.id))
