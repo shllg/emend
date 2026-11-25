@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { BlockReader, type ReaderGroup } from "./components/reading/BlockReader.tsx";
 import { ToastProvider } from "./components/ui/Toast.tsx";
 import { draftKey } from "./lib/drafts.ts";
+import { revealReadingTarget } from "./lib/reading-reveal.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const block: RenderedBlock = {
@@ -121,7 +122,7 @@ test.each([
   expect(screen.queryByRole("button", promptName)).toBeNull();
 });
 
-test.each(["topic", "details"])("a form inside a closed %s fold keeps its draft and allows a new selection", (fold) => {
+function selectOutsideClosedFold(fold: string) {
   const group: ReaderGroup =
     fold === "topic"
       ? {
@@ -142,7 +143,9 @@ test.each(["topic", "details"])("a form inside a closed %s fold keeps its draft 
   };
   if (fold === "details") toggleFold();
   const { prompt } = reveal();
+  mouseCollapse(prompt);
   fireEvent.click(prompt);
+  settle(600);
   const editor = () => screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Comment" });
   fireEvent.change(editor(), { target: { value: "Keep these letters" } });
   const selectOther = (end = 4) => {
@@ -155,6 +158,11 @@ test.each(["topic", "details"])("a form inside a closed %s fold keeps its draft 
   toggleFold();
   selectOther();
   expect(screen.getByRole("button", promptName)).toBeTruthy();
+  return { toggle, toggleFold, paragraph: required(paragraphs[0]), editor, selectOther };
+}
+
+test.each(["topic", "details"])("a form inside a closed %s fold keeps its draft and allows a new selection", (fold) => {
+  const { toggleFold, editor, selectOther } = selectOutsideClosedFold(fold);
   toggleFold();
   expect(screen.queryByRole("button", promptName)).toBeNull();
   expect(editor().value).toBe("Keep these letters");
@@ -170,6 +178,21 @@ test.each(["topic", "details"])("a form inside a closed %s fold keeps its draft 
   expect(screen.queryByRole("button", promptName)).toBeNull();
   selectOther(5);
   expect(screen.getByRole("button", promptName)).toBeTruthy();
+});
+
+test.each([
+  { fold: "topic", reopen: "click" },
+  { fold: "details", reopen: "click" },
+  { fold: "topic", reopen: "navigation" },
+])("reopening a $fold fold by $reopen retires the prompt and preserves the form", async ({ fold, reopen }) => {
+  const { toggle, paragraph, editor } = selectOutsideClosedFold(fold);
+  await act(async () => {
+    if (reopen === "navigation") revealReadingTarget(paragraph);
+    else toggle.click();
+  });
+  expect(screen.queryByRole("button", promptName)).toBeNull();
+  expect(editor().value).toBe("Keep these letters");
+  expect(editor().form?.querySelector("mark")?.textContent).toBe("ee");
 });
 test("a touch tap opens the composer once with the latched text, though the selection clears in between", async () => {
   const { reveal, text, changed, settle } = touchReader();

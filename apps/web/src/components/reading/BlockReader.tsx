@@ -20,6 +20,7 @@ import { useReaderThreads } from "./use-reader-threads.ts";
 import { WriteupDetails } from "./WriteupDetails.tsx";
 
 const emptyFiles: RevisionView["files"] = [];
+const hiddenByFold = "[hidden], details:not([open]) > :not(summary)";
 
 export type ReaderProps = {
   reviewId: string;
@@ -118,6 +119,7 @@ export function BlockReader({
   const guardUntil = useRef(0);
   const mouseHeld = useRef(false);
   const [selectionTarget, setSelectionTarget] = useState<Target | null>(null);
+  const hasSelectionTarget = selectionTarget !== null;
   const [formTarget, setFormTarget] = useState<Target | null>(null);
   const composing = formTarget !== null;
   const [error, setError] = useState("");
@@ -225,9 +227,20 @@ export function BlockReader({
     composing: composing || !!resumedBlockId,
   });
   useEffect(() => {
+    if (readOnly || !composing || !hasSelectionTarget || !root.current) return;
+    const observer = new MutationObserver(() => {
+      if (!editorWrapper.current?.closest(hiddenByFold)) {
+        setSelectionTarget(null);
+        setError("");
+      }
+    });
+    observer.observe(root.current, { subtree: true, attributes: true, attributeFilter: ["hidden", "open"] });
+    return () => observer.disconnect();
+  }, [readOnly, composing, hasSelectionTarget]);
+  useEffect(() => {
     const capture = (event?: Event) => {
       if (readOnly || !root.current) return;
-      if (composing && !editorWrapper.current?.closest("[hidden], details:not([open]) > :not(summary)")) {
+      if (composing && !editorWrapper.current?.closest(hiddenByFold)) {
         setSelectionTarget(null);
         setError("");
         return;
