@@ -28,6 +28,7 @@ export function createSealedLifecycle(label: string) {
   const extraRoots: string[] = [];
   let cleaning: Promise<void> | undefined;
   let aborted = false;
+  const removeListeners: (() => void)[] = [];
 
   function assertRunning(): void {
     if (aborted) throw new Error("The run is ending");
@@ -35,6 +36,7 @@ export function createSealedLifecycle(label: string) {
 
   function track(child: ChildProcess, group = false): void {
     children.set(child, group);
+    child.once("close", () => children.delete(child));
     // The kernel keeps the group number reserved while members remain, so one sweep from the leader's
     // own exit reaches helpers left behind; after it the group is never signalled again. If no member
     // is left, the number is free after the reap, but the sweep runs in the same tick and process ids
@@ -104,6 +106,7 @@ export function createSealedLifecycle(label: string) {
     for (const child of children.keys()) signalChild(child, "SIGKILL");
     await childrenExited(5000);
     removeRoot();
+    for (const remove of removeListeners) remove();
     if (keep) for (const folder of [root, ...extraRoots]) if (folder) console.log(`Kept the sealed folder: ${folder}`);
   }
 
@@ -129,20 +132,26 @@ export function createSealedLifecycle(label: string) {
     ["SIGTERM", 143],
     ["SIGHUP", 129],
   ] as const) {
-    process.on(signal, () => terminate(code));
+    const handler = () => terminate(code);
+    process.on(signal, handler);
+    removeListeners.push(() => process.off(signal, handler));
   }
   for (const event of ["uncaughtException", "unhandledRejection"] as const) {
-    process.on(event, (error: unknown) => {
+    const handler = (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`${label}: ${event}: ${message}`);
       terminate(1);
-    });
+    };
+    process.on(event, handler);
+    removeListeners.push(() => process.off(event, handler));
   }
   // A synchronous last resort if the process ends without the async cleanup having finished.
-  process.on("exit", () => {
+  const onExit = () => {
     for (const child of children.keys()) signalChild(child, "SIGKILL");
     removeRoot();
-  });
+  };
+  process.on("exit", onExit);
+  removeListeners.push(() => process.off("exit", onExit));
 
   function step(text: string): void {
     console.log(`- ${text}`);
@@ -239,75 +248,130 @@ export function createSealedLifecycle(label: string) {
     env: Record<string, string>,
     instanceId: string,
     probeOnly = false,
+    fixedPort?: number,
   ) {
-    const port = await freePort();
-    await assertPortAvailable(port);
+    const port = fixedPort ?? await freePort();
     const origin = sealedOrigin(port);
     writeFileSync(join(env.RECENSE_HOME as string, "instance.json"), JSON.stringify({ id: instanceId, name: "laptop" }), {
       mode: 0o600,
     });
 
-    // ---- The server -------------------------------------------------------------------------
-    step("starting a sealed server");
-    assertRunning();
-    const server = spawn(process.execPath, [entry, "serve", "--port", String(port)], {
-      cwd: sealedRoot,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    track(server);
-    let serverLog = "";
-    server.stdout.setEncoding("utf8").on("data", (chunk: string) => (serverLog += chunk));
-    server.stderr.setEncoding("utf8").on("data", (chunk: string) => (serverLog += chunk));
-    const serverAlive = () => {
-      if (server.exitCode !== null || server.signalCode !== null)
-        throw new Error(`The sealed server stopped: ${serverLog.trim().slice(-300)}`);
-    };
-    if (!probeOnly)
-      for (let i = 0; ; i++) {
-        serverAlive();
-        if (serverLog.includes(`recense is serving ${origin}`)) break;
-        if (i > 300) throw new Error("The sealed server did not start");
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-    // node:http to the literal loopback address: no redirects, no proxy environment, no resolver.
-    const probeStatus = () =>
-      new Promise<number>((resolve, reject) => {
-        const probe = request(
-          { host: "127.0.0.1", port, path: "/api/v1/capabilities", method: "GET", agent: false, timeout: 10_000 },
-          (response) => {
-            response.resume();
-            resolve(response.statusCode ?? 0);
-          },
-        );
-        probe.once("timeout", () => probe.destroy(new Error("The sealed server did not answer")));
-        probe.once("error", reject);
-        probe.end();
+    async function launch() {
+      await assertPortAvailable(port);
+      // ---- The server -------------------------------------------------------------------------
+      step("starting a sealed server");
+      assertRunning();
+      const server = spawn(process.execPath, [entry, "serve", "--port", String(port)], {
+        cwd: sealedRoot,
+        env,
+        stdio: ["ignore", "pipe", "pipe"],
       });
-    let status = 0;
-    if (probeOnly) {
-      for (let attempt = 0; attempt <= 300; attempt++) {
-        serverAlive();
-        status = await probeStatus().catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ECONNREFUSED") return 0;
-          throw error;
-        });
-        if (status === 200) break;
-        await new Promise((resolve) => setTimeout(resolve, 50));
+      track(server);
+      const exited = new Promise<void>((done) => server.once("exit", () => done()));
+      async function stopServer() {
+        signalChild(server, "SIGTERM");
+        const force = setTimeout(() => signalChild(server, "SIGKILL"), 4000);
+        let deadline: NodeJS.Timeout | undefined;
+        try {
+          if (server.pid) {
+            await Promise.race([
+              exited,
+              new Promise<never>((_, reject) => {
+                deadline = setTimeout(() => reject(new Error("The sealed server did not exit after SIGKILL")), 9000);
+              }),
+            ]);
+          }
+        } finally {
+          clearTimeout(force);
+          clearTimeout(deadline);
+          // A descendant can keep the write ends open after the server exits.
+          server.stdout.destroy();
+          server.stderr.destroy();
+        }
       }
-    } else status = await probeStatus();
-    if (status !== 200) throw new Error("The sealed server does not answer");
-    const record = JSON.parse(readFileSync(join(env.RECENSE_HOME as string, "server.json"), "utf8")) as { url?: string };
-    if (new URL(record.url ?? "http://invalid").origin !== origin)
-      throw new Error("The sealed server record names another URL");
+      let spawnError: Error | undefined;
+      server.once("error", (error) => { spawnError = error; });
+      let serverLog = "";
+      server.stdout.setEncoding("utf8").on("data", (chunk: string) => (serverLog += chunk));
+      server.stderr.setEncoding("utf8").on("data", (chunk: string) => (serverLog += chunk));
+      const serverAlive = () => {
+        if (spawnError) throw spawnError;
+        if (server.exitCode !== null || server.signalCode !== null)
+          throw new Error(`The sealed server stopped: ${serverLog.trim().slice(-300)}`);
+      };
+      try {
+        if (!probeOnly)
+          for (let i = 0; ; i++) {
+            serverAlive();
+            if (serverLog.includes(`recense is serving ${origin}`)) break;
+            if (i > 300) throw new Error("The sealed server did not start");
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+        // node:http to the literal loopback address: no redirects, no proxy environment, no resolver.
+        const probeStatus = () =>
+          new Promise<number>((resolve, reject) => {
+            const probe = request(
+              { host: "127.0.0.1", port, path: "/api/v1/capabilities", method: "GET", agent: false, timeout: 10_000 },
+              (response) => {
+                response.resume();
+                resolve(response.statusCode ?? 0);
+              },
+            );
+            probe.once("timeout", () => probe.destroy(new Error("The sealed server did not answer")));
+            probe.once("error", reject);
+            probe.end();
+          });
+        let status = 0;
+        if (probeOnly) {
+          for (let attempt = 0; attempt <= 300; attempt++) {
+            serverAlive();
+            status = await probeStatus().catch((error: NodeJS.ErrnoException) => {
+              if (error.code === "ECONNREFUSED") return 0;
+              throw error;
+            });
+            if (status === 200) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+        } else status = await probeStatus();
+        if (status !== 200) throw new Error("The sealed server does not answer");
+        const record = JSON.parse(readFileSync(join(env.RECENSE_HOME as string, "server.json"), "utf8")) as { url?: string };
+        if (new URL(record.url ?? "http://invalid").origin !== origin)
+          throw new Error("The sealed server record names another URL");
+      } catch (error) {
+        await stopServer();
+        throw error;
+      }
 
-    const cli = async (args: string[], cwd: string, timeoutMs?: number): Promise<string> => {
-      serverAlive();
-      const result = await run(process.execPath, [entry, ...args], { cwd, env, ...(timeoutMs ? { timeoutMs } : {}) });
-      if (result.code !== 0) throw new Error(`recense ${args[0]} failed: ${result.stderr.trim().slice(0, 300)}`);
-      return result.stdout;
+      const cli = async (args: string[], cwd: string, timeoutMs?: number): Promise<string> => {
+        serverAlive();
+        const result = await run(process.execPath, [entry, ...args], { cwd, env, ...(timeoutMs ? { timeoutMs } : {}) });
+        if (result.code !== 0) throw new Error(`recense ${args[0]} failed: ${result.stderr.trim().slice(0, 300)}`);
+        return result.stdout;
+      };
+      return { cli, serverAlive, stopServer };
+    }
+    let running = await launch();
+    return {
+      port, origin,
+      cli: (...args: Parameters<typeof running.cli>) => running.cli(...args),
+      serverAlive: () => running.serverAlive(),
+      async restart(beforeStart?: () => void) {
+        await running.stopServer();
+        assertRunning();
+        beforeStart?.();
+        running = await launch();
+        return running.cli;
+      },
     };
-    return { port, origin, cli, serverAlive };
+  }
+  async function pairingLink(entry: string, sealedRoot: string, env: Record<string, string>, origin: string) {
+    const pairCommand = [process.execPath, entry, "pair"];
+    const quoted = pairCommand.map((part) => `'${part.replaceAll("'", `'\\''`)}'`).join(" ");
+    const scriptArgs =
+      process.platform === "darwin" ? ["-q", "/dev/null", ...pairCommand] : ["-qec", quoted, "/dev/null"];
+    const paired = await run("script", scriptArgs, { cwd: sealedRoot, env, timeoutMs: 60_000, group: true });
+    if (paired.code !== 0) throw new Error(`The pairing command exited with code ${paired.code}`);
+    return parsePairingLink(paired.stdout, origin);
   }
   async function signIn(
     entry: string,
@@ -321,14 +385,8 @@ export function createSealedLifecycle(label: string) {
     const { port, origin, serverAlive } = server;
     // ---- Sign in ----------------------------------------------------------------------------
     step("signing in through a pty");
-    const pairCommand = [process.execPath, entry, "pair"];
-    const quoted = pairCommand.map((part) => `'${part.replaceAll("'", `'\\''`)}'`).join(" ");
-    const scriptArgs =
-      process.platform === "darwin" ? ["-q", "/dev/null", ...pairCommand] : ["-qec", quoted, "/dev/null"];
     serverAlive();
-    const paired = await run("script", scriptArgs, { cwd: sealedRoot, env, timeoutMs: 60_000, group: true });
-    if (paired.code !== 0) throw new Error(`The pairing command exited with code ${paired.code}`);
-    const link = parsePairingLink(paired.stdout, origin);
+    const link = await pairingLink(entry, sealedRoot, env, origin);
 
     step("starting a sealed browser");
     assertRunning();
@@ -353,8 +411,10 @@ export function createSealedLifecycle(label: string) {
     return { browser, desktop };
   }
   return {
+    cleanup,
     createRoot,
     startServer,
+    pairingLink,
     signIn,
     run,
     git,

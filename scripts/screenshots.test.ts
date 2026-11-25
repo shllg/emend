@@ -331,11 +331,16 @@ test("the output folder may not overlap real state, also through a symlink", (t)
   assert.throws(() => canonicalPath("relative"), { message: "Paths must be absolute" });
 });
 
+function runnerSource(): string {
+  return ["./screenshots.ts", "./screenshots/demo.ts", "./screenshots/sealed.ts"]
+    .map((file) => readFileSync(new URL(file, import.meta.url), "utf8")).join("\n");
+}
+
 test("the screenshot runner's selectors and stored values match the app's source", () => {
   const store = readFileSync(new URL("../apps/web/src/lib/layout-store.ts", import.meta.url), "utf8");
   const sendBar = readFileSync(new URL("../apps/web/src/components/send/SendBar.tsx", import.meta.url), "utf8");
   const reader = readFileSync(new URL("../apps/web/src/components/reading/BlockReader.tsx", import.meta.url), "utf8");
-  const runner = readFileSync(new URL("./screenshots.ts", import.meta.url), "utf8");
+  const runner = runnerSource();
 
   assert.match(store, /const layoutKey\s*=\s*"recense\.layout\.v1"/);
   assert.match(store, /const tabsDefaultKey\s*=\s*"recense\.layout\.tabs-default"/);
@@ -1468,7 +1473,7 @@ function hasEnvOption(call: string): boolean {
 
 test("the parent's environment is read only to find Chromium, and every child gets an env", () => {
   const dir = fileURLToPath(new URL(".", import.meta.url));
-  const runner = readFileSync(join(dir, "screenshots.ts"), "utf8") + readFileSync(join(dir, "screenshots", "sealed.ts"), "utf8");
+  const runner = runnerSource();
   const browser = readFileSync(join(dir, "screenshots", "browser.ts"), "utf8");
   const lookup = browser.slice(browser.indexOf("export function findChromium"), browser.indexOf("export class Browser"));
   assert(lookup.includes("process.env"));
@@ -1558,7 +1563,7 @@ test("the runner imports every safety guard it calls", () => {
   const exported = [...readFileSync(join(dir, "screenshots", "safety.ts"), "utf8").matchAll(/^export (?:async )?function (\w+)/gm)].map(
     (match) => match[1] as string,
   );
-  const runner = readFileSync(join(dir, "screenshots.ts"), "utf8") + readFileSync(join(dir, "screenshots", "sealed.ts"), "utf8");
+  const runner = runnerSource();
   const imported = [...runner.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\/(?:screenshots\/)?safety\.ts"/g)].map((match) => match[1]).join(",");
   const names = new Set(imported.split(",").map((name) => name.trim()));
   assert(exported.length > 5 && names.size > 5);
