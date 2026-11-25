@@ -21,6 +21,7 @@ import { run } from "../../main.ts";
 import * as executor from "../../server/publish/executor.ts";
 import * as publish from "../publish/resolve.ts";
 import * as roots from "../publish/root.ts";
+import * as worktree from "../publish/worktree.ts";
 import { prepareCommand } from "./prepare.ts";
 
 const exec = promisify(execFile);
@@ -202,32 +203,37 @@ test("worktree preparation includes untracked files, flags, lockfiles and collec
   ]);
 });
 
-test("checks docs on disk against the SHA-256 head and records each reason for omission", async () => {
+test("checks docs against the SHA-256 head and skips hashing oversized and different-sized disk copies", async () => {
   await git("init", "--object-format=sha256", "-b", "topic");
   const base = await commit();
-  for (const file of ["changed.md", "large.md", "matching.MARKDOWN", "missing.htm", "redirect.html"])
+  for (const file of ["changed.md", "large.md", "matching.MARKDOWN", "missing.htm", "redirect.html", "resized.htm"])
     await writeFile(join(root, file), "original\n");
   const head = await commit();
-  await writeFile(join(root, "changed.md"), "different\n");
-  await writeFile(join(root, "large.md"), Buffer.alloc(LIMITS.markdownDocBytes + 1, 65));
+  await writeFile(join(root, "changed.md"), "modified\n");
+  await truncate(join(root, "large.md"), LIMITS.markdownDocBytes * 64);
+  await truncate(join(root, "resized.htm"), LIMITS.markdownDocBytes + 1);
   await rm(join(root, "missing.htm"));
   await rm(join(root, "redirect.html"));
   await symlink("matching.MARKDOWN", join(root, "redirect.html"));
   const resolveDoc = vi.spyOn(publish, "resolvePublish");
+  const hash = vi.spyOn(worktree, "hashWorktreeFile");
   expect(await prepare(base, head)).toEqual({
     code: 0,
     stderr: "",
-    stdout: `${JSON.stringify({ manifest: path, diff: 5, doc: 1 })}\n`,
+    stdout: `${JSON.stringify({ manifest: path, diff: 6, doc: 1 })}\n`,
   });
   const { files } = PublishManifest.parse(JSON.parse(await readFile(path, "utf8")));
   expect(files.map((file) => [file.path, file.prepared?.doc ?? file.role])).toEqual([
     ["changed.md", "differs-from-head"],
-    ["large.md", "differs-from-head"],
+    ["large.md", "refused"],
     ["matching.MARKDOWN", "included"],
     ["matching.MARKDOWN", "doc"],
     ["missing.htm", "differs-from-head"],
     ["redirect.html", "differs-from-head"],
+    ["resized.htm", "differs-from-head"],
   ]);
+  expect(files.find((file) => file.path === "large.md")?.prepared?.docRefusal).toBe("file exceeds its size limit");
+  expect(hash.mock.calls.map(([, path]) => path)).toEqual(["changed.md", "matching.MARKDOWN"]);
   expect(resolveDoc.mock.calls.map(([manifest]) => manifest.files[0]?.path)).toEqual(["matching.MARKDOWN"]);
 });
 
@@ -455,8 +461,7 @@ test("truncates long publish refusals with a closing ellipsis", async () => {
   await mkdir(join(root, parent), { recursive: true });
   const name = join(parent, "large.md");
   await writeFile(join(root, name), Buffer.alloc(LIMITS.markdownDocBytes + 1, 65));
-  const head = await commit();
-  expect((await prepare(base, head)).code).toBe(0);
+  expect((await prepare(base, "worktree")).code).toBe(0);
   expect((await skeleton()).files[0]?.prepared?.docRefusal).toBe(
     `${`file exceeds its size limit: ${name}`.slice(0, 999)}…`,
   );
@@ -503,7 +508,66 @@ test("counts each asset path once and leaves room for a shared asset after refus
   ]);
 });
 
-test("reserves writeup bytes, charges unique doc and asset blobs, and skips refused docs in the total", async () => {
+test("fits docs to the serialized publish request including all diffs and each shared asset row once", async () => {
+  await git("init", "-b", "topic");
+  await git("config", "remote.origin.url", "https://example.test/reviews/sample.git");
+  for (const asset of ["shared.png", "other.png"]) await writeFile(join(root, asset), "image");
+  await writeFile(join(root, "z.bin"), Buffer.from([0, 1]));
+  const base = await commit();
+  const first = 'a-"é".html';
+  for (const [file, asset] of [
+    [first, "shared.png"],
+    ["b.html", "other.png"],
+    ["c.html", "shared.png"],
+  ] as const)
+    await writeFile(join(root, file), `<img src="${asset}">`);
+  await writeFile(join(root, "z.bin"), Buffer.from([0, 2]));
+  const head = await commit();
+
+  const { request } = await publish.resolvePublish(
+    {
+      version: 1,
+      title: "topic",
+      base,
+      head,
+      topics: [],
+      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      files: [
+        ...[first, "b.html", "c.html", "z.bin"].map((path) => ({ path, role: "diff" as const })),
+        { path: first, role: "doc" },
+        { path: "c.html", role: "doc" },
+      ],
+    },
+    { manifest: path },
+    join(dir, "state"),
+    join(dir, "config"),
+    null,
+    root,
+    () => {},
+  );
+  // Publish dropped the flagged diff's hashes. Prepare must reserve space for both sides.
+  const files = request.files.map((file) =>
+    file.path === "z.bin" ? { ...file, oldBlob: "0".repeat(64), newBlob: "0".repeat(64) } : file,
+  );
+  const exact = Buffer.byteLength(JSON.stringify({ ...request, files }));
+  const refusal = "publish request exceeds its size limit";
+  for (const publishJsonBytes of [exact, exact - 1]) {
+    await withLimits(base, head, { publishJsonBytes, countBudgetMs: 0 });
+    const { files } = await skeleton();
+    expect(files.filter((file) => file.role === "doc").map((file) => file.path)).toEqual(
+      publishJsonBytes === exact ? [first, "c.html"] : [first],
+    );
+    expect(files.find((file) => file.path === "b.html")?.prepared).toMatchObject({
+      doc: "refused",
+      docRefusal: refusal,
+    });
+    if (publishJsonBytes < exact)
+      expect(files.find((file) => file.path === "c.html")?.prepared?.docRefusal).toBe(refusal);
+    await rm(path);
+  }
+});
+
+test("reserves the publish JSON cap for the writeup and charges only included docs' unique blobs", async () => {
   await git("init", "-b", "topic");
   await mkdir(join(root, "sub"));
   const picture = "sample picture";
@@ -515,7 +579,7 @@ test("reserves writeup bytes, charges unique doc and asset blobs, and skips refu
   await writeFile(join(root, "c.md"), "c");
   await writeFile(join(root, "d.md"), "d");
   await writeFile(join(root, "sub/copy.html"), html);
-  const revisionBytes = LIMITS.writeupBytes + Buffer.byteLength(html + picture) + 1;
+  const revisionBytes = LIMITS.publishJsonBytes + Buffer.byteLength(html + picture) + 1;
   await withLimits(base, await commit(), { revisionBytes });
   const { files } = await skeleton();
   expect(files.filter((file) => file.role === "doc").map((file) => file.path)).toEqual([

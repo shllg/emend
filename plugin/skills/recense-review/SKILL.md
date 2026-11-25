@@ -117,8 +117,8 @@ and added and removed line counts when available. A flag marks binary or oversiz
 `lockfile: true` marks a lockfile.
 
 For Markdown and HTML, `doc: "included"` means the doc entry follows the diff.
-`deleted` means the change removed it. `differs-from-head` means the bytes publish would upload
-differ from the new git object prepare found. For `refused`, read the reason in `docRefusal`.
+`deleted` means the change removed it. `differs-from-head` means the disk copy is missing,
+is not a regular file, or differs from the reviewed commit. For `refused`, read the reason in `docRefusal`.
 Cite a left-out doc in prose.
 Read the docs to judge their substance. Keep design docs and decision records and skip generated indexes.
 If a doc disappears or exceeds its size limit before publish, remove its doc entry and cite it in prose.
@@ -145,15 +145,18 @@ git ls-files -z --others --exclude-standard | xargs -0 grep -nHE 'ADR|RFC|PRD|[R
 ```
 
 Resolve references to supported, readable files; cite unavailable or unsupported docs in prose.
-Prepare already checked the changed docs. For an unchanged cited doc with a commit head, run
-this check from the repository root:
+Prepare checked each changed doc it lists as `included`, `deleted`, `differs-from-head` or `refused`.
+A `not checked: …` refusal means prepare skipped that doc's check. You can check it by hand as
+described below for that head and give it a `doc` entry if it passes.
+For an unchanged cited doc with a commit head, use the same check from the repository root.
+If a cited path contains a single quote, a backslash, `$`, a backquote or a control character, cite it in prose without running the check.
 
 ```sh
 git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'
 ```
 
 Exit 0 means the doc exists at `head` and the disk copy is identical. Give it a `doc` entry.
-On any other exit, cite it in prose only. With a worktree head, give a readable unchanged cited doc a `doc` entry.
+On any other exit, cite it in prose only. With a worktree head, check that the doc is a readable regular file before giving it a `doc` entry.
 Set each doc entry's `topic` to the topic whose prose leans on it.
 
 Name the doc and its supporting heading in the topic's `why` or `body`.

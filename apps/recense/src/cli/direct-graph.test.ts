@@ -130,6 +130,7 @@ const multilineTemplates = new Map([
   ["cli/publish/assets.ts", "Skipped-asset diagnostics end with a newline."],
   ["cli/publish/collect.ts", "Nested-repository diagnostics end with a newline."],
   ["cli/publish/sides.ts", "Synthetic submodule content ends with a newline."],
+  ["cli/commands/prepare.ts", "The review.json skeleton ends with a newline."],
   ["cli/commands/publish.ts", "Publish diagnostics end with a newline."],
   ["cli/commands/feedback.ts", "The reply hint on stderr ends with a newline."],
   ["cli/commands/mcp.ts", "MCP JSON output ends with a newline."],
@@ -746,10 +747,15 @@ async function assertAgentGraph(root: string, entries: string[]) {
 test("all agent entry graphs exclude reviewer mutations, including workers", async () => {
   const seen = await assertAgentGraph(root, [
     ...(await sources(join(root, "cli/direct"))),
-    ...["publish", "wait", "feedback", "reply", "mcp"].map((name) => join(root, `cli/commands/${name}.ts`)),
+    ...["prepare", "publish", "wait", "feedback", "reply", "mcp"].map((name) => join(root, `cli/commands/${name}.ts`)),
     join(root, "mcp/server.ts"),
   ]);
-  for (const name of ["server/mailbox/take.ts", "server/publish/ingest.ts", "server/publish/worker.ts"])
+  for (const name of [
+    "cli/commands/prepare.ts",
+    "server/mailbox/take.ts",
+    "server/publish/ingest.ts",
+    "server/publish/worker.ts",
+  ])
     expect(seen.has(join(root, name)), name).toBe(true);
 });
 

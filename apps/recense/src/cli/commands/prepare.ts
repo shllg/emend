@@ -3,7 +3,7 @@ import { constants, lstatSync, type Stats } from "node:fs";
 import { lstat, open, realpath, unlink } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { docViewOf, LIMITS, type PreparedFile, PublishManifest } from "@recense/contract";
+import { docViewOf, isRenderedHtmlDoc, LIMITS, type PreparedFile, PublishManifest } from "@recense/contract";
 import { cleanDocTitle, isLockfile } from "@recense/core";
 import type { Io } from "../../main.ts";
 import { createDiffCountBudget, type DiffCountBudget } from "../../server/publish/counts.ts";
@@ -13,7 +13,7 @@ import { escapeJson, escapeReference } from "../escape.ts";
 import { GitFailed, type GitRunner } from "../git.ts";
 import { CliError, CliUsageError, printJson } from "../http.ts";
 import { collectChanges } from "../publish/collect.ts";
-import { inside } from "../publish/read.ts";
+import { inside, OversizedFile } from "../publish/read.ts";
 import { publishContext, resolvePublish, shortenRepoName } from "../publish/resolve.ts";
 import { worktreeRoot } from "../publish/root.ts";
 import { type ChangedPath, readSide } from "../publish/sides.ts";
@@ -164,9 +164,25 @@ type DocBudget = {
   remainingMs: number;
   remainingRows: number;
   remainingBytes: number;
+  remainingJsonBytes: number;
   assetPaths: Set<string>;
   blobHashes: Set<string>;
 };
+
+const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+const blobPlaceholder = "0".repeat(64);
+
+function diffJsonBytes({ path, oldPath, status }: ChangedPath, flag: PreparedFile["flag"]) {
+  return jsonBytes({
+    path,
+    oldPath,
+    status,
+    role: "diff",
+    flag: flag ?? null,
+    oldBlob: status === "added" ? null : blobPlaceholder,
+    newBlob: status === "deleted" ? null : blobPlaceholder,
+  });
+}
 
 function refusedDoc(reason: string) {
   const limit = LIMITS.errorMessageChars;
@@ -177,8 +193,9 @@ function refusedDoc(reason: string) {
 }
 
 async function prepareDoc(
-  { root, gitDirs }: PublishContext,
+  { root, git, gitDirs }: PublishContext,
   change: ChangedPath,
+  range: { base: string; head: string; branch: string | null },
   format: "sha1" | "sha256",
   resolveDoc: (path: string) => ReturnType<typeof resolvePublish>,
   budget: DocBudget,
@@ -193,12 +210,20 @@ async function prepareDoc(
     if (change.newOid) {
       const info = await statWorktree(root, change.path, gitDirs);
       if (!info?.isFile()) return { doc: "differs-from-head" };
+      const html = isRenderedHtmlDoc({ role: "doc", path: change.path });
+      if (info.size > (html ? LIMITS.htmlDocBytes : LIMITS.markdownDocBytes)) throw new OversizedFile();
+      if (range.head !== "worktree") {
+        const size = Number((await git(root, ["cat-file", "-s", change.newOid])).toString().trim());
+        if (size !== info.size) return { doc: "differs-from-head" };
+      }
       const oid = await hashWorktreeFile(root, change.path, info, format, undefined, gitDirs);
       if (oid !== change.newOid) return { doc: "differs-from-head" };
     }
     const { request, blobs } = await resolveDoc(change.path);
+    const doc = request.files.find((file) => file.role === "doc");
+    if (!doc) throw new Error("missing resolved doc");
     if (change.newOid) {
-      const hash = request.files.find((file) => file.role === "doc")?.newBlob;
+      const hash = doc.newBlob;
       const source = hash && blobs.get(hash);
       if (!hash || !source) throw new Error("missing resolved doc blob");
       if (gitBlobId(format, await readBlob(hash, source)) !== change.newOid) return { doc: "differs-from-head" };
@@ -210,9 +235,15 @@ async function prepareDoc(
     let bytes = 0;
     for (const [hash, source] of blobs) if (!budget.blobHashes.has(hash)) bytes += source.size;
     if (bytes > budget.remainingBytes) return refusedDoc("the docs pass the revision size limit");
+    // The resolver supplied a docs-only shell. Restore the range for this code review.
+    const shellBytes = jsonBytes({ ...request, ...range, files: [] });
+    const addedJsonBytes = assets.reduce((sum, asset) => sum + jsonBytes(asset), jsonBytes(doc)) + rows;
+    if (shellBytes + addedJsonBytes > budget.remainingJsonBytes)
+      return refusedDoc("publish request exceeds its size limit");
 
     budget.remainingRows -= rows;
     budget.remainingBytes -= bytes;
+    budget.remainingJsonBytes -= addedJsonBytes;
     for (const file of assets) budget.assetPaths.add(file.path);
     for (const hash of blobs.keys()) budget.blobHashes.add(hash);
     return { doc: "included" };
@@ -233,7 +264,13 @@ export async function prepareCommand(
   args: string[],
   io: Io,
   cwd: string,
-  limits: { countBudgetMs?: number; docBudgetMs?: number; filesPerRevision?: number; revisionBytes?: number } = {},
+  limits: {
+    countBudgetMs?: number;
+    docBudgetMs?: number;
+    filesPerRevision?: number;
+    revisionBytes?: number;
+    publishJsonBytes?: number;
+  } = {},
 ) {
   const { base, head, dir } = parseArgs(args);
   const requested = resolve(cwd, dir);
@@ -258,6 +295,9 @@ export async function prepareCommand(
   const configRoots = await readDocRoots(stateDir, configDir, cwd, warn);
   const format = (await git(root, ["rev-parse", "--show-object-format"])).toString().trim();
   if (format !== "sha1" && format !== "sha256") throw new CliError("unsupported git object format");
+  const branch = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).toString().trim();
+  const range = { base, head, branch: branch === "HEAD" ? null : branch };
+  const title = shortenRepoName(cleanDocTitle(range.branch ?? basename(root))) || "Review";
   const counting: Counting = {
     worker: workerExecutor(),
     outcomes: new Map(),
@@ -266,8 +306,8 @@ export async function prepareCommand(
   const writeup = { overview: "", tldr: "", decisions: null, topics: {} };
   const resolveDoc = (path: string) =>
     resolvePublish(
-      { version: 1, title: "prepare", topics: [], files: [{ path, role: "doc" }], writeup },
-      { manifest: "prepare", key: "prepare", project: "prepare" },
+      { version: 1, title, topics: [], files: [{ path, role: "doc" }], writeup },
+      { manifest: "prepare", key: "prepare" },
       stateDir,
       configDir,
       null,
@@ -278,28 +318,35 @@ export async function prepareCommand(
       counting.worker,
     );
   const files: PublishManifest["files"] = [];
+  const publishJsonBytes = limits.publishJsonBytes ?? LIMITS.publishJsonBytes;
+  // The agent's eventual writeup, topics and notes share these publish caps.
   const docBudget: DocBudget = {
     remainingMs: limits.docBudgetMs ?? PREPARE_DOC_BUDGET_MS,
     remainingRows: (limits.filesPerRevision ?? LIMITS.filesPerRevision) - changes.length,
-    remainingBytes: (limits.revisionBytes ?? LIMITS.revisionBytes) - LIMITS.writeupBytes,
+    remainingBytes: (limits.revisionBytes ?? LIMITS.revisionBytes) - publishJsonBytes,
+    remainingJsonBytes: publishJsonBytes - Math.max(0, changes.length - 1),
     assetPaths: new Set(),
     blobHashes: new Set(),
   };
   try {
+    const diffs = [];
     for (const change of changes) {
       const prepared = await prepareDiff(context, head, change, format, counting);
+      docBudget.remainingJsonBytes -= diffJsonBytes(change, prepared.flag);
+      diffs.push({ change, prepared });
+    }
+    for (const { change, prepared } of diffs) {
       files.push({ path: change.path, role: "diff", prepared });
       if (docViewOf({ path: change.path }) !== "rendered") continue;
-      Object.assign(prepared, await prepareDoc(context, change, format, resolveDoc, docBudget));
+      Object.assign(prepared, await prepareDoc(context, change, range, format, resolveDoc, docBudget));
       if (prepared.doc === "included") files.push({ path: change.path, role: "doc" });
     }
   } finally {
     await counting.worker.close();
   }
-  const branch = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).toString().trim();
   const skeleton = PublishManifest.parse({
     version: 1,
-    title: shortenRepoName(cleanDocTitle(branch === "HEAD" ? basename(root) : branch)) || "Review",
+    title,
     base,
     head,
     topics: [],
