@@ -57,9 +57,9 @@ checks catch a copy inside the repo.
   from home. Its allowlisted environment drops Node options and incoming npm options; path-valued
   variables pass only when checked outside the working directory's repositories, hop by hop.
   Its PATH also drops entries whose node, npm, pnpm, bun, aube or systemctl leads into a
-  repository or cannot be checked. For mise it reads the running version's install folder and
-  `mise where`'s: names there, in `v<digits>` and `global-aube`, and the real path of
-  each top-level `node_modules/@shllg/recense`. Over 64 names or an error but a missing path
+  repository or cannot be checked. For mise it reads its own install folder and `mise where`'s:
+  names there, in `v<digits>` and `global-aube`, and the real path of each top-level
+  `node_modules/@shllg/recense`. A listing over 64 names, or an error other than a missing path,
   refuses. Detection needs one to be the running package; the lookup needs exactly one.
   Every child gets `npm_config_ignore_scripts=true`; npm and pnpm get `--ignore-scripts`, and
   pnpm list gets `--config.ignore-pnpmfile=true`, pnpm add `--ignore-pnpmfile`. Children run in
