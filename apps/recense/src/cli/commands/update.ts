@@ -1,4 +1,4 @@
-import { realpath, stat, unlink } from "node:fs/promises";
+import { realpath, unlink } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Io } from "../../main.ts";
@@ -21,6 +21,7 @@ import {
   detectInstall,
   type Install,
   locateArgs,
+  locateMisePackage,
   type Method,
   methodTool,
   updateArgs,
@@ -332,19 +333,9 @@ async function locate(
   const line = await firstLine(result.stdout);
   if (!succeeded(result) || !line) throw new CliError(`${methodTool[method]} did not say where it installed recense.`);
   validatePaths(line);
-  for (const candidate of [
-    join(line, "lib", "node_modules", updatePackage),
-    join(line, "node_modules", updatePackage),
-  ]) {
-    if (
-      await stat(candidate).then(
-        (info) => info.isDirectory(),
-        () => false,
-      )
-    )
-      return candidate;
-  }
-  throw new CliError("mise did not install recense where expected.");
+  const folder = await locateMisePackage(line);
+  if (folder === undefined) throw new CliError("mise did not install recense where expected.");
+  return folder;
 }
 
 async function restartService(

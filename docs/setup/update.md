@@ -32,7 +32,8 @@ recense update
 
 It does six things:
 
-1. It finds how you installed recense: mise, npm or pnpm.
+1. It finds how you installed recense: mise, npm or pnpm. A mise install counts with any package
+   manager mise's `npm.package_manager` setting picks: aube, npm, bun or pnpm.
 2. It copies the database to `backups/` in the state folder and prints the path. Three backups
    stay after a successful change, always including this run's backup. A failed update keeps all
    backups. If the version and service stay unchanged and no older server is running, it removes

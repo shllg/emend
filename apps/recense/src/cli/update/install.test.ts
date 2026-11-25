@@ -1,11 +1,25 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { detectInstall, locateArgs, restoreArgs, updateArgs } from "./install.ts";
+import {
+  detectInstall,
+  locateArgs,
+  locateMisePackage,
+  misePackageFolders,
+  restoreArgs,
+  updateArgs,
+} from "./install.ts";
+import { misePackageFixtures } from "./test-support.ts";
 
+const miseInstall = "mise/installs/npm-shllg-recense/0.1.0";
+const mise = misePackageFixtures(miseInstall);
 const layouts = {
-  mise: "mise/installs/npm-shllg-recense/0.1.0/lib/node_modules/@shllg/recense",
-  miseDirect: "mise/installs/npm-shllg-recense/0.1.0/node_modules/@shllg/recense",
+  mise: mise.npm.folder,
+  miseBun: mise.bun.folder,
+  miseAube: mise.aube.folder,
+  misePnpm10: mise.pnpm10.folder,
+  misePnpm11: mise.pnpm11.folder,
+  miseAubeCli: mise.aube_cli.folder,
   npm: "prefix/lib/node_modules/@shllg/recense",
   miseNode: "mise/installs/node/26.0.0/lib/node_modules/@shllg/recense",
   nvm: "nvm/versions/node/v26/lib/node_modules/@shllg/recense",
@@ -22,6 +36,13 @@ async function fixture(layout: string, manifest: unknown = { name: "@shllg/recen
   await mkdir(dirname(entry), { recursive: true });
   await writeFile(entry, "");
   await writeFile(join(folder, "package.json"), JSON.stringify(manifest));
+  if (link) {
+    const links = Object.values(mise).find((item) => item.folder === layout)?.links ?? [];
+    for (const [target, path] of links) {
+      await mkdir(dirname(join(root, path)), { recursive: true });
+      await symlink(join(root, target), join(root, path));
+    }
+  }
   if (link && layout.endsWith("lib/node_modules/@shllg/recense")) {
     const prefix = folder.slice(0, -"/lib/node_modules/@shllg/recense".length);
     await mkdir(join(prefix, "bin"), { recursive: true });
@@ -96,9 +117,24 @@ describe("confirmed install detection", () => {
     "prefix/node_modules/@shllg/recense",
     "prefix/lib/x/node_modules/@shllg/recense",
     "m/installs/npm-shllg-recense/0.1.0/extra/lib/node_modules/@shllg/recense",
+    "m/installs/npm-shllg-recense/0.1.0/global-aube/1a2b-18c3d4e5f60/lib/node_modules/@shllg/recense",
+    "m/installs/npm-shllg-recense/.staging/lib/node_modules/@shllg/recense",
     "pnpm-x/node_modules/@shllg/recense",
   ])("refuses near miss %s", async (layout) => {
     const f = await fixture(layout);
+    expect(await detectInstall(f.entry)).toEqual({ kind: "unknown" });
+  });
+  test.each([layouts.miseAube, layouts.misePnpm11])("refuses a store copy without a link: %s", async (layout) => {
+    const f = await fixture(layout, undefined, false);
+    expect(await detectInstall(f.entry)).toEqual({ kind: "unknown" });
+  });
+  test("refuses an aube store copy when the top-level link points to a different copy", async () => {
+    const f = await fixture(layouts.miseAube);
+    const link = join(f.root, miseInstall, "node_modules/@shllg/recense");
+    const other = f.folder.replace("@shllg+recense@0.1.0", "@shllg+recense@0.2.0");
+    await cp(f.folder, other, { recursive: true });
+    await rm(link);
+    await symlink(other, link);
     expect(await detectInstall(f.entry)).toEqual({ kind: "unknown" });
   });
   test.each([
@@ -107,6 +143,47 @@ describe("confirmed install detection", () => {
     "/usr/local/lib/node_modules/@shllg/recense/dist/other.mjs",
   ])("refuses invalid entry %s", async (entry) => {
     expect(await detectInstall(entry)).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("locating the package in a mise install", () => {
+  test.each(Object.entries(mise))("locates the %s package", async (_name, layout) => {
+    const f = await fixture(layout.folder);
+    const located = await locateMisePackage(join(f.root, miseInstall));
+    expect(located).toBeDefined();
+    expect(await realpath(located as string)).toBe(await realpath(f.folder));
+  });
+  test("returns the first path to a package even when it is a symlink", async () => {
+    const f = await fixture(layouts.miseAubeCli);
+    const install = join(f.root, miseInstall);
+    const alias = join(install, "global-aube", "0".repeat(64), "node_modules/@shllg/recense");
+    expect(await locateMisePackage(install)).toBe(alias);
+  });
+  test("finds no package in an empty install folder", async () => {
+    const install = await mkdtemp(join(process.env.RECENSE_HOME as string, "empty-"));
+    expect(await locateMisePackage(install)).toBeUndefined();
+  });
+  test("refuses two distinct package folders", async () => {
+    const f = await fixture(layouts.mise);
+    await mkdir(join(f.root, layouts.miseBun), { recursive: true });
+    expect(await locateMisePackage(join(f.root, miseInstall))).toBeUndefined();
+  });
+  test("stops using a v11 listing once it exceeds 64 entries", async () => {
+    const f = await fixture(layouts.misePnpm11);
+    const install = join(f.root, miseInstall);
+    const v11 = join(install, "v11");
+    for (let i = 1; i < 64; i++) await writeFile(join(v11, `.ignored-${i}`), "");
+    expect(await locateMisePackage(install)).toBeDefined();
+    await writeFile(join(v11, ".ignored-64"), "");
+    expect(await locateMisePackage(install)).toBeUndefined();
+  });
+  test("lists package folders in layout and name order", async () => {
+    const install = await mkdtemp(join(process.env.RECENSE_HOME as string, "layouts-"));
+    const roots = ["lib", "", "10", "5", "v11/a", "v11/b", "v12/c", "global-aube/a", "global-aube/b"];
+    const ignored = ["other", "v11/.cache", "v11/node_modules", "global-aube/.cache", "global-aube/node_modules"];
+    const folder = (root: string) => join(install, root, "node_modules/@shllg/recense");
+    for (const root of [...roots, ...ignored].reverse()) await mkdir(folder(root), { recursive: true });
+    expect(await misePackageFolders(install)).toEqual(roots.map(folder));
   });
 });
 

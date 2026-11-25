@@ -13,6 +13,7 @@ import {
   type Fake,
   installService,
   type Layout,
+  type MiseLayout,
   makeDatabase,
   makeFake,
   recenseScript,
@@ -34,8 +35,8 @@ vi.mock("../executable.ts", async (original) => {
 });
 
 let fake: Fake;
-async function make(layout: Layout) {
-  fake = await makeFake(process.env.RECENSE_HOME as string, layout);
+async function make(layout: Layout, miseLayout?: MiseLayout) {
+  fake = await makeFake(process.env.RECENSE_HOME as string, layout, undefined, miseLayout);
   fixtureRoot = fake.root;
   return fake;
 }
@@ -537,6 +538,33 @@ test("mise reinstalls from the moving NEW entry with the same node and state fol
     recenseHome: fake.state,
   });
   expect(call?.entry).not.toBe(fake.entry);
+});
+
+test.each(["npm", "aube", "bun", "pnpm10", "pnpm11", "aube_cli"] as const)(
+  "mise upgrades and locates recense with the %s layout",
+  async (layout) => {
+    await make("mise", layout);
+    expect(await update(), err()).toBe(0);
+    expect((await fake.calls()).map(({ tool, argv }) => ({ tool, argv }))).toEqual([
+      { tool: "mise", argv: ["upgrade", "--bump", "npm:@shllg/recense"] },
+      { tool: "mise", argv: ["where", "npm:@shllg/recense"] },
+    ]);
+    expect(out()).toContain("recense: recense is now 0.2.0\n");
+    expect(out()).toContain("recense: this machine runs recense 0.2.0\n");
+  },
+);
+
+test("mise with aube preserves the global tool request and its options", async () => {
+  await make("mise", "aube");
+  const config = join(fake.home, ".config/mise/config.toml");
+  const contents = '[tools]\n"npm:@shllg/recense" = { version = "latest", postinstall = "echo installed" }\n';
+  await mkdir(dirname(config), { recursive: true });
+  await writeFile(config, contents);
+  // On mise 2026.11.6, upgrade --bump keeps latest and its options (checked by hand), so recense leaves the TOML alone.
+  expect(await update(), err()).toBe(0);
+  expect(await readFile(config)).toEqual(Buffer.from(contents));
+  const miseCalls = (await fake.calls()).filter((call) => call.tool === "mise");
+  expect(miseCalls.map((call) => (call.argv as string[])[0])).not.toContain("use");
 });
 
 test.each(["changed", "noop", "failed"])("backup retention after %s with a backward clock", async (outcome) => {

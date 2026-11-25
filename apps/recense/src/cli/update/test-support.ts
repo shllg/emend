@@ -1,11 +1,34 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { Io } from "../../main.ts";
 import type { UpdateOptions } from "../commands/update.ts";
 
 export type Layout = "npm" | "pnpm" | "mise";
+
+type FixtureLink = [target: string, link: string];
+
+export function misePackageFixtures(installFolder: string) {
+  const pkg = "node_modules/@shllg/recense";
+  const storePackage = `@shllg+recense@${basename(installFolder)}/${pkg}`;
+  const direct = join(installFolder, pkg);
+  const aube = join(installFolder, "node_modules/.mise", storePackage);
+  const pnpm10 = join(installFolder, "5/.pnpm", storePackage);
+  const v11 = join(installFolder, "v11/1f54c6-1a213f5c7ca-5a1f77446ee418a1");
+  const pnpm11 = join(v11, "node_modules/.pnpm", storePackage);
+  const aubeCli = join(installFolder, "global-aube/1a2b-18c3d4e5f60");
+  return {
+    npm: { folder: join(installFolder, "lib", pkg), links: [] },
+    bun: { folder: direct, links: [] },
+    aube: { folder: aube, links: [[aube, direct]] },
+    pnpm10: { folder: pnpm10, links: [[pnpm10, join(installFolder, "5", pkg)]] },
+    pnpm11: { folder: pnpm11, links: [[pnpm11, join(v11, pkg)]] },
+    aube_cli: { folder: join(aubeCli, pkg), links: [[aubeCli, join(installFolder, "global-aube", "0".repeat(64))]] },
+  } satisfies Record<string, { folder: string; links: FixtureLink[] }>;
+}
+
+export type MiseLayout = keyof ReturnType<typeof misePackageFixtures>;
 
 export interface Fake {
   root: string;
@@ -68,6 +91,10 @@ if (verb === "install" || verb === "add" || verb === "upgrade") {
   fs.mkdirSync(path.join(config.newPackage, "dist"), { recursive: true });
   fs.writeFileSync(path.join(config.newPackage, "package.json"), JSON.stringify({ name: "@shllg/recense", version: config.newVersion }));
   fs.writeFileSync(path.join(config.newPackage, "dist/recense.mjs"), config.newScript);
+  for (const [target, link] of config.newLinks) {
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    if (!fs.lstatSync(link, { throwIfNoEntry: false })) fs.symlinkSync(target, link);
+  }
 } else if (verb === "list") {
   if (config.listWarning) fs.writeSync(2, config.listWarning);
   if (config.listError) { fs.writeSync(2, config.listError); process.exit(2); }
@@ -85,7 +112,12 @@ export async function makeDatabase(path: string, value = "synthetic row") {
   database.close();
 }
 
-export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1.0"): Promise<Fake> {
+export async function makeFake(
+  parent: string,
+  layout: Layout,
+  oldVersion = "0.1.0",
+  miseLayout: MiseLayout = "npm",
+): Promise<Fake> {
   const root = await realpath(await mkdtemp(join(parent, "update-")));
   const home = join(root, "home");
   const state = join(root, "state");
@@ -99,6 +131,8 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
   let oldPackage: string;
   let newPackage: string;
   let located: string;
+  let oldLinks: FixtureLink[] = [];
+  let newLinks: FixtureLink[] = [];
   if (layout === "npm") {
     oldPackage = newPackage = join(root, "prefix/lib/node_modules/@shllg/recense");
     located = "";
@@ -107,14 +141,22 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
     oldPackage = newPackage = join(modules, ".pnpm/@shllg+recense@x/node_modules/@shllg/recense");
     located = modules;
   } else {
-    oldPackage = join(root, "mise/installs/npm-shllg-recense/0.1.0/lib/node_modules/@shllg/recense");
-    const next = join(root, "mise/installs/npm-shllg-recense/0.2.0");
-    newPackage = join(next, "lib/node_modules/@shllg/recense");
-    located = next;
+    const installs = join(root, "mise/installs/npm-shllg-recense");
+    located = join(installs, "0.2.0");
+    const old = misePackageFixtures(join(installs, "0.1.0"))[miseLayout];
+    const next = misePackageFixtures(located)[miseLayout];
+    oldPackage = old.folder;
+    oldLinks = old.links;
+    newPackage = next.folder;
+    newLinks = next.links;
   }
   await mkdir(join(oldPackage, "dist"), { recursive: true });
   await writeFile(join(oldPackage, "package.json"), JSON.stringify({ name: "@shllg/recense", version: oldVersion }));
   await writeFile(join(oldPackage, "dist/recense.mjs"), recenseScript(oldVersion, root));
+  for (const [target, link] of oldLinks) {
+    await mkdir(dirname(link), { recursive: true });
+    await symlink(target, link);
+  }
   if (layout === "npm") {
     await mkdir(join(oldPackage, "bin"));
     await writeFile(join(oldPackage, "bin/recense"), "synthetic launcher");
@@ -179,6 +221,7 @@ export async function makeFake(parent: string, layout: Layout, oldVersion = "0.1
       oldPackage,
       serverFile: join(root, "server-version"),
       newPackage,
+      newLinks,
       newVersion: "0.2.0",
       newScript: recenseScript("0.2.0", root),
       located,
