@@ -331,6 +331,15 @@ test("the output folder may not overlap real state, also through a symlink", (t)
   assert.throws(() => canonicalPath("relative"), { message: "Paths must be absolute" });
 });
 
+test("the screenshot run stores Split under the app's own layout keys", () => {
+  const store = readFileSync(new URL("../apps/web/src/lib/layout-store.ts", import.meta.url), "utf8");
+  const runner = readFileSync(new URL("./screenshots.ts", import.meta.url), "utf8");
+  assert.match(store, /const layoutKey\s*=\s*"recense\.layout\.v1"/);
+  assert.match(store, /const tabsDefaultKey\s*=\s*"recense\.layout\.tabs-default"/);
+  assert(runner.includes("recense.layout.v1"));
+  assert(runner.includes("recense.layout.tabs-default"));
+});
+
 test("the main screenshot writeup fills the review cards and links to declared topics", () => {
   const slugs = new Set<string>(MAIN_TOPICS.map(({ slug }) => slug));
   for (const revision of [1, 2] as const) {

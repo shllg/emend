@@ -414,6 +414,16 @@ async function main(): Promise<void> {
     `![...el.children].some((child) => child.textContent.includes(${JSON.stringify(text)}))) ?? null; })()`;
 
   step("capturing the review");
+  // Desktop reviews open in Tabs. Store the reader's Split choice as the View menu does
+  // so the screenshot shows the writeup next to the diff.
+  await desktop.eval(`(() => {
+    const LAYOUT_KEY = "recense.layout.v1";
+    const TABS_DEFAULT_KEY = "recense.layout.tabs-default";
+    const layout = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
+    layout.pane = { ...(layout.pane ?? {}), desktop: "split" };
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+    localStorage.setItem(TABS_DEFAULT_KEY, "1");
+  })()`);
   await desktop.goto(reviewUrl("?rev=2"));
   await desktop.settle("the desktop review");
   // The agent note above the thread must clear the sticky file header, with the thread below it.
