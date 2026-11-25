@@ -65,12 +65,32 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
 2. Codex writes the code through `codex-agent`, as `AGENTS.md` says. If Codex cannot run, a Sonnet
    sub-agent writes, and your report says so and why. Commit the checked build as in step 3.
    When the diff from the base to the build commit touches `apps/web/src/`, `apps/web/public/` or
-   `apps/web/index.html`, dispatch `recense-ui-finisher` (`model: "sonnet"`) with the task file,
-   the base and the build commit. Give it a clean tree and a built app.
-   When it returns, run `node scripts/check-ui-scope.ts --since <build commit>`. Restore every
-   printed tracked path to that commit, delete each printed untracked file and report each as a
-   blocker. An error checking scope must be resolved before proceeding. Run `pnpm verify` and
-   commit the finish separately.
+   `apps/web/index.html`, run the following from the worktree root.
+
+   - Run `mktemp -d` once. Write its printed path literally in place of `<temp>` in each later
+     command. Bash calls share no variables.
+   - Copy the checker from the committed build and take the ignored file snapshot before dispatch.
+     Use the external `.mts` copy for both checks. Resolve any error or blocker before dispatch.
+
+     ```sh
+     git show <build commit>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts
+     node <temp>/check-ui-scope.mts --snapshot <temp>/ignored.json
+     ```
+
+   - Dispatch `recense-ui-finisher` (`model: "sonnet"`) with the task file, the base and the build
+     commit. Give it a clean tree and a built app.
+   - When it returns, run the saved checker with the worktree root as the working directory.
+
+     ```sh
+     node <temp>/check-ui-scope.mts --since <build commit> --snapshot <temp>/ignored.json
+     ```
+
+   - Report every printed path as a blocker. For an index flag or a changed or removed ignored
+     file, run `<main>/bin/wt notify blocked`, name the path and wait for the owner. Use the
+     snapshot to distinguish new ignored files from existing ones. Restore other tracked paths
+     to the build commit in both the index and the worktree. Delete each printed untracked or new
+     ignored file. Resolve any checker error before continuing.
+   - Remove the temp folder, run `pnpm verify` and commit the finish separately.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
    Before each review round, with the change committed and `pnpm verify` green at that commit,
@@ -79,12 +99,12 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    (`origin/main...HEAD` for a full round, the fix commits for a check round), the task file
    `.wt/issue.md` (or the description), `.wt/bundle-diff.json`, `.wt/bundle-reason.md` when it
    exists, and, for a check round, `.wt/review-findings.json`. See "Bundle growth" in
-   `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Dispatch findings
-   tagged `ui` to `recense-ui-finisher` (`model: "sonnet"`) and `code` to Codex. Check each
-   finisher pass against its starting commit with the scope check in step 2. Review in rounds as
-   `.claude/rules/review-rounds.md` says: commit first, round 1 over the whole change, then at most
-   two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each manager JSON
-   to `.wt/review-findings.json` as the rule says.
+   `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Route its `ui` fixes
+   to `recense-ui-finisher` (`model: "sonnet"`) and its `code` fixes to Codex. For each finisher
+   pass, follow step 2 from a clean tree using the pass's starting commit as the build commit.
+   Follow `.claude/rules/review-rounds.md`. Commit first, run round 1 over the whole change, then
+   run at most two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each
+   manager JSON to `.wt/review-findings.json` as the rule says.
 5. Apply the sync rule in `AGENTS.md`: check the change against the sibling project and add the
    `Sync:` trailer it asks for. `pnpm check:sync` holds the rule.
 

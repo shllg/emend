@@ -161,3 +161,44 @@ test("only the UI finisher has an inline MCP server and only its tools are avail
   for (const [name, { servers }] of agents)
     if (name !== "recense-ui-finisher") assert.equal(servers, undefined, name);
 });
+
+test("the orchestrator snapshots and checks each finisher pass with the committed checker", () => {
+  const skill = (name: string) =>
+    readFileSync(path.join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
+  const work = skill("e-work");
+  const steps = [
+    "Run `mktemp -d` once",
+    "git show <build commit>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts",
+    "node <temp>/check-ui-scope.mts --snapshot <temp>/ignored.json",
+    'Dispatch `recense-ui-finisher` (`model: "sonnet"`)',
+    "node <temp>/check-ui-scope.mts --since <build commit> --snapshot <temp>/ignored.json",
+    "Report every printed path as a blocker",
+    "`<main>/bin/wt notify blocked`",
+    "Remove the temp folder, run `pnpm verify`",
+  ];
+  let index = -1;
+  for (const step of steps) {
+    index = work.indexOf(step, index + 1);
+    assert.notEqual(index, -1, step);
+  }
+  assert(!work.includes("node scripts/check-ui-scope.ts --since"));
+  assert.match(work, /follow step 2 from a clean tree using the pass's starting commit/);
+  const rounds = readFileSync(path.join(root, ".claude", "rules", "review-rounds.md"), "utf8");
+  for (const text of [skill("e-pr-finalize"), rounds])
+    assert.match(text, /checking each finisher pass as `\/e-work` step 2/);
+});
+
+test("the manager tags fixes and the finisher uses the checked stop and screenshot paths", () => {
+  const body = (agent: string) =>
+    readFileSync(path.join(directory, agent + ".md"), "utf8").replace(/\s+/g, " ");
+  const manager = body("recense-review-manager");
+  assert.match(manager, /all its paths are allowed by `scripts\/check-ui-scope.ts`/);
+  assert.match(manager, /did not come from `recense-security-reviewer`/);
+  assert.match(manager, /every other fix `code`/);
+  assert.match(manager, /The orchestrator routes the fixes\. The manager dispatches no fixer/);
+  const finisher = body("recense-ui-finisher");
+  assert.match(finisher, /Read `scripts\/check-ui-scope.ts` for the allowed and refused paths/);
+  assert.match(finisher, /Save screenshots to `\.wt\/ui\/`.*refuses that path, report it/);
+  assert.match(finisher, /run `node scripts\/ui-demo.ts stop`, including when a check fails/);
+  assert.doesNotMatch(finisher, /\bkill\b/);
+});

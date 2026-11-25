@@ -45,9 +45,10 @@ It has a fresh Codex thread try to refute the finding. Only a confirmed false po
 
 - Commit before each round, so the reviewers read committed work and the log names that head.
 - **Round 1** reviews the whole change.
-- Fix every finding in the manager's `fix` list in one batch, routing `ui` to `recense-ui-finisher`
-  and the rest to Codex. Leave preferences as they are and list each under "Not changed" in the PR
-  body, with one line of reason. List follow-ups under "Follow-ups"; they never go into the change.
+- The orchestrator fixes the manager's `fix` list in one batch, routing its `ui` fixes to
+  `recense-ui-finisher` and `code` fixes to Codex, checking each finisher pass as `/e-work` step 2
+  says. Leave preferences as they are and list each under "Not changed" in the PR body, with one
+  line of reason. List follow-ups under "Follow-ups" and keep them out of the change.
 - After a round with fixes, run a **check round**: call the manager with the check round, fix
   range, task and `.wt/review-findings.json`. It checks the earlier findings as FIXED, NOT FIXED
   or REGRESSED, plus anything the fixes broke. A check round does not review the rest of the change.

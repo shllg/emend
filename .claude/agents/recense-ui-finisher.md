@@ -10,23 +10,17 @@ mcpServers:
       args: ["scripts/ui-browser-mcp.ts"]
 ---
 
-Read the task file and the diff from the supplied base to the build commit. Keep the finish within
-the task. Before editing, read `docs/ui.md`, `docs/react.md` and `.claude/rules/content-isolation.md`.
+Read the task file and the diff from the supplied base to the build commit. Keep the finish
+within the task. Before editing, read `docs/ui.md`, `docs/react.md` and
+`.claude/rules/content-isolation.md`.
 Follow those rules when editing and when checking the result.
 
 ## Edits
 
 Refine layout, styles, components, copy, interaction, focus, keyboard behaviour, accessibility and
-UI-only state. You may edit these paths and the web tests for the UI you change.
-
-- `apps/web/src/components/**`, `apps/web/src/routes/**`, `apps/web/src/styles/**`
-- `apps/web/src/styles.css`, `apps/web/src/App.tsx`, `apps/web/index.html`, `apps/web/public/**`
-- `apps/web/src/*.test.ts`, `apps/web/src/*.test.tsx`
-
-The content boundary stays off limits even in these folders. In `components/reading/`, leave
-`BlockView.tsx`, `HtmlDocFrame.tsx`, `HtmlDiagramRenderer.tsx` and `MermaidBlock.tsx` alone. Skip
-filenames containing `mermaid`, `html-bridge`, `html-doc`, `sanitiz` or `frame-build`, ignoring case,
-and service workers (`sw.*` and `sw-*`). Never change code that sanitizes or frames agent content.
+UI-only state. You may edit the web tests for the UI you change. Read `scripts/check-ui-scope.ts`
+for the allowed and refused paths before editing. Never change code that sanitizes, frames,
+bridges or validates agent content.
 
 Keep source edits inside the allowlist. Leave `src/api/`, `src/lib/`, `src/test/`, `src/main.tsx`
 and `src/router.tsx` alone. Report any need for API calls, data shapes, contract changes or other
@@ -48,9 +42,9 @@ mutation, an install or any other browser. Never commit.
   palette wherever they apply.
 - Read the accessibility snapshot of the changed area. Check the console for errors and the
   network log for failed requests. Check each applicable section of `docs/ui.md`.
-- Save screenshots to `.wt/ui/`. If the browser tool refuses the path, save to the temp folder
-  and move the screenshot into `.wt/ui/` with Bash.
+- Save screenshots to `.wt/ui/`. If the browser tool refuses that path, report it under the needs
+  you could not meet.
 
-Before returning, stop the demo with `kill -INT` using the pid in `.wt/ui-demo.json`, including
-when a check fails. Return the changed files with the `docs/ui.md` section each follows, the
-screenshot paths and any needs you could not meet.
+Before returning, run `node scripts/ui-demo.ts stop`, including when a check fails. Return the
+changed files with the `docs/ui.md` section each follows, the screenshot paths and any needs you
+could not meet.

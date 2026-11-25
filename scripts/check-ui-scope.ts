@@ -1,14 +1,60 @@
 import { execFileSync } from "node:child_process";
-import { posix } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  constants, lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync,
+} from "node:fs";
+import { open } from "node:fs/promises";
+import { join, posix } from "node:path";
 
-const readingBoundaries = new Set([
-  "BlockView.tsx", "HtmlDocFrame.tsx", "HtmlDiagramRenderer.tsx", "MermaidBlock.tsx",
-].map((name) => `apps/web/src/components/reading/${name}`));
+const contentBoundaries = new Set([
+  "App.test.tsx",
+  "diff-boundary.test.ts",
+  "lifecycle-ui.test.tsx",
+  "main.test.tsx",
+  "reading-navigation.test.tsx",
+  "reading-position.test.tsx",
+  "reading.test.tsx",
+  "source.test.tsx",
+  "routes/review.tsx",
+  "routes/theme-sample.test.tsx",
+  "components/diff/comment-lines.test.tsx",
+  "components/diff/parse-client.test.ts",
+  "components/diff/parse-client.ts",
+  "components/diff/parse.worker.ts",
+  "components/diff/render.test.tsx",
+  "components/diff/visibility.test.tsx",
+  "components/diff/worker-pool.test.tsx",
+  "components/diff/worker-render.test.tsx",
+  "components/reading/BlockView.tsx",
+  "components/reading/ChartBlock.test.tsx",
+  "components/reading/ChartBlock.tsx",
+  "components/reading/DocView.tsx",
+  "components/reading/GlossaryTerms.tsx",
+  "components/reading/HtmlDiagramRenderer.tsx",
+  "components/reading/HtmlDocFrame.tsx",
+  "components/reading/IssueCards.tsx",
+  "components/reading/MermaidBlock.tsx",
+  "components/reading/SourceView.tsx",
+  "components/reading/agent-note-refs.test.tsx",
+  "components/reading/agent-note-refs.ts",
+  "components/reading/glossary-terms.test.tsx",
+  "components/reading/highlights.test.tsx",
+  "components/reading/html-diagrams.test.ts",
+  "components/reading/html-diagrams.ts",
+  "components/reading/issue-cards.test.tsx",
+  "components/reading/lightbox.test.tsx",
+  "components/reading/screenshots.ts",
+  "components/reading/thread-marks.test.tsx",
+  "components/reading/writeup.test.tsx",
+  "components/review/ReviewHeader.test.tsx",
+  "components/review/ReviewHeader.tsx",
+  "components/threads/threads.test.tsx",
+].map((path) => `apps/web/src/${path}`));
 
 function allowed(path: string): boolean {
   const name = posix.basename(path);
-  if (readingBoundaries.has(path) || /mermaid|html-bridge|html-doc|sanitiz|frame-build/i.test(name) || /^sw[.-]/i.test(name))
-    return false;
+  if (contentBoundaries.has(path) || /mermaid|html-bridge|html-doc|sanitiz|frame-build/i.test(name)
+      || /^sw[.-]/i.test(name)) return false;
   return path.startsWith("apps/web/public/") ||
     /^apps\/web\/src\/(components|routes|styles)\//.test(path) ||
     /^apps\/web\/src\/[^/]+\.test\.tsx?$/.test(path) ||
@@ -19,29 +65,108 @@ export function outsideScope(paths: Iterable<string>): string[] {
   return [...new Set(paths)].filter((path) => !allowed(path)).sort();
 }
 
-function main(args: string[]): number {
-  if (args.length !== 2 || args[0] !== "--since" || !args[1]) {
-    console.error("Usage: node scripts/check-ui-scope.ts --since <commit>");
+// Directory paths have a trailing slash. Never descend into generated output.
+const ignoredSkips = [
+  /(?:^|\/)node_modules(?:\/|$)/,
+  /(?:^|\/)\.tsbuild\//,
+  /^apps\/[^/]+\/dist\//,
+  /^\.wt\/ui\//,
+  /^\.wt\/ui-demo\.json(?:\.[^/]*)?$/,
+  /^\.claude\/scheduled_tasks\.lock$/,
+];
+
+async function ignoredFiles(cwd: string, roots: string[]): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  async function walk(path: string) {
+    if (ignoredSkips.some((skip) => skip.test(path))) return;
+    const file = join(cwd, path);
+    const stat = lstatSync(file);
+    if (stat.isDirectory()) {
+      if (ignoredSkips.some((skip) => skip.test(path + "/"))) return;
+      for (const entry of readdirSync(file)) await walk(path + "/" + entry);
+    } else if (stat.isSymbolicLink()) {
+      const target = readlinkSync(file, { encoding: "buffer" });
+      files.set(path, "link:" + createHash("sha256").update(target).digest("hex"));
+    } else if (stat.isFile()) {
+      const hash = createHash("sha256");
+      const flags = constants.O_RDONLY | constants.O_NOFOLLOW;
+      const handle = await open(file, flags);
+      for await (const chunk of handle.createReadStream()) hash.update(chunk);
+      files.set(path, hash.digest("hex"));
+    } else {
+      throw new Error(`Cannot snapshot special file ${JSON.stringify(path)}`);
+    }
+  }
+  for (const root of roots) await walk(root.replace(/\/$/, ""));
+  return files;
+}
+
+function readSnapshot(file: string): Map<string, string> {
+  const values = JSON.parse(readFileSync(file, "utf8"));
+  if (!values || typeof values !== "object" || Array.isArray(values))
+    throw new Error("Invalid ignored file snapshot");
+  const files = new Map<string, string>();
+  for (const [path, hash] of Object.entries(values)) {
+    if (typeof hash !== "string" || !/^(?:link:)?[0-9a-f]{64}$/.test(hash))
+      throw new Error("Invalid digest in ignored file snapshot");
+    files.set(path, hash);
+  }
+  return files;
+}
+
+const splitPaths = (output: string) => output.split("\0").filter(Boolean);
+
+async function main(args: string[]): Promise<number> {
+  const snapshotOnly = args.length === 2 && args[0] === "--snapshot" && !!args[1];
+  const since = args[0] === "--since" && !!args[1] &&
+    (args.length === 2 || (args.length === 4 && args[2] === "--snapshot" && !!args[3]));
+  if (!snapshotOnly && !since) {
+    console.error("Usage: node scripts/check-ui-scope.ts [--since <commit>] [--snapshot <file>]");
     return 2;
   }
   const options = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] } as const;
   const cwd = execFileSync("git", ["rev-parse", "--show-toplevel"], options).trimEnd();
-  const git = (args: string[]) => execFileSync("git", args, { ...options, cwd, maxBuffer: 64 * 1024 * 1024 });
-  const base = git(["rev-parse", "--verify", "--end-of-options", `${args[1]}^{commit}`]).trim();
-  const diff = ["diff", "--name-only", "--no-renames", "-z"];
-  // The index can still differ even when the working copy matches the base again.
-  const paths = git([...diff, base, "--"]) + git([...diff, "--cached", base, "--"]) +
-    git(["ls-files", "--others", "--exclude-standard", "-z"]);
-  const outside = outsideScope(paths.split("\0").filter(Boolean));
-  for (const path of outside) console.log(/[\r\n]/.test(path) ? JSON.stringify(path) : path);
-  return outside.length ? 1 : 0;
+  const git = (args: string[]) =>
+    execFileSync("git", args, { ...options, cwd, maxBuffer: 64 * 1024 * 1024 });
+
+  let violations = false;
+  function report(path: string, prefix = "") {
+    console.log(prefix + (/[\r\n]/.test(path) ? JSON.stringify(path) : path));
+    violations = true;
+  }
+  if (since) {
+    const base = git(["rev-parse", "--verify", "--end-of-options", `${args[1]}^{commit}`]).trim();
+    const diff = ["diff", "--name-only", "--no-renames", "-z"];
+    // The index can still differ even when the working copy matches the base again.
+    const paths = git([...diff, base, "--"]) + git([...diff, "--cached", base, "--"]) +
+      git(["ls-files", "--others", "--exclude-standard", "-z"]);
+    for (const path of outsideScope(splitPaths(paths))) report(path);
+  }
+  const snapshot = snapshotOnly ? args[1] : args[3];
+  if (snapshot) {
+    const roots = git(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory",
+      "-z"]);
+    const current = await ignoredFiles(cwd, splitPaths(roots));
+    if (snapshotOnly) {
+      writeFileSync(snapshot, JSON.stringify(Object.fromEntries(current)), {
+        flag: "wx", mode: 0o600,
+      });
+    } else {
+      const before = readSnapshot(snapshot);
+      for (const path of [...new Set([...before.keys(), ...current.keys()])].sort())
+        if (before.get(path) !== current.get(path)) report(path, "ignored: ");
+    }
+  }
+  for (const entry of splitPaths(git(["ls-files", "-v", "-z"])))
+    if (/^[a-zS] /.test(entry)) report(entry.slice(2), "index flag: ");
+  return violations ? 1 : 0;
 }
 
 if (import.meta.main) {
   try {
-    process.exitCode = main(process.argv.slice(2));
-  } catch {
-    console.error("Could not read the base commit or the worktree paths");
+    process.exitCode = await main(process.argv.slice(2));
+  } catch (error) {
+    console.error("Could not check UI scope:", error instanceof Error ? error.message : error);
     process.exitCode = 2;
   }
 }
