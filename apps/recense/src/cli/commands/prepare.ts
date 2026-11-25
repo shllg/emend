@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants, lstatSync, type Stats } from "node:fs";
 import { lstat, open, realpath, unlink } from "node:fs/promises";
+import { constants as osConstants } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { docViewOf, LIMITS, type PreparedFile, PublishManifest } from "@recense/contract";
 import { cleanDocTitle, isLockfile } from "@recense/core";
@@ -17,6 +18,9 @@ import { publishContext, resolvePublish, shortenRepoName } from "../publish/reso
 import { worktreeRoot } from "../publish/root.ts";
 import { type ChangedPath, readSide } from "../publish/sides.ts";
 import { readBlob } from "../publish/upload.ts";
+import { hashWorktreeFile, statWorktree } from "../publish/worktree.ts";
+
+const PREPARE_DOC_BUDGET_MS = 30_000;
 
 function parseArgs(args: string[]) {
   const usage = new CliUsageError("usage: recense prepare --base <commit> --head <commit|worktree> --dir <folder>");
@@ -156,15 +160,42 @@ async function prepareDiff(
   return prepared;
 }
 
+type DocBudget = {
+  remainingMs: number;
+  remainingRows: number;
+  remainingBytes: number;
+  assetPaths: Set<string>;
+  blobHashes: Set<string>;
+};
+
+function refusedDoc(reason: string) {
+  const limit = LIMITS.errorMessageChars;
+  return {
+    doc: "refused" as const,
+    docRefusal: reason.length > limit ? `${reason.slice(0, limit - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : reason,
+  };
+}
+
 async function prepareDoc(
+  { root, gitDirs }: PublishContext,
   change: ChangedPath,
-  format: string,
+  format: "sha1" | "sha256",
   resolveDoc: (path: string) => ReturnType<typeof resolvePublish>,
+  budget: DocBudget,
 ): Promise<Pick<PreparedFile, "doc" | "docRefusal">> {
   if (change.status === "deleted") return { doc: "deleted" };
   if (change.newMode !== "100644" && change.newMode !== "100755")
-    return { doc: "refused", docRefusal: "the changed doc is not a regular file" };
+    return refusedDoc("the changed doc is not a regular file");
+  if (budget.remainingRows < 1) return refusedDoc("too many files in the review");
+  if (budget.remainingMs <= 0) return refusedDoc("not checked: prepare ran out of time for doc checks");
+  const start = performance.now();
   try {
+    if (change.newOid) {
+      const info = await statWorktree(root, change.path, gitDirs);
+      if (!info?.isFile()) return { doc: "differs-from-head" };
+      const oid = await hashWorktreeFile(root, change.path, info, format, undefined, gitDirs);
+      if (oid !== change.newOid) return { doc: "differs-from-head" };
+    }
     const { request, blobs } = await resolveDoc(change.path);
     if (change.newOid) {
       const hash = request.files.find((file) => file.role === "doc")?.newBlob;
@@ -172,19 +203,27 @@ async function prepareDoc(
       if (!hash || !source) throw new Error("missing resolved doc blob");
       if (gitBlobId(format, await readBlob(hash, source)) !== change.newOid) return { doc: "differs-from-head" };
     }
+
+    const assets = request.files.filter((file) => file.role === "asset" && !budget.assetPaths.has(file.path));
+    const rows = 1 + assets.length;
+    if (rows > budget.remainingRows) return refusedDoc("too many files in the review");
+    let bytes = 0;
+    for (const [hash, source] of blobs) if (!budget.blobHashes.has(hash)) bytes += source.size;
+    if (bytes > budget.remainingBytes) return refusedDoc("the docs pass the revision size limit");
+
+    budget.remainingRows -= rows;
+    budget.remainingBytes -= bytes;
+    for (const file of assets) budget.assetPaths.add(file.path);
+    for (const hash of blobs.keys()) budget.blobHashes.add(hash);
     return { doc: "included" };
   } catch (error) {
-    if (error instanceof CliError) {
-      const limit = LIMITS.errorMessageChars;
-      const reason = error.message;
-      return {
-        doc: "refused",
-        docRefusal: reason.length > limit ? `${reason.slice(0, limit - 1).replace(/[\uD800-\uDBFF]$/, "")}…` : reason,
-      };
-    }
-    if (typeof error === "object" && error !== null && "code" in error)
-      return { doc: "refused", docRefusal: "the doc could not be read" };
-    throw error;
+    if (error instanceof CliError) return refusedDoc(error.message);
+    const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+    if (typeof code === "string" && Object.hasOwn(osConstants.errno, code))
+      return refusedDoc("the doc could not be read");
+    return refusedDoc("the doc could not be checked");
+  } finally {
+    budget.remainingMs -= performance.now() - start;
   }
 }
 
@@ -194,7 +233,7 @@ export async function prepareCommand(
   args: string[],
   io: Io,
   cwd: string,
-  limits: { countBudgetMs?: number; filesPerRevision?: number } = {},
+  limits: { countBudgetMs?: number; docBudgetMs?: number; filesPerRevision?: number; revisionBytes?: number } = {},
 ) {
   const { base, head, dir } = parseArgs(args);
   const requested = resolve(cwd, dir);
@@ -218,6 +257,12 @@ export async function prepareCommand(
   const changes = await collectChanges(root, base, head, git, warn, gitDirs);
   const configRoots = await readDocRoots(stateDir, configDir, cwd, warn);
   const format = (await git(root, ["rev-parse", "--show-object-format"])).toString().trim();
+  if (format !== "sha1" && format !== "sha256") throw new CliError("unsupported git object format");
+  const counting: Counting = {
+    worker: workerExecutor(),
+    outcomes: new Map(),
+    budget: createDiffCountBudget(limits.countBudgetMs),
+  };
   const writeup = { overview: "", tldr: "", decisions: null, topics: {} };
   const resolveDoc = (path: string) =>
     resolvePublish(
@@ -227,31 +272,26 @@ export async function prepareCommand(
       configDir,
       null,
       cwd,
-      warn,
+      () => {},
       context,
       configRoots,
+      counting.worker,
     );
   const files: PublishManifest["files"] = [];
-  let docSlots = (limits.filesPerRevision ?? LIMITS.filesPerRevision) - changes.length;
-  const counting: Counting = {
-    worker: workerExecutor(),
-    outcomes: new Map(),
-    budget: createDiffCountBudget(limits.countBudgetMs),
+  const docBudget: DocBudget = {
+    remainingMs: limits.docBudgetMs ?? PREPARE_DOC_BUDGET_MS,
+    remainingRows: (limits.filesPerRevision ?? LIMITS.filesPerRevision) - changes.length,
+    remainingBytes: (limits.revisionBytes ?? LIMITS.revisionBytes) - LIMITS.writeupBytes,
+    assetPaths: new Set(),
+    blobHashes: new Set(),
   };
   try {
     for (const change of changes) {
       const prepared = await prepareDiff(context, head, change, format, counting);
       files.push({ path: change.path, role: "diff", prepared });
       if (docViewOf({ path: change.path }) !== "rendered") continue;
-      Object.assign(prepared, await prepareDoc(change, format, resolveDoc));
-      if (prepared.doc !== "included") continue;
-      if (docSlots <= 0) {
-        prepared.doc = "refused";
-        prepared.docRefusal = "too many files in the review";
-      } else {
-        files.push({ path: change.path, role: "doc" });
-        docSlots--;
-      }
+      Object.assign(prepared, await prepareDoc(context, change, format, resolveDoc, docBudget));
+      if (prepared.doc === "included") files.push({ path: change.path, role: "doc" });
     }
   } finally {
     await counting.worker.close();

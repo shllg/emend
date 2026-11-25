@@ -56,7 +56,7 @@ export function escapeJson(json: string, output: "terminal" | "manifest" = "term
       : unit(code);
   if (output === "manifest") {
     // JSON.stringify escapes line feeds in strings. Literal line feeds separate fields.
-    const invisible = /(?![ \n])[\p{C}\p{Z}]|\p{Variation_Selector}|\u034f|[\u115f\u1160\u3164\uffa0\u2800]/gu;
+    const invisible = /(?![ \n])[\p{C}\p{Z}\p{Default_Ignorable_Code_Point}\p{Variation_Selector}\u2800]/gu;
     return expanded.replace(invisible, (char) => unicodeEscape(char.codePointAt(0) as number));
   }
   return escapeControls(expanded, unicodeEscape);

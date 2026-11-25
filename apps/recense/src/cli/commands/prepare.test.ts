@@ -19,8 +19,7 @@ import { LIMITS, type PreparedFile, PublishManifest } from "@recense/contract";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import * as executor from "../../server/publish/executor.ts";
-import * as collection from "../publish/collect.ts";
-import { resolvePublish } from "../publish/resolve.ts";
+import * as publish from "../publish/resolve.ts";
 import * as roots from "../publish/root.ts";
 import { prepareCommand } from "./prepare.ts";
 
@@ -153,7 +152,7 @@ test("prepares a committed branch in listing order and resolves the same files a
   };
   const resolve = async (manifest: PublishManifest) =>
     (
-      await resolvePublish(
+      await publish.resolvePublish(
         manifest,
         { manifest: path },
         join(dir, "state"),
@@ -214,6 +213,7 @@ test("checks docs on disk against the SHA-256 head and records each reason for o
   await rm(join(root, "missing.htm"));
   await rm(join(root, "redirect.html"));
   await symlink("matching.MARKDOWN", join(root, "redirect.html"));
+  const resolveDoc = vi.spyOn(publish, "resolvePublish");
   expect(await prepare(base, head)).toEqual({
     code: 0,
     stderr: "",
@@ -222,17 +222,13 @@ test("checks docs on disk against the SHA-256 head and records each reason for o
   const { files } = PublishManifest.parse(JSON.parse(await readFile(path, "utf8")));
   expect(files.map((file) => [file.path, file.prepared?.doc ?? file.role])).toEqual([
     ["changed.md", "differs-from-head"],
-    ["large.md", "refused"],
+    ["large.md", "differs-from-head"],
     ["matching.MARKDOWN", "included"],
     ["matching.MARKDOWN", "doc"],
-    ["missing.htm", "refused"],
-    ["redirect.html", "refused"],
+    ["missing.htm", "differs-from-head"],
+    ["redirect.html", "differs-from-head"],
   ]);
-  expect(files.filter((file) => file.prepared?.doc === "refused").map((file) => file.prepared?.docRefusal)).toEqual([
-    "file exceeds its size limit: large.md",
-    "doc not found: missing.htm",
-    "doc source must end in .md, .markdown, .html or .htm, like its path.",
-  ]);
+  expect(resolveDoc.mock.calls.map(([manifest]) => manifest.files[0]?.path)).toEqual(["matching.MARKDOWN"]);
 });
 
 test("counts a repeated object pair once on the worker and skips fresh pairs after exhausting the budget", async () => {
@@ -275,6 +271,43 @@ test("distinguishes size-changing worktree sides when collection omits their new
   ]);
 });
 
+test("shares the count worker with doc checks and stops resolving when their time budget is spent", async () => {
+  await git("init", "-b", "topic");
+  const base = await commit();
+  for (const name of ["a.md", "b.md", "c.md"]) await writeFile(join(root, name), "![picture](missing.png)");
+  const head = await commit();
+  let elapsed = 0;
+  vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+  const worker = executor.workerExecutor();
+  const execute = Object.assign(
+    vi.fn(async (work: Parameters<typeof worker>[0]) => {
+      elapsed += work.kind === "diff-counts" ? 100 : 5;
+      return worker(work);
+    }),
+    { close: vi.fn(worker.close) },
+  );
+  const create = vi.spyOn(executor, "workerExecutor").mockReturnValue(execute);
+  const resolveDoc = vi.spyOn(publish, "resolvePublish");
+  await withLimits(base, head, { docBudgetMs: 10 });
+  expect(resolveDoc.mock.calls.map(([manifest]) => manifest.files[0]?.path)).toEqual(["a.md", "b.md"]);
+  expect(create).toHaveBeenCalledOnce();
+  expect(execute.mock.calls.map(([work]) => work.kind)).toEqual(["diff-counts", "doc-images", "doc-images"]);
+  expect(execute.close).toHaveBeenCalledOnce();
+  expect((await skeleton()).files).toEqual([
+    diff("a.md", { status: "added", added: 1, removed: 0, doc: "included" }),
+    doc("a.md"),
+    diff("b.md", { status: "added", added: 1, removed: 0, doc: "included" }),
+    doc("b.md"),
+    diff("c.md", {
+      status: "added",
+      added: 1,
+      removed: 0,
+      doc: "refused",
+      docRefusal: "not checked: prepare ran out of time for doc checks",
+    }),
+  ]);
+});
+
 test.each(["commit", "worktree"])("refuses a changed symlink doc at a %s head", async (kind) => {
   await git("init", "-b", "topic");
   await writeFile(join(root, "target.md"), "# Target");
@@ -293,16 +326,15 @@ test.each(["commit", "worktree"])("refuses a changed symlink doc at a %s head", 
   ]);
 });
 
-test("compares the publishable doc bytes with the collected worktree object", async () => {
+test("checks publishable bytes even when the disk copy matched before resolve", async () => {
   await git("init", "--object-format=sha256", "-b", "topic");
   const base = await commit();
   const file = join(root, "changed.md");
   await writeFile(file, "collected\n");
-  const collect = collection.collectChanges;
-  vi.spyOn(collection, "collectChanges").mockImplementationOnce(async (...args) => {
-    const changes = await collect(...args);
+  const resolveDoc = publish.resolvePublish;
+  vi.spyOn(publish, "resolvePublish").mockImplementationOnce(async (...args) => {
     await writeFile(file, "later\n");
-    return changes;
+    return resolveDoc(...args);
   });
   expect((await prepare(base, "worktree")).code).toBe(0);
   expect((await skeleton()).files).toEqual([
@@ -335,7 +367,52 @@ test("refuses a changed doc when publish rejects its oversized local asset", asy
   ]);
 });
 
-test.skipIf(!process.getuid || process.getuid() === 0)("records publish's refusal for an unreadable doc", async () => {
+test("writes the manifest when asset parsing fails on deeply nested HTML", async () => {
+  await git("init", "-b", "topic");
+  const base = await commit();
+  await writeFile(join(root, "nested.html"), "<div>".repeat(10_000) + "</div>".repeat(10_000));
+  await writeFile(join(root, "next.md"), "text");
+  expect((await prepare(base, await commit())).code).toBe(0);
+  expect((await skeleton()).files).toEqual([
+    diff("nested.html", {
+      status: "added",
+      added: 1,
+      removed: 0,
+      doc: "refused",
+      docRefusal: "the doc could not be checked",
+    }),
+    diff("next.md", { status: "added", added: 1, removed: 0, doc: "included" }),
+    doc("next.md"),
+  ]);
+});
+
+test("omits per-reference warnings from changed HTML docs", async () => {
+  await git("init", "-b", "topic");
+  const base = await commit();
+  const images = Array.from({ length: 100 }, (_, i) => `<img src="missing-${i}.png">`);
+  await writeFile(join(root, "images.html"), images.join("\n"));
+  expect(await prepare(base, await commit())).toEqual({
+    code: 0,
+    stderr: "",
+    stdout: `${JSON.stringify({ manifest: path, diff: 1, doc: 1 })}\n`,
+  });
+});
+
+test("distinguishes a resolver error with an internal code from a filesystem error", async () => {
+  await git("init", "-b", "topic");
+  const base = await commit();
+  await writeFile(join(root, "guide.md"), "text");
+  vi.spyOn(publish, "resolvePublish").mockRejectedValueOnce(
+    Object.assign(new Error("unexpected result"), { code: "ERR_ASSERTION" }),
+  );
+  expect((await prepare(base, await commit())).code).toBe(0);
+  expect((await skeleton()).files[0]?.prepared).toMatchObject({
+    doc: "refused",
+    docRefusal: "the doc could not be checked",
+  });
+});
+
+test.skipIf(!process.getuid || process.getuid() === 0)("records a fixed refusal for an unreadable doc", async () => {
   await git("init", "-b", "topic");
   const base = await commit();
   await writeFile(join(root, "locked.md"), "text");
@@ -348,12 +425,12 @@ test.skipIf(!process.getuid || process.getuid() === 0)("records publish's refusa
       added: 1,
       removed: 0,
       doc: "refused",
-      docRefusal: "unreadable: locked.md",
+      docRefusal: "the doc could not be read",
     }),
   ]);
 });
 
-test("records a fixed refusal when a doc read encounters a symlink loop", async () => {
+test("records a symlink loop in place of a committed doc as differing from head", async () => {
   await git("init", "-b", "topic");
   const base = await commit();
   await writeFile(join(root, "loop.md"), "text");
@@ -366,8 +443,7 @@ test("records a fixed refusal when a doc read encounters a symlink loop", async 
       status: "added",
       added: 1,
       removed: 0,
-      doc: "refused",
-      docRefusal: "the doc could not be read",
+      doc: "differs-from-head",
     }),
   ]);
 });
@@ -377,24 +453,81 @@ test("truncates long publish refusals with a closing ellipsis", async () => {
   const base = await commit();
   const parent = Array(5).fill("a".repeat(200)).join("/");
   await mkdir(join(root, parent), { recursive: true });
-  const name = join(parent, "missing.md");
-  await writeFile(join(root, name), "text");
+  const name = join(parent, "large.md");
+  await writeFile(join(root, name), Buffer.alloc(LIMITS.markdownDocBytes + 1, 65));
   const head = await commit();
-  await rm(join(root, name));
   expect((await prepare(base, head)).code).toBe(0);
-  expect((await skeleton()).files[0]?.prepared?.docRefusal).toBe(`${`doc not found: ${name}`.slice(0, 999)}…`);
+  expect((await skeleton()).files[0]?.prepared?.docRefusal).toBe(
+    `${`file exceeds its size limit: ${name}`.slice(0, 999)}…`,
+  );
 });
 
 test("reserves a slot for every diff before including docs", async () => {
   await git("init", "-b", "topic");
   const base = await commit();
   for (const name of ["a.md", "b.md", "z.txt"]) await writeFile(join(root, name), "text");
+  const resolveDoc = vi.spyOn(publish, "resolvePublish");
   await withLimits(base, "worktree", { filesPerRevision: 4 });
+  expect(resolveDoc.mock.calls.map(([manifest]) => manifest.files[0]?.path)).toEqual(["a.md"]);
   expect((await skeleton()).files).toEqual([
     diff("a.md", { status: "added", added: 1, removed: 0, doc: "included" }),
     doc("a.md"),
     diff("b.md", { status: "added", added: 1, removed: 0, doc: "refused", docRefusal: "too many files in the review" }),
     diff("z.txt", { status: "added", added: 1, removed: 0 }),
+  ]);
+});
+
+test("counts each asset path once and leaves room for a shared asset after refusing a doc", async () => {
+  await git("init", "-b", "topic");
+  for (const name of ["shared.png", "other.png"]) await writeFile(join(root, name), "same bytes");
+  const base = await commit();
+  for (const [file, asset] of [
+    ["a.html", "shared.png"],
+    ["b.html", "other.png"],
+    ["c.html", "shared.png"],
+  ] as const)
+    await writeFile(join(root, file), `<img src="${asset}">`);
+  await withLimits(base, await commit(), { filesPerRevision: 6 });
+  expect((await skeleton()).files).toEqual([
+    diff("a.html", { status: "added", added: 1, removed: 0, doc: "included" }),
+    doc("a.html"),
+    diff("b.html", {
+      status: "added",
+      added: 1,
+      removed: 0,
+      doc: "refused",
+      docRefusal: "too many files in the review",
+    }),
+    diff("c.html", { status: "added", added: 1, removed: 0, doc: "included" }),
+    doc("c.html"),
+  ]);
+});
+
+test("reserves writeup bytes, charges unique doc and asset blobs, and skips refused docs in the total", async () => {
+  await git("init", "-b", "topic");
+  await mkdir(join(root, "sub"));
+  const picture = "sample picture";
+  for (const asset of ["p.png", "sub/p.png"]) await writeFile(join(root, asset), picture);
+  const base = await commit();
+  const html = '<img src="p.png">';
+  await writeFile(join(root, "a.html"), html);
+  await writeFile(join(root, "b.md"), "more than one byte");
+  await writeFile(join(root, "c.md"), "c");
+  await writeFile(join(root, "d.md"), "d");
+  await writeFile(join(root, "sub/copy.html"), html);
+  const revisionBytes = LIMITS.writeupBytes + Buffer.byteLength(html + picture) + 1;
+  await withLimits(base, await commit(), { revisionBytes });
+  const { files } = await skeleton();
+  expect(files.filter((file) => file.role === "doc").map((file) => file.path)).toEqual([
+    "a.html",
+    "c.md",
+    "sub/copy.html",
+  ]);
+  expect(
+    files.filter((file) => file.prepared?.doc === "refused").map((file) => [file.path, file.prepared?.docRefusal]),
+  ).toEqual([
+    ["b.md", "the docs pass the revision size limit"],
+    ["d.md", "the docs pass the revision size limit"],
   ]);
 });
 
@@ -419,12 +552,12 @@ test("rejects folders inside a linked worktree's git directories before checking
 test("cleans the branch title and visibly escapes hidden code points in paths without changing them", async () => {
   await git("init", "-b", "top\u202eic");
   const base = await commit();
-  const name = "a \u{e0041}\ue123\u0378\u00a0\u2800\ufe0f\u{e0100}.txt";
+  const name = "a \u{e0041}\ue123\u0378\u00a0\u17b4\u17b5\u2800\ufe0f\u{e0100}.txt";
   await writeFile(join(root, name), "text");
   const head = await commit();
   expect((await prepare(base, head)).code).toBe(0);
   const raw = await readFile(path, "utf8");
-  expect(raw).toContain(String.raw`a \udb40\udc41\ue123\u0378\u00a0\u2800\ufe0f\udb40\udd00.txt`);
+  expect(raw).toContain(String.raw`a \udb40\udc41\ue123\u0378\u00a0\u17b4\u17b5\u2800\ufe0f\udb40\udd00.txt`);
   const manifest = await skeleton();
   expect(manifest.title).toBe("topic");
   expect(manifest.files[0]?.path).toBe(name);

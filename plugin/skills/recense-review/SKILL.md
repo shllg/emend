@@ -149,7 +149,7 @@ Prepare already checked the changed docs. For an unchanged cited doc with a comm
 this check from the repository root:
 
 ```sh
-git cat-file -e <head>:<path> && git show <head>:<path> | cmp -s - <path>
+git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'
 ```
 
 Exit 0 means the doc exists at `head` and the disk copy is identical. Give it a `doc` entry.

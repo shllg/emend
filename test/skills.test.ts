@@ -610,7 +610,7 @@ test("the review skill prepares the manifest in its private folder and uses git 
   expect(docs).toContain("git log --no-color");
   expect(docs).toContain("xargs -0 grep");
   expect(docs).toContain("For an unchanged cited doc with a commit head");
-  expect(docs).toContain("git cat-file -e <head>:<path> && git show <head>:<path> | cmp -s - <path>");
+  expect(docs).toContain("git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'");
   expect(docs).toContain("`docRefusal`");
   expect(docs).not.toMatch(/--name-status|git ls-files --others/);
 });
