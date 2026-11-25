@@ -77,6 +77,37 @@ test("holding code text leaves scrolling available", () => {
   expect(cell.hasAttribute("data-touch-hold")).toBe(false);
 });
 
+test.each(["touch", "pen", "mouse"])("%s pointercancel preserves a pending hold only for mouse", (pointerType) => {
+  const { cell } = fixture();
+  touch(cell, "touchstart", [20, 30]);
+  vi.advanceTimersByTime(TOUCH_HOLD_MS - 1);
+  cell.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, composed: true, pointerType }));
+  vi.advanceTimersByTime(2);
+  const held = pointerType === "mouse";
+  expect(cell.hasAttribute("data-touch-hold")).toBe(held);
+  expect(touch(cell, "touchmove", [20, 100]).defaultPrevented).toBe(held);
+});
+
+test("holding the gutter button leaves scrolling available beside a selectable number", () => {
+  const { cell, label } = fixture();
+  const slot = document.createElement("div");
+  slot.setAttribute("data-gutter-utility-slot", "");
+  const button = document.createElement("button");
+  slot.append(button);
+  cell.append(slot);
+
+  expect(touch(button, "touchstart", [20, 30]).defaultPrevented).toBe(false);
+  vi.advanceTimersByTime(TOUCH_HOLD_MS);
+  expect(cell.hasAttribute("data-touch-hold")).toBe(false);
+  expect(touch(button, "touchmove", [20, 100]).defaultPrevented).toBe(false);
+  touch(button, "touchend");
+
+  touch(label, "touchstart", [20, 30]);
+  vi.advanceTimersByTime(TOUCH_HOLD_MS);
+  expect(cell.hasAttribute("data-touch-hold")).toBe(true);
+  expect(touch(label, "touchmove", [20, 100]).defaultPrevented).toBe(true);
+});
+
 test("holding a read-only line number leaves scrolling available", () => {
   const { cell, pre } = fixture();
   pre.removeAttribute("data-interactive-line-numbers");

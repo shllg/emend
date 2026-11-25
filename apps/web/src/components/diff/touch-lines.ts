@@ -15,19 +15,18 @@ export function holdToSelectLines(element: HTMLElement): () => void {
     clear();
     const touch = event.touches[0];
     if (event.touches.length !== 1 || !touch) return;
-    const cell = event
-      .composedPath()
-      .find(
-        (node): node is Element =>
-          node instanceof Element && node.matches("pre[data-interactive-line-numbers] [data-column-number]"),
-      );
-    if (!cell) return;
-    hold = {
-      cell,
-      startX: touch.clientX,
-      startY: touch.clientY,
-      timer: setTimeout(() => cell.setAttribute("data-touch-hold", ""), TOUCH_HOLD_MS),
-    };
+    for (const cell of event.composedPath()) {
+      if (!(cell instanceof Element)) continue;
+      if (cell.hasAttribute("data-gutter-utility-slot")) return;
+      if (!cell.matches("pre[data-interactive-line-numbers] [data-column-number]")) continue;
+      hold = {
+        cell,
+        startX: touch.clientX,
+        startY: touch.clientY,
+        timer: setTimeout(() => cell.setAttribute("data-touch-hold", ""), TOUCH_HOLD_MS),
+      };
+      return;
+    }
   }
 
   function move(event: TouchEvent) {
@@ -46,6 +45,10 @@ export function holdToSelectLines(element: HTMLElement): () => void {
     if (hold) event.preventDefault();
   }
 
+  function pointerCancel(event: PointerEvent) {
+    if (event.pointerType !== "mouse") clear();
+  }
+
   const controller = new AbortController();
   const { signal } = controller;
   const passive = { signal, passive: true };
@@ -53,6 +56,7 @@ export function holdToSelectLines(element: HTMLElement): () => void {
   element.addEventListener("touchmove", move, { signal, passive: false });
   element.addEventListener("touchend", clear, passive);
   element.addEventListener("touchcancel", clear, passive);
+  element.addEventListener("pointercancel", pointerCancel, passive);
   element.addEventListener("contextmenu", contextMenu, { signal });
   return () => {
     clear();
