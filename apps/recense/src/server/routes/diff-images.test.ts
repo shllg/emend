@@ -76,9 +76,9 @@ test.each([false, true])(
       new: { mediaType: "image/svg+xml", flag: null },
     });
     expect(await rows()).toHaveLength(2);
-    for (const [side, bytes, type] of [
-      ["old", png, "image/png"],
-      ["new", svg, "image/svg+xml"],
+    for (const [side, bytes, type, disposition] of [
+      ["old", png, "image/png", "inline"],
+      ["new", svg, "image/svg+xml", "attachment"],
     ] as const) {
       const path = `/files/${file.id}/${side}/image`;
       for (const destination of ["image", "document"]) {
@@ -98,7 +98,7 @@ test.each([false, true])(
           "Content-Type": type,
           "Content-Length": String(bytes.length),
           "Cache-Control": "no-store",
-          "Content-Disposition": "inline",
+          "Content-Disposition": disposition,
           "X-Content-Type-Options": "nosniff",
           "Cross-Origin-Resource-Policy": "same-origin",
           "X-Frame-Options": "DENY",
@@ -117,6 +117,13 @@ test.each([false, true])(
     expect((await f.request(`/reviews/${id}/bin`, "POST")).status).toBe(204);
     const path = `/files/${file.id}/old/image`;
     await error(await f.request(path, "GET"), 409, "review_in_bin");
+    await error(
+      await f.request(`/files/${file.id}/new/image`, "GET", undefined, "reviewer", undefined, {
+        "Sec-Fetch-Dest": "document",
+      }),
+      409,
+      "review_in_bin",
+    );
     await f.db.query((q) =>
       q
         .update(reviews)

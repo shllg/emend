@@ -189,16 +189,18 @@ the number of queries is bounded independently of revision size.
 A reviewer session can read the old or new image of a diff file by file UUID.
 The old side uses the extension of `oldPath ?? path`, the new side that of `path`.
 PNG, JPG/JPEG, GIF, WebP, AVIF and SVG map to `image/png`, `image/jpeg`, `image/gif`,
-`image/webp`, `image/avif` and `image/svg+xml`, case-insensitively. A binned review
-returns `review_in_bin` unless moved. An unknown, malformed or foreign file id, another
-role, an unsupported extension, an absent or oversized side or missing bytes give `404 not_found`.
-For SVG, a request with a `Sec-Fetch-Dest` value other than `image` also gives
-`404 not_found` before the server opens the blob. Requests without the header
-can load SVG. Raster images accept any destination.
+`image/webp`, `image/avif` and `image/svg+xml`, case-insensitively. An unknown, malformed
+or foreign file id, another role, or an absent or oversized side gives `404 not_found`.
+For a matching row, a binned, unmoved review gives `409 review_in_bin`. Next, an unsupported
+extension gives `404 not_found`. For SVG, the server then checks `Sec-Fetch-Dest` and returns
+`404 not_found` for any value other than `image`. Requests without the header can load SVG.
+Raster images accept any destination. Missing blob bytes give `404 not_found`.
 
 `GET` streams the stored bytes with that `Content-Type`, `Content-Length`,
-`Content-Disposition: inline`, `Cache-Control: no-store`, `Cross-Origin-Resource-Policy: same-origin`
-and `X-Content-Type-Options: nosniff`. The image response replaces the app CSP with
+`Cache-Control: no-store`, `Cross-Origin-Resource-Policy: same-origin` and
+`X-Content-Type-Options: nosniff`. SVG responses carry `Content-Disposition: attachment`
+so a direct navigation without a destination header downloads the file. Raster responses carry
+`Content-Disposition: inline`. The image response replaces the app CSP with
 `sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`
 and retains the other app headers including `X-Frame-Options: DENY`. This disables SVG
 scripts and event handlers even on direct navigation. `HEAD` returns the same status

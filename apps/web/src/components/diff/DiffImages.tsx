@@ -6,7 +6,7 @@ import type { LightboxSubject } from "../reading/screenshots.ts";
 import { Button } from "../ui/Button.tsx";
 import { cn, focusRing } from "../ui/utils.ts";
 import { fileSideQuery, useFileTexts } from "./file-texts.ts";
-import { svgActiveKinds } from "./svg-active.ts";
+import { scanSvg, uncheckedSvg } from "./svg-active.ts";
 
 const comparisonModes = ["Before", "After", "Side by side"] as const;
 const formats = ["Pictures", "Text"] as const;
@@ -84,38 +84,57 @@ function ImageSide({ picture, label, onOpen }: { picture: Picture; label: string
 
 const list = new Intl.ListFormat("en", { type: "conjunction" });
 
-function SvgNotice({ file }: { file: FileView }) {
+function useSvgScan(file: FileView, side: "old" | "new", near: boolean) {
   const source = useFileTexts();
-  const before = useQuery({
-    ...fileSideQuery(file.id, "old", source),
-    enabled: file.hasOld,
-    select: svgActiveKinds,
+  const svg = file.image?.[side]?.mediaType === "image/svg+xml";
+  const readable = svg && !file.flag && (side === "old" ? file.hasOld : file.hasNew);
+  const query = useQuery({
+    ...fileSideQuery(file.id, side, source),
+    enabled: near && readable,
+    select: readable ? scanSvg : () => uncheckedSvg,
   });
-  const after = useQuery({
-    ...fileSideQuery(file.id, "new", source),
-    enabled: file.hasNew,
-    select: svgActiveKinds,
-  });
-  const old = file.hasOld && file.image?.old?.mediaType === "image/svg+xml" ? before.data : undefined;
-  const next = file.hasNew && file.image?.new?.mediaType === "image/svg+xml" ? after.data : undefined;
-  if (!old?.length && !next?.length) return null;
-  const subject =
-    old?.length && next?.length ? "Before and After SVGs hold" : old?.length ? "Before SVG holds" : "After SVG holds";
-  const found = new Set([...(old ?? []), ...(next ?? [])]);
+  if (!svg) return undefined;
+  return !readable || query.isError ? uncheckedSvg : query.data;
+}
+
+function sideLabel(before: boolean, after: boolean) {
+  if (before && after) return "Before and After";
+  return before ? "Before" : after ? "After" : undefined;
+}
+
+function SvgNotice({ file, near }: { file: FileView; near: boolean }) {
+  const before = useSvgScan(file, "old", near);
+  const after = useSvgScan(file, "new", near);
+  const active = sideLabel(!!before?.kinds.length, !!after?.kinds.length);
+  const unchecked = sideLabel(!!before?.unchecked, !!after?.unchecked);
+  if (!active && !unchecked) return null;
+  const found = new Set([...(before?.kinds ?? []), ...(after?.kinds ?? [])]);
   return (
-    <p className="bg-warning-bg px-3 py-2 text-warning-fg [font:var(--type-meta)]">
-      The {subject} {list.format(found)}. The picture never runs {found.size === 1 ? "it" : "them"}. Text shows the
-      source.
-    </p>
+    <div className="bg-warning-bg px-3 py-2 text-warning-fg [font:var(--type-meta)]">
+      {active && (
+        <p>
+          The {active} {active === "Before and After" ? "SVGs hold" : "SVG holds"} {list.format(found)}. The picture
+          never runs {found.size === 1 ? "it" : "them"}. Text shows the source.
+        </p>
+      )}
+      {unchecked && (
+        <p>
+          The {unchecked} SVG {unchecked === "Before and After" ? "sources were" : "source was"} not checked for scripts
+          or links. The picture never runs scripts.
+        </p>
+      )}
+    </div>
   );
 }
 
 export function DiffImages({
   file,
+  near,
   mode,
   onModeChange,
 }: {
   file: FileView;
+  near: boolean;
   mode: DiffImageMode;
   onModeChange: (mode: DiffImageMode) => void;
 }) {
@@ -169,7 +188,7 @@ export function DiffImages({
           )}
         </div>
       )}
-      {svg && !file.flag && (file.hasOld || file.hasNew) && <SvgNotice file={file} />}
+      {svg && <SvgNotice file={file} near={near} />}
       {mode.format === "Pictures" && (
         <div className="em-diff-images" data-pair={visible.length === 2 || undefined}>
           {visible.map((picture) => (

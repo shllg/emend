@@ -33,12 +33,12 @@ export function fileRoutes(app: Hono<AppEnv>, deps: AppDeps) {
           .get(),
       );
       if (!file?.blob) throw new ApiError("not_found");
+      if (file.binnedAt !== null && file.movedToUrl === null) throw new ApiError("review_in_bin");
       const type = diffImageType(side === "old" ? (file.oldPath ?? file.path) : file.path);
+      if (!type) throw new ApiError("not_found");
       const destination = c.req.header("Sec-Fetch-Dest");
       if (type === "image/svg+xml" && destination !== undefined && destination !== "image")
         throw new ApiError("not_found");
-      if (file.binnedAt !== null && file.movedToUrl === null) throw new ApiError("review_in_bin");
-      if (!type) throw new ApiError("not_found");
       const read = await deps.blobs.open(ownerId, file.blob, c.req.raw.signal);
       if (!read) throw new ApiError("not_found");
       let body: ReadableStream<Uint8Array> | null = null;
@@ -56,7 +56,7 @@ export function fileRoutes(app: Hono<AppEnv>, deps: AppDeps) {
       c.header("X-Content-Type-Options", "nosniff");
       c.header("Cross-Origin-Resource-Policy", "same-origin");
       c.header("Cache-Control", "no-store");
-      c.header("Content-Disposition", "inline");
+      c.header("Content-Disposition", type === "image/svg+xml" ? "attachment" : "inline");
       c.header("Content-Security-Policy", DIFF_IMAGE_CSP);
       return body === null ? c.body(null) : c.body(body);
     });

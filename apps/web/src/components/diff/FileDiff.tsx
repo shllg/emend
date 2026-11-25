@@ -461,7 +461,7 @@ export function FileDiff({
       )}
       {!collapsed && !topicCollapsed && (
         <div className="em-diff-body">
-          {file.image && <DiffImages file={file} mode={imageMode} onModeChange={setImageMode} />}
+          {file.image && <DiffImages file={file} near={mounted} mode={imageMode} onModeChange={setImageMode} />}
           {!pictures &&
             (file.flag ? (
               <p className="em-diff-summary">

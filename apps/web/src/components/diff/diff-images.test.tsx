@@ -1,9 +1,10 @@
 import type { FileView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { diffLoads } from "../../lib/diff-loads.ts";
+import { stubIntersectionObserver } from "../../test/intersection.ts";
 import { FileDiff, type ParsedDiff } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
 
@@ -33,18 +34,13 @@ const file: FileView = {
 const base = `/api/v1/files/${file.id}`;
 const svgSource = '<svg onload=""><script>/* fixture */</script></svg>';
 let client: QueryClient;
+let intersections: ReturnType<typeof stubIntersectionObserver>;
 let fetchText: ReturnType<typeof vi.fn<(path: string) => Promise<Response>>>;
 beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   fetchText = vi.fn(async (path: string) => new Response(path.endsWith("/old") ? "<svg/>" : svgSource));
   vi.stubGlobal("fetch", fetchText);
-  vi.stubGlobal(
-    "IntersectionObserver",
-    class {
-      observe() {}
-      disconnect() {}
-    },
-  );
+  intersections = stubIntersectionObserver();
 });
 afterEach(() => {
   cleanup();
@@ -83,6 +79,9 @@ function mount(values: Partial<FileView> = {}) {
   return { container, onActive, show: (collapsed: boolean, revealed: boolean) => rerender(ui(collapsed, revealed)) };
 }
 const button = (name: string) => screen.getByRole("button", { name });
+function setNear(near: boolean) {
+  act(() => intersections.intersect(screen.getByRole("region", { name: /^File / }), near));
+}
 
 test("modified PNG opens side by side and switches between its stored sides", () => {
   const { onActive } = mount();
@@ -162,13 +161,16 @@ test("SVG Pictures warns about the After source and shares its text queries with
   expect(section.style.minHeight).toBe("");
   expect(screen.getByRole("button", { name: "Pictures", pressed: true })).toBeTruthy();
   expect(body?.querySelectorAll("img")).toHaveLength(2);
+  setNear(false);
+  expect(fetchText).not.toHaveBeenCalled();
+  setNear(true);
+  const notice =
+    "The After SVG holds a script and an event handler. The picture never runs them. Text shows the source.";
+  expect(await screen.findByText(notice)).toBeTruthy();
   expect(body?.querySelector("svg, script, object, embed, iframe, [onload], [onerror]")).toBeNull();
   expect(writes).not.toHaveBeenCalled();
-  expect(
-    await screen.findByText(
-      "The After SVG holds a script and an event handler. The picture never runs them. Text shows the source.",
-    ),
-  ).toBeTruthy();
+  setNear(false);
+  expect(screen.getByText(notice)).toBeTruthy();
   fireEvent.click(button("Before"));
   show(true, false);
   show(false, true);
@@ -192,6 +194,7 @@ test("SVG Pictures warns about the After source and shares its text queries with
 test("a clean SVG opens without a notice and only fetches its existing side", async () => {
   fetchText.mockImplementation(async () => new Response("<svg/>"));
   mount({ path: "leaf.svg", status: "added", flag: null, hasNew: true, image: { old: null, new: svg } });
+  setNear(true);
   await waitFor(() => expect(client.getQueryData(["file", "reviews", file.id, "new"])).toBe("<svg/>"));
   expect(screen.queryByText(/SVG.* holds?/)).toBeNull();
   expect(fetchText.mock.calls.map(([path]) => path)).toEqual([`${base}/new`]);
@@ -199,8 +202,26 @@ test("a clean SVG opens without a notice and only fetches its existing side", as
 
 test("a raster with text sides does not fetch text for an SVG notice", () => {
   mount({ flag: null, hasOld: true, hasNew: true });
+  setNear(true);
   expect(screen.queryByText(/SVG.* holds?/)).toBeNull();
   expect(fetchText).not.toHaveBeenCalled();
+});
+
+test("a raster and SVG pair requests only the SVG text when it enters the viewport", async () => {
+  mount({
+    path: "leaf.svg",
+    oldPath: "leaf.png",
+    status: "renamed",
+    flag: null,
+    hasOld: true,
+    hasNew: true,
+    image: { old: png, new: svg },
+  });
+  expect(fetchText).not.toHaveBeenCalled();
+  setNear(true);
+  expect(await screen.findByText(/The After SVG holds a script and an event handler\./)).toBeTruthy();
+  expect(fetchText.mock.calls.map(([path]) => path)).toEqual([`${base}/new`]);
+  expect(screen.queryByText(/not checked/)).toBeNull();
 });
 
 test("a single notice names both active SVG sides", async () => {
@@ -208,14 +229,43 @@ test("a single notice names both active SVG sides", async () => {
     async (path) => new Response(path.endsWith("/old") ? "<svg><script/></svg>" : "<svg><foreignObject/></svg>"),
   );
   mount({ path: "leaf.svg", flag: null, hasOld: true, hasNew: true, image: { old: svg, new: svg } });
+  setNear(true);
   expect(await screen.findByText(/The Before and After SVGs hold a script and embedded HTML\./)).toBeTruthy();
   expect(screen.getAllByText(/SVGs? holds?/)).toHaveLength(1);
 });
 
-test("oversized SVG text is never fetched for a notice", () => {
-  mount({ path: "large.svg", flag: "oversized", image: { old: svg, new: svg } });
-  expect(screen.queryByText(/SVG.* holds?/)).toBeNull();
+test("flagged SVG sides show an unchecked notice without fetching text", () => {
+  mount({ path: "large.svg", flag: "oversized", hasOld: true, hasNew: true, image: { old: svg, new: svg } });
+  setNear(true);
+  expect(
+    screen.getByText(
+      "The Before and After SVG sources were not checked for scripts or links. The picture never runs scripts.",
+    ),
+  ).toBeTruthy();
   expect(fetchText).not.toHaveBeenCalled();
+});
+
+test("a missing text side and an active side are both reported", async () => {
+  mount({ path: "leaf.svg", flag: null, hasNew: true, image: { old: svg, new: svg } });
+  setNear(true);
+  expect(await screen.findByText(/The After SVG holds a script and an event handler\./)).toBeTruthy();
+  expect(screen.getByText(/The Before SVG source was not checked/)).toBeTruthy();
+  expect(fetchText.mock.calls.map(([path]) => path)).toEqual([`${base}/new`]);
+});
+
+test.each([
+  ["failed request", 404, ""],
+  ["entity declaration", 200, '<!DOCTYPE svg [<!ENTITY label "Leaf">]><svg/>'],
+] as const)("the notice names the unchecked SVG side for a %s", async (_reason, status, source) => {
+  fetchText.mockImplementation(async () => new Response(source, { status }));
+  mount({ path: "leaf.svg", status: "added", flag: null, hasNew: true, image: { old: null, new: svg } });
+  setNear(true);
+  expect(
+    await screen.findByText(
+      "The After SVG source was not checked for scripts or links. The picture never runs scripts.",
+    ),
+  ).toBeTruthy();
+  expect(fetchText.mock.calls.map(([path]) => path)).toEqual([`${base}/new`]);
 });
 
 test("an SVG on either side offers Text even when the text diff is flagged", () => {
