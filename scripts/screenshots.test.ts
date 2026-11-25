@@ -16,7 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { BLOCK_SOCKETS, Browser, Page, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
+import { BLOCK_SOCKETS, Browser, DESKTOP, Page, PHONE, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
 import { applyFixture, MAIN_TOPICS, mainWriteup } from "./screenshots/content.ts";
 import { writeImages } from "./screenshots/images.ts";
 import {
@@ -343,9 +343,12 @@ test("the screenshot runner's selectors and stored values match the app's source
   assert.match(store, /pane:\s*z\s*\.object\(\{\s*desktop:\s*paneChoice\b/);
   assert(runner.includes("recense.layout.v1"));
   assert(runner.includes("recense.layout.tabs-default"));
-  assert(runner.includes("layout.pane = { ...(layout.pane ?? {}), desktop: \"split\" };"));
+  assert.match(
+    runner,
+    /\blayout\s*\.\s*pane\s*=\s*\{\s*\.\.\.\s*\(\s*layout\s*\.\s*pane\s*\?\?\s*\{\s*\}\s*\)\s*,\s*desktop\s*:\s*"split"\s*\}\s*;?/,
+  );
 
-  assert.match(sendBar, /<section\b[^>]*\saria-label="Send and approve"/);
+  assert.match(sendBar, /<section\b(?:[^<>{}]|\{[^{}]*\})*?\saria-label="Send and approve"/);
   assert(sendBar.includes("{unsentCount} to send"));
   assert.match(sendBar, /<Button\b(?:[^<>{}]|\{[^{}]*\})*?\stype="submit"(?:[^<>{}]|\{[^{}]*\})*>\s*Send\s*<\/Button>/);
   assert(runner.includes("section[aria-label=\"Send and approve\"]"));
@@ -361,7 +364,7 @@ test("the main screenshot writeup fills the review cards and links to declared t
   const slugs = new Set<string>(MAIN_TOPICS.map(({ slug }) => slug));
   for (const revision of [1, 2] as const) {
     const writeup = mainWriteup(revision);
-    for (const field of ["area", "whyItMatters", "whereToLook", "checked", "notChecked", "decisions"] as const) {
+    for (const field of ["tldr", "overview", "area", "whyItMatters", "whereToLook", "checked", "notChecked", "decisions"] as const) {
       assert.match(writeup[field], /\S/, field);
     }
     assert.deepEqual(writeup.needsYou.map(({ kind }) => kind).sort(), ["accept", "decide"]);
@@ -552,6 +555,17 @@ async function advanceBrowserClock(t: TestContext, fake: ReturnType<typeof fakeC
     await fake.yieldOnce();
   }
 }
+
+test("phone pages turn touch on and desktop pages keep the mouse", async () => {
+  const touchMethod = "Emulation.setTouchEmulationEnabled";
+  const phone = fakeChromium();
+  await new Page(phone.browser, "phone").configure(PHONE);
+  assert(phone.sent.some(({ method, params }) => method === touchMethod && params.enabled === true));
+
+  const desktop = fakeChromium();
+  await new Page(desktop.browser, "desktop").configure(DESKTOP);
+  assert(!desktop.sent.some(({ method }) => method === touchMethod));
+});
 
 test("dedicated-worker attaches and requests restart the full calm period without changing openRequests", async (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
