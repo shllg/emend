@@ -1,6 +1,6 @@
 import type { FileView } from "@recense/contract";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { diffLoads } from "../../lib/diff-loads.ts";
@@ -114,6 +114,7 @@ test("modified PNG opens side by side and switches between its stored sides", ()
   }
   fireEvent.click(button("Comment on file"));
   expect(onActive).toHaveBeenCalledWith({ kind: "file", path: file.path });
+  expect(screen.queryByText(/SVG.* holds?/)).toBeNull();
   expect(fetchText).not.toHaveBeenCalled();
 });
 
@@ -144,7 +145,7 @@ test("oversized and failed sides show their reason in place of the picture", () 
   expect(screen.queryByRole("button", { name: "Open After image" })).toBeNull();
 });
 
-test("SVG pictures use only img, and only Text loads the text body", async () => {
+test("SVG Pictures warns about the After source and shares its text queries with Text", async () => {
   const suffix = "HTML";
   const writes = vi.spyOn(Element.prototype, `inner${suffix}`, "set");
   const hold = vi.spyOn(diffLoads(client), "hold");
@@ -163,15 +164,18 @@ test("SVG pictures use only img, and only Text loads the text body", async () =>
   expect(body?.querySelectorAll("img")).toHaveLength(2);
   expect(body?.querySelector("svg, script, object, embed, iframe, [onload], [onerror]")).toBeNull();
   expect(writes).not.toHaveBeenCalled();
+  expect(
+    await screen.findByText(
+      "The After SVG holds a script and an event handler. The picture never runs them. Text shows the source.",
+    ),
+  ).toBeTruthy();
   fireEvent.click(button("Before"));
   show(true, false);
-  expect(client.getQueryCache().getAll()).toHaveLength(0);
   show(false, true);
   expect(screen.getByRole("button", { name: "Before", pressed: true })).toBeTruthy();
   expect(section.hasAttribute("data-diff-loading")).toBe(false);
   expect(container.querySelector("[data-slot-pending]")).toBeNull();
   expect(hold).not.toHaveBeenCalled();
-  expect(fetchText).not.toHaveBeenCalled();
 
   fireEvent.click(button("Text"));
   expect(screen.getByRole("button", { name: "Text", pressed: true })).toBeTruthy();
@@ -183,6 +187,35 @@ test("SVG pictures use only img, and only Text loads the text body", async () =>
   expect(screen.getByRole("img", { name: "Before" })).toBeTruthy();
   expect(section.hasAttribute("data-diff-loading")).toBe(false);
   expect(container.querySelector("[data-slot-pending]")).toBeNull();
+});
+
+test("a clean SVG opens without a notice and only fetches its existing side", async () => {
+  fetchText.mockImplementation(async () => new Response("<svg/>"));
+  mount({ path: "leaf.svg", status: "added", flag: null, hasNew: true, image: { old: null, new: svg } });
+  await waitFor(() => expect(client.getQueryData(["file", "reviews", file.id, "new"])).toBe("<svg/>"));
+  expect(screen.queryByText(/SVG.* holds?/)).toBeNull();
+  expect(fetchText.mock.calls.map(([path]) => path)).toEqual([`${base}/new`]);
+});
+
+test("a raster with text sides does not fetch text for an SVG notice", () => {
+  mount({ flag: null, hasOld: true, hasNew: true });
+  expect(screen.queryByText(/SVG.* holds?/)).toBeNull();
+  expect(fetchText).not.toHaveBeenCalled();
+});
+
+test("a single notice names both active SVG sides", async () => {
+  fetchText.mockImplementation(
+    async (path) => new Response(path.endsWith("/old") ? "<svg><script/></svg>" : "<svg><foreignObject/></svg>"),
+  );
+  mount({ path: "leaf.svg", flag: null, hasOld: true, hasNew: true, image: { old: svg, new: svg } });
+  expect(await screen.findByText(/The Before and After SVGs hold a script and embedded HTML\./)).toBeTruthy();
+  expect(screen.getAllByText(/SVGs? holds?/)).toHaveLength(1);
+});
+
+test("oversized SVG text is never fetched for a notice", () => {
+  mount({ path: "large.svg", flag: "oversized", image: { old: svg, new: svg } });
+  expect(screen.queryByText(/SVG.* holds?/)).toBeNull();
+  expect(fetchText).not.toHaveBeenCalled();
 });
 
 test("an SVG on either side offers Text even when the text diff is flagged", () => {

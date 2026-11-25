@@ -86,7 +86,7 @@ async function attach(stateDir: string, link: ReturnType<typeof pairingLink>, io
     }
     signal.throwIfAborted();
     if (!pair) pair = await register(stateDir, link, state.instance, io, signal);
-    const result = await copyReviews(stateDir, state, attachedTarget(pair), io, hubHasBin, signal);
+    const result = await copyReviews(stateDir, state, attachedTarget(pair), io, capabilities.features, signal);
     io.stderr(
       `recense: attached to ${safeMessage(pair.attachment.hubName)}; copied ${result.copied} reviews, skipped ${result.skipped}.\n`,
     );

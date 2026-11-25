@@ -192,6 +192,9 @@ PNG, JPG/JPEG, GIF, WebP, AVIF and SVG map to `image/png`, `image/jpeg`, `image/
 `image/webp`, `image/avif` and `image/svg+xml`, case-insensitively. A binned review
 returns `review_in_bin` unless moved. An unknown, malformed or foreign file id, another
 role, an unsupported extension, an absent or oversized side or missing bytes give `404 not_found`.
+For SVG, a request with a `Sec-Fetch-Dest` value other than `image` also gives
+`404 not_found` before the server opens the blob. Requests without the header
+can load SVG. Raster images accept any destination.
 
 `GET` streams the stored bytes with that `Content-Type`, `Content-Length`,
 `Content-Disposition: inline`, `Cache-Control: no-store`, `Cross-Origin-Resource-Policy: same-origin`
@@ -1761,7 +1764,7 @@ object construction (when Zod captures this setting), so validation never probes
 `Function` under the app CSP. The normal contract index also exports the function.
 
 `Capabilities = { api: 1, version: string, features: string[] }`. The current feature list is
-`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "review-pin-order", "agent-review-key"]`,
+`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "review-pin-order", "agent-review-key", "diff-images"]`,
 plus `server-stop` when the server supports stopping through the API; clients accept additional feature strings.
 
 `PairingPurpose = "device" | "machine"`. `PairingRequest = { purpose? }` defaults to `"device"`.
@@ -2007,8 +2010,11 @@ Only a diff file with a status may carry `image: { old, new }`. The old side is 
 an addition, the new side exactly for a deletion. Each present side requires a supported extension
 on its own path and contains either `{ blob: sha256 }` or `{ flag: "oversized" }`. Image blobs
 are limited to `assetBytes` (25 MiB) each and count once per distinct hash across all inputs
-toward `revisionBytes`. An older server drops the image field. Text flags, blobs and their
-1 MiB limit apply independently. Paths and topic slugs are
+toward `revisionBytes`. When a side also has a text blob, its image must carry the same hash.
+The text side keeps its 1 MiB limit. For HTTP publish and attach, the destination must advertise
+`diff-images` to receive `image` fields or `diffImages` rows. Otherwise the CLI omits them and
+uploads only blobs referenced by the remaining fields. Direct publish keeps image sides.
+Paths and topic slugs are
 unique within their namespaces (diffs; rendered docs and assets; source docs); file, writeup,
 newInRevision and needsYou topics must be declared. Verdict topics are not checked against them.
 `assets` is required for rendered HTML docs (including an empty array), optional for rendered Markdown
@@ -2947,9 +2953,11 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `publishJsonBytes` | 8388608 bytes per publish or import JSON request body |
 | `requestJsonBytes` | 1048576 bytes per other JSON request body |
 
-Binary and oversized diff sides are listed as not shown; publishing still succeeds. The CLI
-allocates the revision budget in topic importance order, with Other changes last. Diff sides
-that exceed the remaining budget are listed as oversized without uploading their blobs.
+Binary and oversized text diffs show their reason in place of the text. A diff file with
+recognised image sides shows pictures. The CLI allocates the revision budget in topic
+importance order, with Other changes last. When text exceeds the remaining budget, the
+file is marked oversized and its text blobs are omitted. When the pictures do not fit,
+the CLI omits the file’s image sides and the reviewer sees its usual text diff or flagged summary.
 
 ## Identifiers and secrets
 

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   Capabilities,
+  DIFF_IMAGES_FEATURE,
   InboxList,
   PairingCreated,
   PublishResponse,
@@ -883,58 +884,83 @@ describe.each(["HTTP", "in-process"])("%s transport", (mode) => {
     expect(inbox.items.find((r) => r.id === local.result.reviewId)?.origin).toEqual(instance);
   });
 
-  test("attach exports diff image rows and uploads bytes referenced only by those rows", async () => {
-    const f = await fixture();
-    const local = await f.reviewer();
-    const png = Buffer.from("89504e470d0a1a0a0001", "hex");
-    const blob = await local.blobs.put(local.ownerId, png, "application/octet-stream");
-    await apiRequest(f.stateDir, await localTarget(f.stateDir, f.laptop.url), "/publish", {
-      method: "POST",
-      body: {
-        reviewKey: "c".repeat(64),
-        repo: null,
-        branch: null,
-        title: "Synthetic image",
-        base: null,
-        head: null,
-        topics: [],
-        writeup: { overview: "Image", tldr: "", decisions: null, topics: {} },
-        files: [
-          {
-            role: "diff",
-            path: "icon.png",
-            status: "modified",
-            oldPath: null,
-            oldBlob: null,
-            newBlob: null,
-            flag: "binary",
-            image: { old: { flag: "oversized" }, new: { blob } },
-          },
-        ],
-      },
-    });
-    const requests = vi.spyOn(globalThis, "fetch");
-    const out = await f.command(["attach", f.pairing.url]);
-    expect(out.code, out.text).toBe(0);
-    const sent = requests.mock.calls.find(([url]) => String(url) === `${f.hub.url}/api/v1/import`);
-    expect(JSON.parse(String(sent?.[1]?.body)).diffImages).toEqual(
-      expect.arrayContaining([
-        { fileId: expect.any(String), side: "new", blob, flag: null },
-        { fileId: expect.any(String), side: "old", blob: null, flag: "oversized" },
-      ]),
-    );
-    expect(
-      requests.mock.calls.some(
-        ([url, init]) => String(url) === `${f.hub.url}/api/v1/blobs/${blob}` && init?.method === "PUT",
-      ),
-    ).toBe(true);
-    const hub = await initializeServerState(f.hubDir);
-    f.cleanup.push(() => hub.db.close());
-    expect(
-      await hub.db.read((q) => q.select().from(diffImages).where(eq(diffImages.ownerId, hub.ownerId))),
-    ).toHaveLength(2);
-    expect(await hub.blobs.get(hub.ownerId, blob)).toEqual(new Uint8Array(png));
-  });
+  test.each([true, false])(
+    "attach gates diff image rows and image-only uploads (hub supports images: %s)",
+    async (supported) => {
+      const f = await fixture();
+      const local = await f.reviewer();
+      const png = Buffer.from("89504e470d0a1a0a0001", "hex");
+      const blob = await local.blobs.put(local.ownerId, png, "application/octet-stream");
+      const shared = await local.blobs.put(
+        local.ownerId,
+        Buffer.concat([png, Buffer.from("shared")]),
+        "application/octet-stream",
+      );
+      await apiRequest(f.stateDir, await localTarget(f.stateDir, f.laptop.url), "/publish", {
+        method: "POST",
+        body: {
+          reviewKey: "c".repeat(64),
+          repo: null,
+          branch: null,
+          title: "Synthetic image",
+          base: null,
+          head: null,
+          topics: [],
+          writeup: { overview: "Image", tldr: "", decisions: null, topics: {} },
+          files: [
+            {
+              role: "diff",
+              path: "icon.png",
+              status: "modified",
+              oldPath: null,
+              oldBlob: null,
+              newBlob: null,
+              flag: "binary",
+              image: { old: { blob: shared }, new: { blob } },
+            },
+            { path: "shared.png", role: "asset", oldPath: null, oldBlob: null, newBlob: shared, flag: null },
+          ],
+        },
+      });
+      const fetcher = globalThis.fetch;
+      const requests = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const response = await fetcher(input, init);
+        if (!supported && String(input) === `${f.hub.url}/api/v1/capabilities`) {
+          const caps = Capabilities.parse(await response.json());
+          return Response.json({ ...caps, features: caps.features.filter((name) => name !== DIFF_IMAGES_FEATURE) });
+        }
+        return response;
+      });
+      const out = await f.command(["attach", f.pairing.url]);
+      expect(out.code, out.text).toBe(0);
+      const sent = requests.mock.calls.find(([url]) => String(url) === `${f.hub.url}/api/v1/import`);
+      const bundle = JSON.parse(String(sent?.[1]?.body));
+      if (supported)
+        expect(bundle.diffImages).toEqual(
+          expect.arrayContaining([
+            { fileId: expect.any(String), side: "new", blob, flag: null },
+            { fileId: expect.any(String), side: "old", blob: shared, flag: null },
+          ]),
+        );
+      else expect(bundle).not.toHaveProperty("diffImages");
+      expect(
+        requests.mock.calls.some(
+          ([url, init]) => String(url) === `${f.hub.url}/api/v1/blobs/${shared}` && init?.method === "PUT",
+        ),
+      ).toBe(true);
+      expect(
+        requests.mock.calls.some(
+          ([url, init]) => String(url) === `${f.hub.url}/api/v1/blobs/${blob}` && init?.method === "PUT",
+        ),
+      ).toBe(supported);
+      const hub = await initializeServerState(f.hubDir);
+      f.cleanup.push(() => hub.db.close());
+      expect(
+        await hub.db.read((q) => q.select().from(diffImages).where(eq(diffImages.ownerId, hub.ownerId))),
+      ).toHaveLength(supported ? 2 : 0);
+      expect(await hub.blobs.hasWhole(hub.ownerId, blob)).toBe(supported);
+    },
+  );
 
   test("copy preserves HTML asset associations and ignores other origins", async () => {
     const f = await fixture();

@@ -115,6 +115,12 @@ export const PublishRequest = z
         if ((file.image.new === null) !== (file.status === "deleted")) issue("only a deleted image has no new side");
         if (file.image.old && !diffImageType(file.oldPath ?? file.path)) issue("unsupported old image extension");
         if (file.image.new && !diffImageType(file.path)) issue("unsupported new image extension");
+        for (const side of ["old", "new"] as const) {
+          const image = file.image[side];
+          const text = side === "old" ? file.oldBlob : file.newBlob;
+          if (text && image && (!("blob" in image) || image.blob !== text))
+            issue(`the ${side} image must use the same blob as its text`);
+        }
       }
       if (file.topic && !topics.has(file.topic)) issue("file topic is not declared");
       const markdown = isRenderedMarkdownDoc(file);

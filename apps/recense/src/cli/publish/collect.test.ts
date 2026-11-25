@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { LIMITS, type PublishManifest } from "@recense/contract";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { collectChanges } from "./collect.ts";
-import { resolvePublish } from "./resolve.ts";
+import { type PublishOptions, publishContext, resolvePublish } from "./resolve.ts";
 import { readSides } from "./sides.ts";
 
 const exec = promisify(execFile);
@@ -73,28 +73,80 @@ async function repo(format = "sha1") {
   }
 }
 
-async function resolveImages(f: Awaited<ReturnType<typeof repo>>, base: string) {
+async function resolveImages(
+  f: Awaited<ReturnType<typeof repo>>,
+  base: string,
+  {
+    head = "worktree",
+    context,
+    docFolders,
+  }: {
+    head?: string;
+    context?: Awaited<ReturnType<typeof publishContext>>;
+    docFolders?: PublishOptions["docFolders"];
+  } = {},
+) {
   return resolvePublish(
     {
       version: 1,
       title: "Images",
       base,
-      head: "worktree",
+      head,
       files: [],
       topics: [],
       writeup: { overview: "", tldr: "", decisions: null, topics: {} },
     },
-    { manifest: "synthetic" },
+    { manifest: "synthetic", docFolders },
     f.state,
     f.configDir,
     "instance",
     f.root,
     () => {},
+    context,
   );
 }
 
 const png = (value: number) => Buffer.from([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10, 0, value]);
 const digest = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
+test("a committed image object is read once across paths, extensions and the SVG text view", async () => {
+  const f = await repo();
+  try {
+    await f.run("commit", "--allow-empty", "-m", "synthetic base");
+    const base = (await f.run("rev-parse", "HEAD")).stdout.trim();
+    const svg = "<svg><title>shared</title></svg>";
+    await writeFile(join(f.root, "a.jpg"), png(1));
+    for (let i = 0; i < 12; i++) {
+      await writeFile(join(f.root, `copy-${i}.png`), png(1));
+      await writeFile(join(f.root, `copy-${i}.svg`), svg);
+    }
+    await f.run("add", ".");
+    await f.run("commit", "-m", "synthetic images");
+    const head = (await f.run("rev-parse", "HEAD")).stdout.trim();
+    const context = await publishContext(f.root, f.state);
+    const git = vi.fn(context.git);
+    const { request, blobs } = await resolveImages(f, base, {
+      head,
+      context: { ...context, git },
+      docFolders: new Map(),
+    });
+    const reads = () => git.mock.calls.filter(([, call]) => call[0] === "cat-file" && call[1] === "blob");
+    expect(reads()).toHaveLength(2);
+    expect(request.files).toHaveLength(25);
+    for (const file of request.files) {
+      if (file.path.endsWith(".jpg")) expect(file.image).toBeUndefined();
+      else if (file.path.endsWith(".png")) expect(file.image?.new).toEqual({ blob: digest(png(1)) });
+      else {
+        expect(file.newBlob).toBe(digest(svg));
+        expect(file.image?.new).toEqual({ blob: file.newBlob });
+      }
+    }
+    for (const blob of blobs.values()) await blob.read();
+    expect(reads()).toHaveLength(4);
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test("resolves image sides independently of the text flags and rechecks worktree images at upload", async () => {
   const f = await repo();
   try {
@@ -156,6 +208,7 @@ test("a second image side over the revision budget rolls back just that file's i
   const limit = LIMITS.revisionBytes;
   try {
     await writeFile(join(f.root, "b.png"), png(1));
+    await writeFile(join(f.root, "z.png"), png(1));
     await f.run("add", ".");
     await f.run("commit", "-m", "synthetic base");
     const base = (await f.run("rev-parse", "HEAD")).stdout.trim();
@@ -171,6 +224,15 @@ test("a second image side over the revision budget rolls back just that file's i
     });
     expect(request.files.find((file) => file.path === "b.png")).not.toHaveProperty("image");
     expect([...blobs.keys()]).toEqual([digest("text")]);
+    // The later deletion needs the same old object that did not fit as part of the pair.
+    await rm(join(f.root, "z.png"));
+    const retry = await resolveImages(f, base);
+    expect(retry.request.files.find((file) => file.path === "b.png")).not.toHaveProperty("image");
+    expect(retry.request.files.find((file) => file.path === "z.png")?.image).toEqual({
+      old: { blob: digest(png(1)) },
+      new: null,
+    });
+    expect(new Set(retry.blobs.keys())).toEqual(new Set([digest("text"), digest(png(1))]));
   } finally {
     Object.assign(LIMITS, { revisionBytes: limit });
     await f.cleanup();

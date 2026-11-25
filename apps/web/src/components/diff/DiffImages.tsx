@@ -1,9 +1,12 @@
 import { type FileView, LIMITS } from "@recense/contract";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { Lightbox } from "../reading/Lightbox.tsx";
 import type { LightboxSubject } from "../reading/screenshots.ts";
 import { Button } from "../ui/Button.tsx";
 import { cn, focusRing } from "../ui/utils.ts";
+import { fileSideQuery, useFileTexts } from "./file-texts.ts";
+import { svgActiveKinds } from "./svg-active.ts";
 
 const comparisonModes = ["Before", "After", "Side by side"] as const;
 const formats = ["Pictures", "Text"] as const;
@@ -79,6 +82,34 @@ function ImageSide({ picture, label, onOpen }: { picture: Picture; label: string
   );
 }
 
+const list = new Intl.ListFormat("en", { type: "conjunction" });
+
+function SvgNotice({ file }: { file: FileView }) {
+  const source = useFileTexts();
+  const before = useQuery({
+    ...fileSideQuery(file.id, "old", source),
+    enabled: file.hasOld,
+    select: svgActiveKinds,
+  });
+  const after = useQuery({
+    ...fileSideQuery(file.id, "new", source),
+    enabled: file.hasNew,
+    select: svgActiveKinds,
+  });
+  const old = file.hasOld && file.image?.old?.mediaType === "image/svg+xml" ? before.data : undefined;
+  const next = file.hasNew && file.image?.new?.mediaType === "image/svg+xml" ? after.data : undefined;
+  if (!old?.length && !next?.length) return null;
+  const subject =
+    old?.length && next?.length ? "Before and After SVGs hold" : old?.length ? "Before SVG holds" : "After SVG holds";
+  const found = new Set([...(old ?? []), ...(next ?? [])]);
+  return (
+    <p className="bg-warning-bg px-3 py-2 text-warning-fg [font:var(--type-meta)]">
+      The {subject} {list.format(found)}. The picture never runs {found.size === 1 ? "it" : "them"}. Text shows the
+      source.
+    </p>
+  );
+}
+
 export function DiffImages({
   file,
   mode,
@@ -138,6 +169,7 @@ export function DiffImages({
           )}
         </div>
       )}
+      {svg && !file.flag && (file.hasOld || file.hasNew) && <SvgNotice file={file} />}
       {mode.format === "Pictures" && (
         <div className="em-diff-images" data-pair={visible.length === 2 || undefined}>
           {visible.map((picture) => (

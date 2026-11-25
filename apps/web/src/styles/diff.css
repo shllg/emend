@@ -181,6 +181,11 @@
     gap: var(--space-2);
     padding: var(--space-2) var(--space-3);
   }
+  @media (any-pointer: coarse) {
+    .em-diff-image-toolbar button {
+      min-height: var(--touch-min);
+    }
+  }
   .em-diff-images {
     display: grid;
     grid-template-columns: minmax(0, 1fr);

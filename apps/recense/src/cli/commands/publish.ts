@@ -9,6 +9,7 @@ import { publishDirect } from "../direct/index.ts";
 import { escapeReference } from "../escape.ts";
 import { apiRequest, CliError, printJson, publishAnswerIncomplete } from "../http.ts";
 import { binnedError, movedError, refuseUncopiedReview } from "../moved.ts";
+import { publishForDestination } from "../publish/destination.ts";
 import { manifestError } from "../publish/manifest-error.ts";
 import { GitFolderRead, inside, NotRegularFile, OversizedFile, readRegular } from "../publish/read.ts";
 import { type PublishOptions, publishContext, resolvePublish } from "../publish/resolve.ts";
@@ -228,9 +229,13 @@ export async function publishCommand(
       } catch {
         throw new CliError("invalid recense instance");
       }
-      const request = collected.forInstance(instanceId);
+      const { request, blobs } = publishForDestination(
+        collected.forInstance(instanceId),
+        collected.blobs,
+        target.features,
+      );
       if (localReviewId) request.reviewId = localReviewId;
-      await upload(stateDir, target, collected.blobs);
+      await upload(stateDir, target, blobs);
       response = await apiRequest(stateDir, target, "/publish", {
         method: "POST",
         body: request,

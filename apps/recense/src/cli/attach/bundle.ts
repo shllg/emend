@@ -55,6 +55,7 @@ export async function snapshot(
   movedToUrl: string,
   now: number,
   hubHasBin: boolean,
+  hubHasImages = false,
 ) {
   const where = and(eq(reviews.ownerId, ownerId), eq(reviews.originInstanceId, instanceId), eq(reviews.id, reviewId));
   const review = await q.select().from(reviews).where(where).get();
@@ -108,11 +109,13 @@ export async function snapshot(
     .select({ id: files.id })
     .from(files)
     .where(and(eq(files.ownerId, ownerId), inArray(files.revisionId, revisionIds)));
-  const imageRows = await q
-    .select({ fileId: diffImages.fileId, side: diffImages.side, blob: diffImages.blob, flag: diffImages.flag })
-    .from(diffImages)
-    .where(and(eq(diffImages.ownerId, ownerId), inArray(diffImages.fileId, fileIds)))
-    .orderBy(diffImages.fileId, diffImages.side);
+  const imageRows = hubHasImages
+    ? await q
+        .select({ fileId: diffImages.fileId, side: diffImages.side, blob: diffImages.blob, flag: diffImages.flag })
+        .from(diffImages)
+        .where(and(eq(diffImages.ownerId, ownerId), inArray(diffImages.fileId, fileIds)))
+        .orderBy(diffImages.fileId, diffImages.side)
+    : [];
   const noteRows = await q
     .select({ note: agentNotes })
     .from(agentNotes)

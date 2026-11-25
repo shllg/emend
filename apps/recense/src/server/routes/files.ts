@@ -33,8 +33,11 @@ export function fileRoutes(app: Hono<AppEnv>, deps: AppDeps) {
           .get(),
       );
       if (!file?.blob) throw new ApiError("not_found");
-      if (file.binnedAt !== null && file.movedToUrl === null) throw new ApiError("review_in_bin");
       const type = diffImageType(side === "old" ? (file.oldPath ?? file.path) : file.path);
+      const destination = c.req.header("Sec-Fetch-Dest");
+      if (type === "image/svg+xml" && destination !== undefined && destination !== "image")
+        throw new ApiError("not_found");
+      if (file.binnedAt !== null && file.movedToUrl === null) throw new ApiError("review_in_bin");
       if (!type) throw new ApiError("not_found");
       const read = await deps.blobs.open(ownerId, file.blob, c.req.raw.signal);
       if (!read) throw new ApiError("not_found");

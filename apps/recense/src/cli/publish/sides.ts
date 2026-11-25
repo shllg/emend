@@ -32,7 +32,8 @@ export async function readWorktree(
     mode: info.mode & 0o100 ? "100755" : "100644",
   };
 }
-const classify = (bytes: Buffer): Side => (bytes.subarray(0, 8000).includes(0) ? { flag: "binary" } : { bytes });
+export const isBinarySide = (bytes: Buffer) => bytes.subarray(0, 8000).includes(0);
+const classify = (bytes: Buffer): Side => (isBinarySide(bytes) ? { flag: "binary" } : { bytes });
 export async function readSide(
   root: string,
   head: string,

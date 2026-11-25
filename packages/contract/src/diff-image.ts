@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+export const DIFF_IMAGES_FEATURE = "diff-images";
 export const DIFF_IMAGE_TYPES = {
   png: "image/png",
   jpg: "image/jpeg",

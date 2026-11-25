@@ -55,6 +55,27 @@ test("diff image sides follow the file status and each side's extension", () => 
     expect(parse(patch).success, JSON.stringify(patch)).toBe(false);
 });
 
+test.each(["old", "new"] as const)("the %s picture and text share one blob", (side) => {
+  const blob = "c".repeat(64);
+  const file = {
+    path: "icon.svg",
+    role: "diff",
+    oldPath: null,
+    status: "modified",
+    oldBlob: blob,
+    newBlob: blob,
+    flag: null,
+  };
+  const parse = (value: object) =>
+    PublishRequest.safeParse({
+      ...request,
+      files: [{ ...file, image: { old: { blob }, new: { blob }, [side]: value } }],
+    });
+  expect(parse({ blob }).success).toBe(true);
+  expect(parse({ blob: "d".repeat(64) }).success).toBe(false);
+  expect(parse({ flag: "oversized" }).success).toBe(false);
+});
+
 test("file views optionally describe images on diff files", () => {
   const file = {
     id: randomUUID(),

@@ -81,6 +81,16 @@ test.each([false, true])(
       ["new", svg, "image/svg+xml"],
     ] as const) {
       const path = `/files/${file.id}/${side}/image`;
+      for (const destination of ["image", "document"]) {
+        const response = await f.request(path, "GET", undefined, "reviewer", undefined, {
+          "Sec-Fetch-Dest": destination,
+        });
+        if (type === "image/svg+xml" && destination === "document") await error(response, 404, "not_found");
+        else {
+          expect(response.status).toBe(200);
+          expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+        }
+      }
       for (const method of ["GET", "HEAD"]) {
         const response = await f.request(path, method);
         expect(response.status).toBe(200);
@@ -234,6 +244,16 @@ test.each([false, true])("import round-trips optional image sides (included %s)"
   const legacy = { ...input, files: [file] };
   const row = { fileId: file.id, side: "new", blob, flag: null };
   if (included) {
+    const text = await store(svg);
+    await error(
+      await f.importRequest("/import", {
+        ...legacy,
+        files: [{ ...file, path: "icon.svg", flag: null, newBlob: text }],
+        diffImages: [row],
+      }),
+      400,
+      "invalid_request",
+    );
     await error(
       await f.importRequest("/import", { ...legacy, diffImages: [{ ...row, blob: "f".repeat(64) }] }),
       400,
