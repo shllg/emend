@@ -66,10 +66,10 @@ export function errorLine(error: unknown, command?: string): string {
   if (
     command === "publish" &&
     error instanceof CliApiError &&
-    error.code === "invalid_request" &&
+    (error.code === "invalid_request" || error.code === "too_large") &&
     error.serverMessage.startsWith("Agent note ")
   )
-    return `recense: invalid_request: ${escapeReference(error.serverMessage)}\n`;
+    return `recense: ${error.code}: ${escapeReference(error.serverMessage)}\n`;
   return `recense: ${error instanceof CliApiError ? error.code : error instanceof CliError ? error.message : "The recense request failed."}${hint}\n`;
 }
 export const jsonLine = (value: unknown): string => `${JSON.stringify(value)}\n`;

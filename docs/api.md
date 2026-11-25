@@ -2131,8 +2131,9 @@ The remaining quote lines must equal consecutive whole file lines. Interior blan
 whitespace-only file lines. Exactly one match places the note on the first through last matched
 line, counting from 1. Publish returns `400 invalid_request` with the file and zero-based note
 index for a missing match, multiple matches (even with a range), or a supplied range that differs
-from the unique match. If quote matching or range checking times out, publish returns `413 too_large` with
-the file and zero-based index of the note that started the job. Publish stores only the resolved range.
+from the unique match. If quote matching or range checking times out, publish and import return
+`413 too_large` with the file and zero-based index of the note that started the job. Publish stores
+only the resolved range.
 
 For range-only notes, publish and import check that every line in `start..end` exists on the
 stored side. Unchanged lines within a file with changed content are valid and the diff opens
@@ -3024,9 +3025,10 @@ All errors use `ErrorBody`, with no stack traces or another owner's ids:
 
 `ERROR_STATUS` is the single exported code-to-status map; `ErrorCode` is derived from its keys.
 Publish and import may return `invalid_request` with a message naming the file and zero-based
-agent note index when a note is refused. These catalogue-built messages are bounded by
-`errorMessageChars`; long file names may be abbreviated. The CLI prints the message as one
-escaped line on stderr.
+agent note index when a note is refused. A note-matching timeout returns `too_large` with a
+message naming the same file and index. These catalogue-built messages are bounded by
+`errorMessageChars`. Long file names may be abbreviated. For either code, `recense publish`
+prints the note message as one escaped line on stderr.
 
 | Error code | HTTP status | When |
 | --- | ---: | --- |

@@ -80,6 +80,13 @@ test("publish diagnostics preserve note context without terminal control charact
   expect(line).not.toContain("\u001b");
 });
 
+test("publish prints escaped note details for a timeout and only the code for other size errors", () => {
+  const reason = "matching the note's quote or range took too long.";
+  const timeout = new CliApiError("too_large", `Agent note 0 in a\n.ts: ${reason}`);
+  expect(errorLine(timeout, "publish")).toBe(`recense: too_large: Agent note 0 in a\\u{a}.ts: ${reason}\n`);
+  expect(errorLine(new CliApiError("too_large", "The request is too large."), "publish")).toBe("recense: too_large\n");
+});
+
 test("a refused note exits 1 with one stderr line and no stdout", async () => {
   const dir = await mkdtemp(join(tmpdir(), "recense-note-stderr-"));
   const root = join(dir, "repo");
