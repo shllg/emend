@@ -1122,7 +1122,10 @@ function LoadedReview({
                     onSaved={endResume}
                     onCancel={endResume}
                     wrap={(editor) => (
-                      <section aria-label="Resumed comment" className="sticky bottom-0 px-4 pt-4 pb-8 md:pr-8 md:pl-14">
+                      <section
+                        aria-label="Resumed comment"
+                        className="sticky bottom-0 z-1 px-4 pt-4 pb-8 md:pr-8 md:pl-14"
+                      >
                         {editor}
                       </section>
                     )}
