@@ -493,7 +493,7 @@ test.each(["pnpm", "mise"] as const)(
 );
 
 test.each(["aube", "pnpm10", "pnpm11", "aube_cli"] as const)(
-  "mise refuses a %s install linked into the original cwd repository before executing it",
+  "mise refuses a %s install linked through the original cwd repository before executing it",
   async (layout) => {
     await make("mise", layout);
     const repo = join(fake.root, "repo");
@@ -502,12 +502,15 @@ test.each(["aube", "pnpm10", "pnpm11", "aube_cli"] as const)(
     fake.options.cwd = repo;
     const located = join(fake.root, "located");
     const next = misePackageFixtures(located)[layout];
-    const newPackage = join(repo, "node_modules/@shllg/recense");
-    const newLinks = next.links.map(([target, link]) => {
-      if (layout === "aube_cli") return [repo, link];
-      return [target === next.folder ? newPackage : target, link];
+    const hop = join(repo, "hop");
+    const newLinks = next.links.flatMap(([target, link], index) => {
+      if (index > 0) return [[target, link]];
+      return [
+        [target, hop],
+        [hop, link],
+      ];
     });
-    await fake.set({ located, newPackage, newLinks });
+    await fake.set({ located, newPackage: next.folder, newLinks });
     expect(await update(), err()).toBe(1);
     expect(err()).toContain("repository");
     expect(err()).toContain("to go back");
@@ -603,6 +606,27 @@ test.each([
   expect(err()).toContain(message);
   expect(await fake.calls()).toEqual([]);
   expect(out()).toBe("");
+});
+
+test("mise refuses a rollback entry linked through the working directory's repository before backup", async () => {
+  await make("mise", "bun");
+  await makeDatabase(join(fake.state, "recense.db"));
+  const install = join(fake.root, "mise/installs/npm-shllg-recense/0.1.0");
+  const repo = join(fake.root, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+  const lib = join(repo, "x");
+  const link = join(lib, "node_modules/@shllg/recense");
+  await mkdir(dirname(link), { recursive: true });
+  await symlink(fake.oldPackage, link);
+  await symlink(lib, join(install, "lib"));
+  fake.options.cwd = repo;
+
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain("repository");
+  expect(await fake.calls()).toEqual([]);
+  expect(out()).toBe("");
+  expect(await readdir(fake.state)).not.toContain("backups");
 });
 
 test("recense leaves the global mise config alone and runs no mise use with aube", async () => {

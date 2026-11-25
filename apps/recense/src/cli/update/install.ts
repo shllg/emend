@@ -24,6 +24,11 @@ function endsWith(segments: string[], tail: string[]): boolean {
   );
 }
 
+function isMissingPath(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
 async function listedNames(folder: string): Promise<string[] | undefined> {
   const names: string[] = [];
   try {
@@ -32,8 +37,7 @@ async function listedNames(folder: string): Promise<string[] | undefined> {
       names.push(name);
     }
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === "ENOENT" || code === "ENOTDIR" ? [] : undefined;
+    return isMissingPath(error) ? [] : undefined;
   }
   return names.sort();
 }
@@ -41,8 +45,8 @@ async function listedNames(folder: string): Promise<string[] | undefined> {
 /**
  * npm puts node_modules under lib, while bun and embedded aube put it at the install root.
  * pnpm uses a numeric folder or v<digits>/<id>, and aube CLI uses global-aube/<id>.
- * List stable folder symlinks before per-install folders. Return undefined if a listing
- * exceeds 64 names or cannot be checked. Missing folders and non-directories contribute nothing.
+ * List stable folder symlinks before per-install folders. Skip missing paths and non-directories.
+ * Return undefined if a listing exceeds 64 names or a listing or candidate cannot be checked.
  */
 export async function misePackageFolders(installFolder: string): Promise<string[] | undefined> {
   const roots = [join(installFolder, "lib"), installFolder];
@@ -73,28 +77,26 @@ export async function misePackageFolders(installFolder: string): Promise<string[
     const candidate = join(root, "node_modules", updatePackage);
     try {
       if ((await stat(candidate)).isDirectory()) folders.push(candidate);
-    } catch {
-      // No package directory at this path.
+    } catch (error) {
+      if (!isMissingPath(error)) return undefined;
     }
   }
   return folders;
 }
 
-async function realMiseFolder(candidate: string): Promise<string | undefined> {
-  try {
-    return await realpath(candidate);
-  } catch {
-    return undefined;
-  }
-}
-
+/** Keep the first linked path if every remaining candidate resolves to the same package. */
 export async function locateMisePackage(installFolder: string): Promise<string | undefined> {
   const folders = await misePackageFolders(installFolder);
   if (folders === undefined) return undefined;
   let first: { path: string; real: string } | undefined;
   for (const path of folders) {
-    const real = await realMiseFolder(path);
-    if (real === undefined) continue;
+    let real: string;
+    try {
+      real = await realpath(path);
+    } catch (error) {
+      if (isMissingPath(error)) continue;
+      return undefined;
+    }
     if (first && first.real !== real) return undefined;
     first ??= { path, real };
   }
@@ -150,7 +152,7 @@ export async function detectInstall(
     const candidates = await misePackageFolders(installFolder);
     if (candidates === undefined) return { kind: "unknown" };
     for (const candidate of candidates) {
-      if ((await realMiseFolder(candidate)) === folder)
+      if ((await realpath(candidate).catch(() => undefined)) === folder)
         return { kind: "mise", entry: join(candidate, "dist", "recense.mjs") };
     }
     return { kind: "unknown" };

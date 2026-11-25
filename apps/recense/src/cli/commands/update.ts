@@ -4,7 +4,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Io } from "../../main.ts";
 import { VERSION } from "../../version.ts";
 import { escapeReference, quoteShellArgument } from "../escape.ts";
-import { filterExecutablePath, findExecutable } from "../executable.ts";
+import { filterExecutablePath, findExecutable, pathThroughRepository } from "../executable.ts";
 import { CliError, CliSignalExit, CliUsageError } from "../http.ts";
 import type { CliRuntime } from "../runtime.ts";
 import { cliRuntime } from "../runtime.ts";
@@ -154,7 +154,12 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       await pnpmPackages(prepared.helper.file, home, prepared.env, folder);
       return true;
     });
-    rollbackEntry = install.kind === "mise" && install.entry !== undefined ? checkedOldEntry(install.entry) : oldEntry;
+    rollbackEntry = oldEntry;
+    if (install.kind === "mise" && install.entry !== undefined) {
+      rollbackEntry = checkedOldEntry(install.entry);
+      if (await pathThroughRepository(install.entry, roots).catch(() => true))
+        throw new CliError("the old entry's path failed the repository check for the working directory");
+    }
   } catch (error) {
     throw unknown(error instanceof CliError ? error.message : "");
   }

@@ -179,6 +179,24 @@ describe("locating the package in a mise install", () => {
     await mkdir(join(f.root, layouts.miseBun), { recursive: true });
     expect(await locateMisePackage(join(f.root, miseInstall))).toBeUndefined();
   });
+  test("refuses the npm layout when another candidate is a symlink loop", async () => {
+    const f = await fixture(layouts.mise);
+    const link = join(f.root, layouts.miseBun);
+    await mkdir(dirname(link), { recursive: true });
+    await symlink(link, link);
+    expect(await locateMisePackage(join(f.root, miseInstall))).toBeUndefined();
+  });
+  test.skipIf(process.getuid?.() === 0)("refuses the bun layout when lib cannot be traversed", async () => {
+    const f = await fixture(layouts.miseBun);
+    const install = join(f.root, miseInstall);
+    const lib = join(install, "lib");
+    await mkdir(lib, { mode: 0o000 });
+    try {
+      expect(await locateMisePackage(install)).toBeUndefined();
+    } finally {
+      await chmod(lib, 0o700);
+    }
+  });
   test("stops using a v11 listing once it exceeds 64 entries", async () => {
     const f = await fixture(layouts.misePnpm11);
     const install = join(f.root, miseInstall);
