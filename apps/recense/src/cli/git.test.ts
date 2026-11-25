@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { LIMITS } from "@recense/contract";
 import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { createGitSession, type GitCall, GitFailed, GitNotAllowed, git } from "./git.ts";
 
@@ -73,7 +74,12 @@ test("git fences every call and rejects old versions", async () => {
       expect(args).toContain(fence);
     expect(options).toMatchObject({
       timeout: 10000,
-      maxBuffer: args.includes("ls-tree") || args.includes("ls-files") ? 67108864 : 8388608,
+      maxBuffer:
+        args.includes("ls-tree") || args.includes("ls-files")
+          ? 67108864
+          : args.includes("cat-file") && args.includes("blob")
+            ? LIMITS.assetBytes
+            : LIMITS.publishJsonBytes,
     });
     expect(["/tmp/synthetic", "/tmp/synthetic/nested"]).toContain(options.cwd);
     expect(Object.keys(options.env as object).sort()).toEqual(
