@@ -68,7 +68,7 @@ export function outsideScope(paths: Iterable<string>): string[] {
 const workspaceInstall = /^(?:(?:apps|packages)\/[^/]+\/)?node_modules\//;
 // Directory paths have a trailing slash.
 const ignoredSkips = [
-  /^(?:(?:apps|packages)\/[^/]+\/)?node_modules\/\.(?:vite|cache)\//,
+  /^(?:(?:apps|packages)\/[^/]+\/)?node_modules\/\.(?:vite|vitest-cache|cache)\//,
   /^apps\/[^/]+\/dist\//,
   /^\.wt\/ui\//,
   /^\.wt\/ui-demo\.json(?:\.[^/]*)?$/,

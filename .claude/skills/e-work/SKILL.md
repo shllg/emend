@@ -94,7 +94,9 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
      Restore other tracked paths to the full commit id in both the index and the worktree.
      Delete each printed untracked file and each `ignored new` file. After restoring and deleting,
      run the check again with the same arguments. Continue only at exit 0.
-   - Remove the temp folder, run `pnpm verify` and commit the finish separately.
+   - Remove the temp folder and `node_modules/.vitest-cache`, then run `pnpm verify`. Clearing
+     the skipped cache keeps Vitest from running entries the pass left there. Commit the finish
+     separately.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
    Before each review round, with the change committed and `pnpm verify` green at that commit,

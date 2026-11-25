@@ -179,7 +179,7 @@ test("the orchestrator snapshots and checks each finisher pass with the committe
     "`<main>/bin/wt notify blocked`",
     "Delete each printed untracked file and each `ignored new` file",
     "run the check again with the same arguments. Continue only at exit 0",
-    "Remove the temp folder, run `pnpm verify`",
+    "Remove the temp folder and `node_modules/.vitest-cache`, then run `pnpm verify`",
   ];
   let index = -1;
   for (const step of steps) {

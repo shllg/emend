@@ -154,6 +154,8 @@ test("the snapshot detects ignored edits, additions and removals without followi
   const compare = () => check("--since", base, "--snapshot", snapshot, "--snapshot-sha256", digest);
   assert.equal(check("--since", base, "--snapshot", snapshot).status, 2);
   assert.equal(compare().status, 0);
+  write("node_modules/.vitest-cache/new", "new");
+  write("node_modules/.vitest-cache-extra/new", "new");
   const nested = "apps/web/src/components/node_modules/new";
   for (const path of [...skipped, ...installed, ...hashed, ".wt/changed", ".wt/new", "link-target",
     nested]) write(path, "changed");
@@ -167,7 +169,8 @@ test("the snapshot detects ignored edits, additions and removals without followi
   assert.deepEqual(checked.stdout.trimEnd().split("\n").sort(), [
     ...[...installed, ...hashed, ".wt/changed", "changed-link", "link-target"]
       .map((path) => "ignored changed: " + path),
-    "ignored new: .wt/new", "ignored new: " + nested, "ignored removed: removed",
+    "ignored new: .wt/new", "ignored new: " + nested,
+    "ignored new: node_modules/.vitest-cache-extra/new", "ignored removed: removed",
   ].sort());
   writeFileSync(snapshot, original + "\n");
   const tampered = compare();
