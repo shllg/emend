@@ -41,8 +41,8 @@ export function quoteShellArgument(value: string): string {
   return `$'${quoted}'`;
 }
 
-/** Escape serialized JSON for a terminal without changing what JSON.parse returns. */
-export function escapeJson(json: string): string {
+/** Escape serialized JSON without changing what JSON.parse returns. */
+export function escapeJson(json: string, output: "terminal" | "manifest" = "terminal"): string {
   const shortEscapes: Record<string, string> = { b: "0008", f: "000c", n: "000a", r: "000d", t: "0009" };
   const expanded = json.replace(/\\./gs, (pair) => {
     const code = shortEscapes[pair[1] ?? ""];
@@ -50,9 +50,14 @@ export function escapeJson(json: string): string {
   });
   const unit = (code: number) => `\\u${code.toString(16).padStart(4, "0")}`;
   // JSON escapes a code point above U+FFFF as its surrogate pair.
-  return escapeControls(expanded, (code) =>
+  const unicodeEscape = (code: number) =>
     code > 0xffff
       ? `${unit(0xd800 + ((code - 0x10000) >> 10))}${unit(0xdc00 + ((code - 0x10000) & 0x3ff))}`
-      : unit(code),
-  );
+      : unit(code);
+  if (output === "manifest") {
+    // JSON.stringify escapes line feeds in strings. Literal line feeds separate fields.
+    const invisible = /(?![ \n])[\p{C}\p{Z}]|\p{Variation_Selector}|\u034f|[\u115f\u1160\u3164\uffa0\u2800]/gu;
+    return expanded.replace(invisible, (char) => unicodeEscape(char.codePointAt(0) as number));
+  }
+  return escapeControls(expanded, unicodeEscape);
 }

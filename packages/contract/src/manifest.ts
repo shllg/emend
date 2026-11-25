@@ -223,19 +223,30 @@ function shownWriteupMarkdown(writeup: WriteupInput): (string | null | undefined
 }
 
 const commit = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "expected a full commit hash");
-export const PreparedDoc = z.enum(["included", "deleted", "differs-from-head", "missing", "too-large", "refused"]);
+export const PreparedDoc = z.enum(["included", "deleted", "differs-from-head", "refused"]);
 export type PreparedDoc = z.infer<typeof PreparedDoc>;
 
 const lineCount = z.number().int().nonnegative().max(LIMITS.diffSideBytes);
-export const PreparedFile = z.object({
-  status: FileStatus,
-  oldPath: FilePath.optional(),
-  added: lineCount.optional(),
-  removed: lineCount.optional(),
-  flag: FileFlag.optional(),
-  lockfile: z.literal(true).optional(),
-  doc: PreparedDoc.optional(),
-});
+export const PreparedFile = z
+  .object({
+    status: FileStatus,
+    oldPath: FilePath.optional(),
+    added: lineCount.optional(),
+    removed: lineCount.optional(),
+    flag: FileFlag.optional(),
+    lockfile: z.literal(true).optional(),
+    doc: PreparedDoc.optional(),
+    docRefusal: z
+      .string()
+      .min(1)
+      .max(LIMITS.errorMessageChars)
+      .regex(/^[^\r\n\v\f\u0085\u2028\u2029]+$/u)
+      .optional(),
+  })
+  .refine((file) => file.docRefusal === undefined || file.doc === "refused", {
+    path: ["docRefusal"],
+    message: "only a refused doc has a refusal reason",
+  });
 export type PreparedFile = z.infer<typeof PreparedFile>;
 
 const source = z

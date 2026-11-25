@@ -2036,11 +2036,13 @@ path. It may be absolute or relative, has at most `pathChars` characters, must b
 and cannot contain NUL, C0 controls or DEL.
 
 `recense prepare --base <commit> --head <commit|worktree> --dir <folder>` creates `review.json` in an existing
-private folder outside the worktree, with a title, the range, empty topics and writeup, and one diff per changed path.
-Only a diff accepts `prepared: { status: FileStatus, oldPath?: FilePath, added?, removed?, flag?: FileFlag, lockfile?: true, doc? }`.
+private folder outside the worktree and its git folders, with a title, the range, empty topics and writeup, and one diff per changed path.
+Only a diff accepts `prepared: { status: FileStatus, oldPath?: FilePath, added?, removed?, flag?: FileFlag, lockfile?: true, doc?, docRefusal?: string }`.
 Renames carry the old path. Line counts are nonnegative integers up to `diffSideBytes` and are omitted for flagged
-files or a count timeout. Only Markdown and HTML paths carry `doc`, one of `included`, `deleted`, `differs-from-head`,
-`missing`, `too-large` or `refused`. An included doc follows its diff as a separate file entry.
+files, a count failure or an exhausted count budget. Only Markdown and HTML paths carry `doc`.
+An `included` doc follows its diff as a separate file entry. A `deleted` doc has no new side.
+`differs-from-head` means the publishable bytes differ from the collected new git object.
+Only `refused` may carry `docRefusal`, a one-line reason of at most 1000 characters.
 Publish ignores `prepared` and omits it from the request.
 
 `media?: { path: FilePath, source? }[]` lists images that the writeup embeds, at most

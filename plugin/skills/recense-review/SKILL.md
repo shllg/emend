@@ -117,9 +117,9 @@ and added and removed line counts when available. A flag marks binary or oversiz
 `lockfile: true` marks a lockfile.
 
 For Markdown and HTML, `doc: "included"` means the doc entry follows the diff.
-`deleted` means the change removed it. `differs-from-head` means the disk copy differs from the
-reviewed commit. `missing` means there is no regular file, `too-large` means it exceeds the doc
-limit, and `refused` means it failed the source checks. Cite a left-out doc in prose.
+`deleted` means the change removed it. `differs-from-head` means the bytes publish would upload
+differ from the new git object prepare found. For `refused`, read the reason in `docRefusal`.
+Cite a left-out doc in prose.
 Read the docs to judge their substance. Keep design docs and decision records and skip generated indexes.
 If a doc disappears or exceeds its size limit before publish, remove its doc entry and cite it in prose.
 
@@ -145,7 +145,15 @@ git ls-files -z --others --exclude-standard | xargs -0 grep -nHE 'ADR|RFC|PRD|[R
 ```
 
 Resolve references to supported, readable files; cite unavailable or unsupported docs in prose.
-Give unchanged cited docs a `doc` entry when readable. With a commit head, confirm the disk copy matches the reviewed commit.
+Prepare already checked the changed docs. For an unchanged cited doc with a commit head, run
+this check from the repository root:
+
+```sh
+git cat-file -e <head>:<path> && git show <head>:<path> | cmp -s - <path>
+```
+
+Exit 0 means the doc exists at `head` and the disk copy is identical. Give it a `doc` entry.
+On any other exit, cite it in prose only. With a worktree head, give a readable unchanged cited doc a `doc` entry.
 Set each doc entry's `topic` to the topic whose prose leans on it.
 
 Name the doc and its supporting heading in the topic's `why` or `body`.

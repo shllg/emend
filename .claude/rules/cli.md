@@ -42,6 +42,12 @@ The CLI runs in repos under review: treat them as hostile.
   only, skip symlinks that leave the doc's folder, and enforce the size, file-count and revision
   limits. A path behind a symlinked folder is absent, as git sees it, and no read or listing
   lands inside the git folder or the common git folder.
+- `recense prepare` reads the changed paths through git, their worktree copies, and each changed
+  Markdown or HTML doc the way publish reads a doc, its assets included. It writes one file,
+  `review.json`, in the folder the caller names. The directory must already exist, be owned by the
+  user, have no group or other write permission, and sit outside the worktree and its git folders.
+  Prepare refuses a symlinked directory. It creates the file with `O_EXCL` and `O_NOFOLLOW`,
+  mode 0600, and never replaces a file.
 - `recense publish <path>...` builds that manifest from its arguments: each file argument, and the
   text files found by listing each folder argument. Markdown and HTML render; other text files and
   docs under `--source` show as source. `--main` only picks one of those docs. Every source still
@@ -71,8 +77,11 @@ The CLI runs in repos under review: treat them as hostile.
   `recense publish --manifest` prints one JSON line; `recense publish <path>...`
   prints the review URL alone, escaped, or that JSON line with `--json`; `recense wait` and
   `recense feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and
-  exit 0. Errors print one line on stderr and nothing on stdout. Prepare usage errors exit 2,
-  other errors exit 1. `recense status --line`
+  exit 0. Errors print one line on stderr and nothing on stdout. The shared command handler in
+  `main.ts` exits 2 for a usage error (`CliUsageError`), preserves signal exit codes, and exits 1
+  for other errors. It handles
+  `prepare`, `wait`, `feedback`, `reply`, `ls`, `status`, `stop`, `mcp`, `service`, `update`,
+  `skills`, `config`, `theme`, `look`, `pair`, `devices`, `attach` and `detach`. `recense status --line`
   is the exception: it prints its one line or nothing, never writes stderr, and exits 0 on every
   error.
 - Tokens come from the state directory (`agent.token`, `admin.token`, `hub.token`). Never print a

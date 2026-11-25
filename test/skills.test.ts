@@ -609,7 +609,10 @@ test("the review skill prepares the manifest in its private folder and uses git 
   const docs = skill.split("## Collect the docs the change rests on\n")[1]?.split("\n## ")[0] ?? "";
   expect(docs).toContain("git log --no-color");
   expect(docs).toContain("xargs -0 grep");
-  expect(docs).not.toMatch(/--name-status|git cat-file|git ls-files --others/);
+  expect(docs).toContain("For an unchanged cited doc with a commit head");
+  expect(docs).toContain("git cat-file -e <head>:<path> && git show <head>:<path> | cmp -s - <path>");
+  expect(docs).toContain("`docRefusal`");
+  expect(docs).not.toMatch(/--name-status|git ls-files --others/);
 });
 
 test("review guidance lists the opening fields in display order", () => {
@@ -1161,6 +1164,21 @@ test("CLI rules include bounded Markdown image discovery and secret-name filteri
   const rules = read(".claude/rules/cli.md").replace(/\s+/g, " ");
   expect(rules).toContain("the assets inside each doc's folder");
   expect(rules).toContain("Markdown images skip secret names; a worker finds them");
+});
+
+test("CLI rules document prepare's reads, exclusive create and shared usage exit", () => {
+  const rules = read(".claude/rules/cli.md").replace(/\s+/g, " ");
+  const prepare = rules.split("- `recense prepare` ")[1]?.split(" - ")[0] ?? "";
+  for (const rule of [
+    "their worktree copies",
+    "its assets included",
+    "outside the worktree and its git folders",
+    "`O_EXCL` and `O_NOFOLLOW`",
+    "mode 0600",
+    "never replaces a file",
+  ])
+    expect(prepare).toContain(rule);
+  expect(rules).toContain("shared command handler in `main.ts` exits 2 for a usage error");
 });
 
 test.each(["docs/api.md", "docs/usage.md"])("%s explains Markdown image discovery and skipped paths", (path) => {

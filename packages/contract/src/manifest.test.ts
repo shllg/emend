@@ -43,6 +43,12 @@ describe("publish manifest", () => {
     expect(PublishManifest.safeParse({ ...manifest, files: [{ ...file, path: "plan.txt" }] }).success).toBe(false);
   });
 
+  test("preserves a refused doc's one-line reason up to 1000 characters", () => {
+    const prepared = { status: "added", doc: "refused", docRefusal: "x".repeat(1000) };
+    const file = { path: "plan.md", role: "diff", prepared };
+    expect(PublishManifest.parse({ ...manifest, files: [file] }).files).toEqual([file]);
+  });
+
   test.each([
     {},
     { status: "unknown" },
@@ -54,6 +60,13 @@ describe("publish manifest", () => {
     { status: "added", flag: "text" },
     { status: "added", lockfile: false },
     { status: "added", doc: "changed" },
+    { status: "added", doc: "missing" },
+    { status: "added", doc: "too-large" },
+    { status: "added", docRefusal: "unreadable" },
+    { status: "added", doc: "included", docRefusal: "unreadable" },
+    { status: "added", doc: "refused", docRefusal: "x".repeat(1001) },
+    { status: "added", doc: "refused", docRefusal: "multiple\nlines" },
+    { status: "added", doc: "refused", docRefusal: "line\u2029break" },
   ])("refuses invalid prepared facts %j", (prepared) => {
     expect(
       PublishManifest.safeParse({ ...manifest, files: [{ path: "plan.md", role: "diff", prepared }] }).success,
