@@ -749,6 +749,47 @@
   .em-needs-you dd {
     --reading-inset: calc(23px + var(--facts-label-width) + var(--facts-gap));
   }
+  .em-proofs {
+    display: grid;
+    gap: var(--space-2);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .em-proof {
+    --proof-label-width: 4.5rem;
+    --proof-text-inset: calc(var(--reading-inset) + var(--proof-label-width) + var(--space-2));
+    display: grid;
+    grid-template-columns: var(--proof-label-width) minmax(0, 1fr);
+    gap: var(--space-2);
+    align-items: start;
+    overflow-wrap: anywhere;
+  }
+  .em-proof > div {
+    --reading-inset: var(--proof-text-inset);
+    min-width: 0;
+  }
+  .em-proof-kind {
+    justify-self: start;
+    margin-top: 2px;
+    padding: 1px 7px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    font: 500 11px / 1.5 var(--font-sans);
+  }
+  [data-proof-kind="ran"] > .em-proof-kind {
+    background: var(--bg-inverse);
+    color: var(--fg-inverse);
+  }
+  [data-proof-kind="read"] > .em-proof-kind {
+    border-color: var(--info-fg);
+    background: var(--info-bg);
+    color: var(--info-fg);
+  }
+  [data-proof-kind="reasoned"] > .em-proof-kind {
+    border: 1px dashed var(--border-strong);
+    color: var(--fg-reading-muted);
+  }
   .em-writeup-fact .em-writeup-details {
     margin-top: 0;
   }

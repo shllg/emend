@@ -42,6 +42,7 @@ export const LIMITS = {
   newInRevisionQuoteChars: 120,
   needsYouItems: 4,
   needsYouChars: 300,
+  checkedItems: 12,
   headingsPerDoc: 1024,
   htmlPartsPerDoc: 10000,
   htmlPartsPerRevision: 100000,

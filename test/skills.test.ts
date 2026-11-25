@@ -666,7 +666,7 @@ test("review guidance writes a decision brief with no verdict", () => {
     'Show what you claim, as the writing reference says under "Pictures" and "Tables": a screenshot for a visible change, a table for a config, schema, number or query-plan change.',
   );
   expect(text.replace(/\s+/g, " ")).toContain(
-    "`checked`: the proof, at most five items, strongest first, each saying what it showed. No process items, such as running the gate or reading the diff. Never empty.",
+    "`checked`: the proof, at most five items, strongest first. Each item has a kind, `ran`, `read` or `reasoned`, and says what it showed. No process items, such as running the gate or reading the diff. Never empty.",
   );
   expect(text.replace(/\s+/g, " ")).toContain(
     "`notChecked`: only real gaps, each with what could go wrong. Never empty.",
@@ -703,7 +703,8 @@ test("review guidance writes a decision brief with no verdict", () => {
 
   const checked = reference.split("### Checked and Not checked\n")[1]?.split("\n### ")[0]?.replace(/\s+/g, " ");
   expect(checked).toContain("at most five items, strongest first");
-  expect(checked).toContain("Each item says what it showed");
+  expect(checked).toContain("Each text says what the item showed; its kind says how you know");
+  expect(checked).toContain("a test you read but did not run is Read");
   expect(checked).toContain("Leave out process, such as running the gate");
   expect(checked).toContain("`notChecked` holds only real gaps, each with what could go wrong");
   expect(checked).toContain("A data migration shows row counts and sums before and after, plus a few sample rows.");

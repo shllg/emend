@@ -1075,6 +1075,10 @@ An empty input list stays `[]` with no section; an absent field stays absent. An
 list is omitted without refusing the revision. The app shows a Needs you card under the TL;DR
 and a status line: "N decisions" ("1 decision"), or "Nothing needs a decision. Approve on the proof."
 for `[]`. An absent field shows neither.
+`RenderedWriteup.checked?` holds 1–12 entries `{ kind: CheckedKind, blockIds: BlockId[] }` for a list-form
+Checked section. Each entry lists its rendered blocks in order, with IDs from the `checked` section.
+The app and the download label each item Ran, Read or Reasoned. Markdown strings produce no metadata
+or labels. Invalid stored metadata is omitted without refusing the revision.
 `RenderedWriteup.terms?: GlossaryTerm[]` holds at most 50 entries `{ term, definition, blockId }`
 for a list glossary. `term` is normalized plain text (1–100 characters), `definition` is plain
 text from sanitized glossary blocks (0–2000 characters, ending in `…` when cut), and `blockId`
@@ -1082,7 +1086,7 @@ names the entry's first glossary block. Old revisions, empty lists and Markdown 
 Base/head are nullable full commit hashes; head also permits `worktree`.
 `main` is `"writeup" | FilePath | null`: the manifest's main page, or null when omitted.
 `writeupEmpty` is a boolean computed at publish from the source Markdown, before rendering:
-true only when overview, tldr, whyItMatters, every newInRevision and needsYou item's text, checked, notChecked, outOfScope,
+true only when overview, tldr, whyItMatters, every newInRevision and needsYou item's text, checked (its string or each item's text), notChecked, outOfScope,
 whereToLook, context, deviations, decisions, glossary, and every topic's why, example and body are missing or
 whitespace only. A `review` verdict does not count because it is never shown.
 The plain-text area does not make a writeup non-empty. Both fields are stored
@@ -1111,7 +1115,7 @@ Both are absent without a mark. Marks follow the current path, including for ren
 `RenderedBlock = { id: BlockId, section, kind, html, text, source? }` mirrors core's `Block`.
 Kinds are `heading | paragraph | item | code | table | quote | diagram | chart`. Diagram and chart source is optional.
 A chart block has empty `html` and its fence text in `source`.
-`RenderedWriteup = { area?: WriteupArea, newInRevision?: { topic?: TopicSlug, section?: NewInRevisionSection, blockId?: BlockId, blockIds: BlockId[] }[], needsYou?: { kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }[], terms?: GlossaryTerm[], sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
+`RenderedWriteup = { area?: WriteupArea, newInRevision?: { topic?: TopicSlug, section?: NewInRevisionSection, blockId?: BlockId, blockIds: BlockId[] }[], needsYou?: { kind: NeedsYouKind, topic?: TopicSlug, blockIds: BlockId[] }[], checked?: { kind: CheckedKind, blockIds: BlockId[] }[], terms?: GlossaryTerm[], sections: { key, label, topic: string | null, blocks: RenderedBlock[] }[] }`
 mirrors core's rendered writeup. These are server-rendered blocks, never browser-rendered Markdown.
 Markdown docs are `{ path, kind: "markdown", title?, headings?, terms?: GlossaryTerm[], blocks: RenderedBlock[] }`
 (`blocks` empty if unrendered). `terms` holds at most 50 entries `{ term, definition, blockId }` and
@@ -1698,6 +1702,7 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `RenderedWriteup.sections` | At most `13 + 3 * topicsPerReview` (613): thirteen fixed sections and Why/Example/Details for each writeup topic |
 | `RenderedWriteup.newInRevision` | Optional array of 1–`newInRevisionItems` (12) entries; each has optional `TopicSlug`, `NewInRevisionSection` and destination `blockId: BlockId` (neither `newInRevision-` nor `doc-`), and at most `blocksPerRevision` validated `newInRevision-` block IDs. Invalid stored values are omitted |
 | `RenderedWriteup.needsYou` | Optional array of at most `needsYouItems` (4) entries; each has a `NeedsYouKind`, optional `TopicSlug`, and at most `blocksPerRevision` validated `needsYou-` block IDs. Invalid stored values are omitted |
+| `RenderedWriteup.checked` | Optional array of 1–`checkedItems` (12) entries, each with a `CheckedKind` and at most `blocksPerRevision` validated `checked-` block IDs. Invalid stored values are omitted |
 | `RenderedWriteup.terms` | Optional array of at most `glossaryTerms` (50) entries: `term` 1–`glossaryTermChars` (100) characters, plain-text `definition` 0–`glossaryDefinitionChars` (2000) characters, and a validated `blockId: BlockId` |
 | `RenderedWriteup.sections[].key`, `RenderedBlock.section` | Renderer-generated keys: overview, tldr, whyItMatters, newInRevision, needsYou, review, checked, notChecked, outOfScope, whereToLook, context, deviations, decisions, glossary or `t-<TopicSlug>-why/example/body`; block sections also allow `doc-<hash8>`. TopicSlug permits 1–64 characters, so the longest topic section key is 74 characters |
 | `RenderedWriteup.sections[].label` | `titleChars + " — Example".length` (210), the longest renderer suffix appended to a topic title |
@@ -2134,8 +2139,8 @@ text. There are at most `topicsPerReview` declared topics and writeup topic keys
 blast-radius scopes and notes obey `summaryChars`, `blastScopeChars` and `blastNoteChars`.
 Markdown strings are preserved exactly; the schema does not render or sanitize them.
 
-`WriteupInput = { overview, tldr, whyItMatters?, newInRevision?: NewInRevisionItem[], needsYou?: NeedsYouItem[], area?, review?, checked?, notChecked?, outOfScope?, whereToLook?, context?, deviations?, decisions: string | null, glossary?, topics }`.
-Sections are Markdown strings, except `newInRevision?: NewInRevisionItem[]`, `needsYou?: NeedsYouItem[]`, `area?: WriteupArea`, `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
+`WriteupInput = { overview, tldr, whyItMatters?, newInRevision?: NewInRevisionItem[], needsYou?: NeedsYouItem[], area?, review?, checked?: string | CheckedItem[], notChecked?, outOfScope?, whereToLook?, context?, deviations?, decisions: string | null, glossary?, topics }`.
+Sections are Markdown strings, except `newInRevision?: NewInRevisionItem[]`, `needsYou?: NeedsYouItem[]`, `checked?: string | CheckedItem[]`, `area?: WriteupArea`, `glossary?: string | GlossaryEntry[]` and `review?: ReviewVerdict`;
 `topics` maps slugs to `{ why, example?, body? }`, also Markdown. Decisions is
 required, with `null` representing no decisions section.
 `whyItMatters` is nonblank Markdown: what the change gives the product or prepares for.
@@ -2196,8 +2201,16 @@ topic slugs. `reason` is Markdown with non-whitespace text and counts toward the
 recense no longer checks it against the declared topics or their attention, renders no Review
 section for it, and leaves out the Review section an older revision stored, in the app and in
 the writeup download.
-`checked` (what the agent ran or verified) and `notChecked` (what it did not) are Markdown with
-non-whitespace text.
+`checked` accepts nonblank Markdown or a list of 1–`checkedItems` (12) items.
+`CheckedItem = { kind: CheckedKind, text: string }`, with `CheckedKind = "ran" | "read" | "reasoned"`.
+Ran names a command or test run against the reviewed revision and what it showed. Read records
+inspection of code or test source. Reasoned gives an argument from code with no test behind it.
+Each text is nonblank Markdown and may span multiple lines. The item texts together fit within
+`writeupSectionBytes` and count toward `writeupBytes`. A string renders and downloads as before,
+without labels. `notChecked` is nonblank Markdown describing gaps.
+The CLI reports `writeup.checked.<index>.kind (ran, read or reasoned)` for an unknown kind,
+`writeup.checked (at most 12 items)` for an oversized list, `writeup.checked (at least 1 item)`
+for an empty list and `writeup.checked.<index>.text (must not be blank)` for blank text.
 When any of these fields or `whyItMatters` or `area` is present (`outOfScope`, `whereToLook` and
 `context` count even as an empty string), sections render as TL;DR, Why it matters, Checked,
 Not checked, Overview, Out of scope, Where to look, Context, Decisions and drift, Glossary, then
@@ -2214,7 +2227,7 @@ app, the writeup download skips this section on revision 1.
 Every Markdown string is limited to `writeupSectionBytes` UTF-8 bytes; the sum of all present
 `overview`, `tldr`, `whyItMatters`, `outOfScope`, `whereToLook`, `context`, `deviations`, `decisions`, `glossary`, `why`, `example`
 and `body` strings, including every list glossary term, definition and alias, is limited to
-`writeupBytes`. Each `newInRevision` and `needsYou` item's `text`, the verdict's `reason`, `checked` and `notChecked` count toward both limits too.
+`writeupBytes`. Each `newInRevision` and `needsYou` item's `text`, the verdict's `reason`, `checked` (its string or combined item texts) and `notChecked` count toward both limits too.
 These limits measure UTF-8 bytes, not character count. Parsed `topics` has a null
 prototype: an absent `topics["constructor"]` is `undefined`, while an explicitly declared
 `constructor` topic remains accessible and serializes normally.
@@ -2887,6 +2900,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `newInRevisionQuoteChars` | 120 characters per quote, on one line |
 | `needsYouItems` | 4 items per writeup |
 | `needsYouChars` | 300 characters per item, on one line |
+| `checkedItems` | 12 items per writeup |
 | `pathChars` | 4096 characters per path or source; also per publish URL or block id |
 | `pathSegmentChars` | 255 characters per published path segment |
 | `topicsPerReview` | 200 declared topics or writeup topic keys |
@@ -2897,7 +2911,7 @@ limit with `413 too_large` before parsing. Upload content also has the role's by
 | `glossaryDefinitionChars` | 2000 characters per glossary definition |
 | `blastScopeChars` | 32 characters per blast-radius scope |
 | `blastNoteChars` | 2000 characters per blast-radius note |
-| `writeupSectionBytes` | 1048576 UTF-8 bytes per Markdown string |
+| `writeupSectionBytes` | 1048576 UTF-8 bytes per Markdown string and across all checked item texts |
 | `writeupBytes` | 2097152 UTF-8 bytes across all writeup strings |
 | `targetLines` | 1000 quoted lines per line target |
 | `targetTextChars` | 65536 characters across one target's lines and both context arrays |

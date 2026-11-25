@@ -19,7 +19,14 @@ function expectedForm(issue: ManifestIssue): string {
   const needsYou = issue.path[0] === "writeup" && issue.path[1] === "needsYou";
   if (needsYou && typeof issue.path[2] === "number" && field === "kind")
     return "decide, accept, confirm-drift or answer";
-  if ((needsYou || newInRevision) && issue.path.length === 2 && issue.code === "too_big" && issue.origin === "array")
+  const checked = issue.path[0] === "writeup" && issue.path[1] === "checked";
+  if (checked && typeof issue.path[2] === "number" && field === "kind") return "ran, read or reasoned";
+  if (
+    (checked || needsYou || newInRevision) &&
+    issue.path.length === 2 &&
+    issue.code === "too_big" &&
+    issue.origin === "array"
+  )
     return `at most ${issue.maximum} items`;
   const topic = issue.path[0] === "topics" && typeof issue.path[1] === "number";
   if (
@@ -39,7 +46,20 @@ function expectedForm(issue: ManifestIssue): string {
   return issue.message.replace(/, received[\s\S]*$/, "");
 }
 
-export function manifestError(issues: readonly ManifestIssue[]): string {
+export function manifestError(manifestIssues: readonly ManifestIssue[]): string {
+  const issues = manifestIssues.flatMap<ManifestIssue>((issue) => {
+    if (
+      issue.code === "invalid_union" &&
+      issue.path.length === 2 &&
+      issue.path[0] === "writeup" &&
+      issue.path[1] === "checked"
+    ) {
+      // Checked is Markdown first, then a list. Branch issue paths are relative to the union.
+      const branch = issue.errors[Array.isArray(issue.input) ? 1 : 0];
+      if (branch) return branch.map((inner) => ({ ...inner, path: [...issue.path, ...inner.path] }));
+    }
+    return [issue];
+  });
   const details = issues.slice(0, 3).map((issue) => {
     const path =
       issue.path

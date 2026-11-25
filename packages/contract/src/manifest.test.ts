@@ -530,6 +530,37 @@ describe("writeup opening", () => {
   });
 });
 
+describe("checked items", () => {
+  const input = { overview: "", tldr: "", decisions: "", topics: {} };
+  const item = { kind: "read", text: "First paragraph.\n\nSecond paragraph." } as const;
+
+  test("preserves multiline proof and counts its Markdown as shown text", () => {
+    const checked = Array.from({ length: LIMITS.checkedItems }, () => item);
+    const parsed = PublishManifest.parse({ ...manifest, writeup: { ...input, checked } }).writeup;
+    expect(parsed.checked).toEqual(checked);
+    expect(writeupIsEmpty(parsed)).toBe(false);
+    expect(writeupMarkdown(parsed).filter(Boolean)).toEqual(checked.map(({ text }) => text));
+    for (const invalid of [[], [...checked, item], [{ ...item, kind: "other" }], [{ ...item, text: " \n " }]]) {
+      expect(WriteupInput.safeParse({ ...input, checked: invalid }).success).toBe(false);
+    }
+  });
+
+  test("charges the combined UTF-8 text to the section and the whole writeup", () => {
+    const text = "é".repeat(LIMITS.writeupSectionBytes / 4);
+    const checked = [
+      { ...item, text },
+      { ...item, text },
+    ];
+    const full = { ...input, overview: "x".repeat(LIMITS.writeupBytes - LIMITS.writeupSectionBytes), checked };
+    expect(WriteupInput.safeParse(full).success).toBe(true);
+    expect(WriteupInput.safeParse({ ...full, tldr: "a" }).success).toBe(false);
+    const result = WriteupInput.safeParse({ ...input, checked: [...checked, item] });
+    expect(result.error?.issues).toContainEqual(
+      expect.objectContaining({ path: ["checked"], message: "writeup section exceeds the UTF-8 byte limit" }),
+    );
+  });
+});
+
 describe("needsYou", () => {
   const items = [
     { kind: "decide", text: "Choose the **retry limit**.", topic: "routing" },

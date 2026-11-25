@@ -208,7 +208,8 @@ Write the opening fields below. The app groups them for the reviewer.
 - `area`: one to three words naming the part of the project, such as `cli › serve`.
   Use plain text, at most 60 characters. The breadcrumb shows it after the project.
   Leave it out and the app shows the deepest folder the changed files share.
-- `checked`: the proof, at most five items, strongest first, each saying what it showed.
+- `checked`: the proof, at most five items, strongest first. Each item has a kind, `ran`, `read` or
+  `reasoned`, and says what it showed.
   No process items, such as running the gate or reading the diff. Never empty.
 - `notChecked`: only real gaps, each with what could go wrong. Never empty.
 - `overview`: two bullets in plain language. **Goal** is the end state, starting "After this,".

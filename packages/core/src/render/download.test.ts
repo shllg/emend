@@ -3733,6 +3733,38 @@ test("adding the pub look keeps the HTML download's hostile-content filtering", 
     expect(html).not.toContain(forbidden);
 });
 
+test("downloads Checked labels in order with the thread attached to its block", async () => {
+  const kinds = ["ran", "read", "reasoned"] as const;
+  const blocks = kinds.map((kind, index) => ({
+    ...block(`<p>Proof ${kind}.</p>`),
+    id: `checked-0123abc${index}`,
+    section: "checked" as const,
+  }));
+  const sections = [{ key: "checked" as const, label: "Checked", topic: null, blocks }];
+  const input = { title: "Search", details, topics: [], resolveMedia: async () => null };
+  const checked = kinds.map((kind, index) => ({ kind, blockIds: [`checked-0123abc${index}`] }));
+  const html = await buildWriteupDownload({
+    ...input,
+    writeup: { sections, checked },
+    threads: emptyThreads({ blocks: new Map([["checked-0123abc1", [sampleThread("Which file?")]]]) }),
+  });
+  const items = parsed(html).filter((node) => node.tagName === "li" && node.properties.dataProofKind);
+  expect(items.map((item) => item.properties.dataProofKind)).toEqual(kinds);
+  const children = items.map((item) => item.children.filter((node) => node.type === "element"));
+  expect(children.map((nodes) => nodes.map((node) => hastText(node)))).toEqual([
+    ["Ran", "Proof ran."],
+    ["Read", "Proof read.", expect.stringContaining("Which file?")],
+    ["Reasoned", "Proof reasoned."],
+  ]);
+  for (const nodes of children) expect(nodes[0]?.properties.className).toEqual(["em-proof-kind"]);
+
+  const plain = await buildWriteupDownload({ ...input, writeup: { sections } });
+  expect(plain).toContain(
+    "<section><h2>Checked</h2><p>Proof ran.</p><p>Proof read.</p><p>Proof reasoned.</p></section>",
+  );
+  expect(plain).not.toContain("em-proof-kind");
+});
+
 test("downloads Needs you with each kind before its blocks and supports missing metadata", async () => {
   const blocks: RenderedBlock[] = [
     "Choose the limit.",

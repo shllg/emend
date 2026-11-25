@@ -1,4 +1,4 @@
-import type { NeedsYouKind, RenderedBlock, RevisionView, Target, TopicMeta } from "@recense/contract";
+import type { CheckedKind, NeedsYouKind, RenderedBlock, RevisionView, Target, TopicMeta } from "@recense/contract";
 import { TextSelect } from "lucide-react";
 import { Fragment, type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { claimDraft } from "../../lib/composer-owner.ts";
@@ -32,10 +32,12 @@ export type ReaderProps = {
   activeThreadId?: string;
   threadJump?: ThreadJump;
 };
+type ReaderProof = { key: string; kind: CheckedKind; label: string; blocks: RenderedBlock[] };
 export type ReaderFact = {
   key: string;
   label: string;
   blocks?: RenderedBlock[];
+  proofs?: ReaderProof[];
   content?: ReactNode;
   hideLabel?: boolean;
   fold?: { key: string; summary: string };
@@ -47,6 +49,7 @@ export type ReaderGroup = {
   heading?: ReactNode;
   labelledBy?: string;
   blocks: RenderedBlock[];
+  proofs?: ReaderProof[];
   /** The Markdown doc's TL;DR section, including its heading and excluding the next section. */
   tldr?: { start: number; end: number };
   path?: string;
@@ -360,6 +363,23 @@ export function BlockReader({
         {formTarget && "blockId" in formTarget && formTarget.blockId === block.id && composer}
       </Block>
     ));
+  const renderProofsOrBlocks = (
+    { proofs, blocks }: Pick<ReaderFact, "proofs" | "blocks">,
+    path?: string,
+    presentation?: ReaderGroup["presentation"],
+  ) =>
+    proofs ? (
+      <ul className="em-proofs">
+        {proofs.map((proof) => (
+          <li key={proof.key} className="em-proof" data-proof-kind={proof.kind}>
+            <span className="em-proof-kind">{proof.label}</span>
+            <div>{renderBlocks(proof.blocks, path)}</div>
+          </li>
+        ))}
+      </ul>
+    ) : (
+      renderBlocks(blocks ?? [], path, presentation)
+    );
   const renderNews = (news: NonNullable<ReaderGroup["news"]>, path?: string) => (
     <ul className="em-revision-news">
       {news.map(({ key, blocks, jump }) => (
@@ -427,7 +447,7 @@ export function BlockReader({
                 {renderBlocks(group.blocks.slice(group.tldr.end), group.path)}
               </>
             ) : (
-              renderBlocks(group.blocks, group.path, group.presentation)
+              renderProofsOrBlocks(group, group.path, group.presentation)
             )}
             {group.factGroups?.map((factGroup) => (
               <div key={factGroup.key} className="em-writeup-fact-group" data-fact-group={factGroup.key}>
@@ -453,10 +473,10 @@ export function BlockReader({
                             summary={fact.fold.summary}
                             changedIn={latestChange(fact.blocks ?? [])}
                           >
-                            {renderBlocks(fact.blocks ?? [], group.path)}
+                            {renderProofsOrBlocks(fact, group.path)}
                           </WriteupDetails>
                         ) : (
-                          renderBlocks(fact.blocks ?? [], group.path)
+                          renderProofsOrBlocks(fact, group.path)
                         )}
                       </dd>
                     </div>
