@@ -892,13 +892,17 @@ describe("pressing Comment on selection", () => {
     vi.useRealTimers();
   });
 
-  function openSelection() {
+  function pressSelection() {
     const prompt = screen.getByRole("button", { name: "Comment on selection" });
     fireEvent.pointerDown(prompt, mouse);
     advance(120);
     fireEvent.pointerUp(prompt, mouse);
     fireEvent.mouseUp(prompt);
-    fireEvent.click(prompt);
+    return prompt;
+  }
+
+  function openSelection() {
+    fireEvent.click(pressSelection());
   }
 
   test("only a completed press outside the prompt clears the frame selection", () => {
@@ -925,9 +929,72 @@ describe("pressing Comment on selection", () => {
 
     post.mockClear();
     message({ type: "recense:anchor", ...anchor });
-    openSelection();
-    expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
+    const button = pressSelection();
     expect(post).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
+  });
+
+  test("keyboard focus keeps the selection on buttons and clears it in a text field", () => {
+    const { message, post } = mount();
+    message({ type: "recense:ready" });
+    message({ type: "recense:anchor", ...anchor });
+    post.mockClear();
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    const input = document.createElement("input");
+    document.body.append(input);
+    try {
+      fireEvent.focusIn(screen.getByRole("button", { name: "Open panel" }));
+      expect(prompt.isConnected).toBe(true);
+      expect(post).not.toHaveBeenCalled();
+      fireEvent.focusIn(prompt);
+      expect(prompt.isConnected).toBe(true);
+      expect(post).not.toHaveBeenCalled();
+      fireEvent.focusIn(input);
+      expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+      expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
+    } finally {
+      input.remove();
+    }
+  });
+
+  test("selecting text in the app clears the frame selection once focus leaves the frame", () => {
+    const { frame, message, post } = mount();
+    message({ type: "recense:ready" });
+    message({ type: "recense:anchor", ...anchor });
+    post.mockClear();
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    const appText = screen.getByRole("button", { name: "Open panel" });
+    const selection = document.getSelection();
+    try {
+      frame.focus();
+      expect(document.activeElement).toBe(frame);
+      act(() => selection?.selectAllChildren(appText));
+      expect(selection?.isCollapsed).toBe(false);
+      fireEvent(document, new Event("selectionchange"));
+      expect(prompt.isConnected).toBe(true);
+      expect(post).not.toHaveBeenCalled();
+
+      frame.blur();
+      fireEvent(document, new Event("selectionchange"));
+      expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+      expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
+    } finally {
+      selection?.removeAllRanges();
+      frame.blur();
+    }
+  });
+
+  test("a tap outside the frame clears a touch selection before its first anchor arrives", () => {
+    const { message, post } = mount();
+    message({ type: "recense:ready" });
+    post.mockClear();
+    const touch = { pointerType: "touch" };
+    fireEvent.pointerDown(document.body, touch);
+    advance(120);
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.pointerUp(document.body, touch);
+    expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
   });
 
   test("Cancel retires the selection prompt until the frame proposes a new anchor", () => {

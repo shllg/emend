@@ -192,16 +192,46 @@ export function HtmlDocFrame({
   const post = useCallback((message: ParentToFrame) => {
     if (readyNow.current && !gone.current) frame.current?.contentWindow?.postMessage(message, "*");
   }, []);
+  const retireSelection = useCallback(() => {
+    setSelectionTarget(null);
+    post({ type: "recense:clear-selection" });
+  }, [post]);
   useEffect(() => {
-    if (readOnly || !hasSelectionTarget) return;
+    if (readOnly) return;
+    // A touch selection may still be settling in the frame before its first anchor arrives.
     const onPointerUp = (event: PointerEvent) => {
       if (event.target instanceof Node && selectionPrompt.current?.contains(event.target)) return;
-      setSelectionTarget(null);
-      post({ type: "recense:clear-selection" });
+      retireSelection();
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || selectionPrompt.current?.contains(target)) return;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target.isContentEditable
+      )
+        retireSelection();
     };
     document.addEventListener("pointerup", onPointerUp, true);
-    return () => document.removeEventListener("pointerup", onPointerUp, true);
-  }, [readOnly, hasSelectionTarget, post]);
+    document.addEventListener("focusin", onFocusIn, true);
+    return () => {
+      document.removeEventListener("pointerup", onPointerUp, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+    };
+  }, [readOnly, retireSelection]);
+  useEffect(() => {
+    if (readOnly || !hasSelectionTarget) return;
+    const onSelectionChange = () => {
+      if (document.activeElement === frame.current) return;
+      const selection = document.getSelection();
+      if (selection && !selection.isCollapsed && !selectionPrompt.current?.contains(selection.anchorNode))
+        retireSelection();
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [readOnly, hasSelectionTarget, retireSelection]);
   const markAway = useCallback(() => {
     gone.current = true;
     readyNow.current = false;
