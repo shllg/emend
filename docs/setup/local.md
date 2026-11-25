@@ -11,7 +11,8 @@ pages: [hub-tailscale.md](hub-tailscale.md) and [attach.md](attach.md). Both sta
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me
 the change and wait for my yes; never read secrets (tokens, .env files, credential stores) or
-recense's state folder; never open ~/.claude/settings.json whole; if a dotfiles tool manages a file
+recense's state folder; never open ~/.claude/settings.json whole; never open
+~/.config/mise/config.toml, which can hold secrets under [env]; if a dotfiles tool manages a file
 or link you would change (a symlink into a dotfiles repository, stow, chezmoi, home-manager or
 similar), change its source and tell me how to apply it; never run recense pair, attach, detach,
 config or devices yourself, give me the command instead;
@@ -118,11 +119,36 @@ that npm belongs to:
 npm install -g @shllg/recense
 ```
 
-With mise (activated in your shell, as step 1 says):
+With mise (activated in your shell, as step 1 says), from any folder:
 
 ```sh
-mise use -g npm:@shllg/recense
+mise use -g 'npm:@shllg/recense[allow_low_downloads=true]'
 ```
+
+`-g` writes recense into mise's global config, `~/.config/mise/config.toml`, so `recense` works
+in every folder. Without `-g`, mise writes it into the config of the project you are in, and
+`recense` is missing everywhere else. Remove it there with `mise unuse npm:@shllg/recense`, then
+run the command above.
+
+`allow_low_downloads=true` approves recense for the package manager built into mise. That
+package manager refuses an npm package that is new or seldom downloaded until you approve it;
+without the option, mise stops with `refusing to add @shllg/recense`.
+
+mise also holds back every release for 24 hours (its `minimum_release_age` setting). Right
+after a release it installs the one before, and `mise upgrade` and `recense update` find
+nothing newer. To get each release on its first day, add recense to
+`minimum_release_age_excludes` in `~/.config/mise/config.toml`:
+
+```toml
+[settings]
+minimum_release_age_excludes = ["npm:@shllg/recense"]
+```
+
+If that list already exists, add `"npm:@shllg/recense"` to it.
+
+To let `mise upgrade` also update the service, the skills and the Claude Code plugin, add the
+`postinstall` line from [update.md](update.md#let-mise-finish-the-update). It skips each part
+you have not set up yet, so you can add it now.
 
 If `npm install -g` fails with `EACCES` on a system Node.js, do not use `sudo`. Switch to
 Homebrew's Node.js or to mise (step 1), then install again.
@@ -137,13 +163,23 @@ You should see `recense ` followed by a version number. If the shell says `recen
 open a new terminal. With mise, the command is on your `PATH` only if mise is activated in your
 shell.
 
+With mise, run `recense --version` once more from another folder, such as your home folder. It
+should print the same version. If it says `recense: command not found` there, recense went into a
+project's config: see the `-g` paragraph above.
+
 ```text
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
-stores) or recense's state folder.
+stores) or recense's state folder; never open ~/.config/mise/config.toml, which can hold secrets
+under [env].
 Install recense. If Node.js came from Homebrew or another npm install, run npm install -g
-@shllg/recense. If mise manages Node.js, run mise use -g npm:@shllg/recense. On an EACCES error from
-npm with a system Node.js, never use sudo: tell me to switch to Homebrew's Node.js or mise. Then
-run recense --version and show me the result. If recense is not found, tell me to open a new terminal.
+@shllg/recense. If mise manages Node.js, run mise use -g
+'npm:@shllg/recense[allow_low_downloads=true]', always with -g. On an EACCES error from npm with a
+system Node.js, never use sudo: tell me to switch to Homebrew's Node.js or mise. Then run recense
+--version and show me the result; with mise, run it again from my home folder. If recense is not
+found, tell me to open a new terminal. With mise, ask me whether I want each release on its first
+day; if I do, show me the [settings] lines for minimum_release_age_excludes from
+https://github.com/shllg/recense/blob/release/docs/setup/local.md to add to
+~/.config/mise/config.toml myself.
 ```
 
 ## 3. Start recense
@@ -328,6 +364,8 @@ rm -r ~/recense-check
 
 See [update.md](update.md). In short: update the package, rerun `recense service install` if you
 installed the service, rerun `recense skills install` if you ran it, and update the plugin.
+With mise, a `postinstall` line can do the last three for you:
+[update.md](update.md#let-mise-finish-the-update).
 
 ## Undo
 
@@ -339,8 +377,9 @@ Remove what this page set up, in this order. Skip a line for a part you did not 
    the process it lists.
 3. The agent parts: follow the Undo section of [agents.md](agents.md#undo).
 4. The package: `npm uninstall -g @shllg/recense`, or with mise
-   `mise unuse -g npm:@shllg/recense` and `mise uninstall npm:@shllg/recense`. Node.js, git, Homebrew
-   and mise stay; remove them with the tool that installed them if you want them gone.
+   `mise unuse -g npm:@shllg/recense` and `mise uninstall npm:@shllg/recense`. If you added recense to
+   `minimum_release_age_excludes`, remove it from that list too. Node.js, git, Homebrew and mise
+   stay; remove them with the tool that installed them if you want them gone.
 5. The state folder. **It holds every review, comment and hand-off on this machine, and the
    credentials for this machine's server. Deleting it cannot be undone.** Delete it only when you
    want no review back.
@@ -354,6 +393,7 @@ Remove what this page set up, in this order. Skip a line for a part you did not 
 
 ## When something goes wrong
 
+- [mise refuses to install recense](troubleshooting.md#mise-refuses-to-install-recense)
 - [recense is not running](troubleshooting.md#recense-is-not-running)
 - [Port 3636 is in use](troubleshooting.md#port-3636-is-in-use)
 - [The service does not start](troubleshooting.md#the-service-does-not-start)

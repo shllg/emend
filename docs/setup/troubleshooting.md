@@ -122,8 +122,9 @@ command could not confirm its server; ...`. Its end adds that you should run
 
 Why: the unit or agent started but its server did not answer. Common causes: port 3636 is in use,
 Tailscale is not running (with `--tailscale`), the Node.js the service was installed with is gone
-after an upgrade (`brew upgrade node` or `mise upgrade node`), or the command ran in an agent's sandbox, which cannot reach the service
-manager or `127.0.0.1`.
+after an upgrade (`brew upgrade node` or `mise upgrade node`), mise removed the recense version
+the service was installed with ([update.md](update.md#2-update-the-package)), or the command ran
+in an agent's sandbox, which cannot reach the service manager or `127.0.0.1`.
 
 Fix:
 
@@ -586,6 +587,33 @@ Fix:
   line.
 - Publish from a real path: a symlinked folder is refused. Use the path `pwd -P` prints.
 - `recense config` lists the settings.
+
+## mise refuses to install recense
+
+`mise use -g npm:@shllg/recense`, `mise install` or `mise upgrade` stops with:
+
+```text
+refusing to add @shllg/recense: the package name was first published at <date>, within the configured `minimumPackageAge` of 43200 minutes
+help: after verifying the package, set `allow_low_downloads = true` on `npm:@shllg/recense` to approve it
+```
+
+Or `mise upgrade` installs nothing and prints:
+
+```text
+newer npm:@shllg/recense release <version> (released <date>, eligible <date>) ignored by minimum_release_age (24h)
+```
+
+Why: the package manager built into mise refuses an npm package that is new or seldom
+downloaded until you approve it. Separately, mise holds back every release for its first 24
+hours.
+
+Fix:
+
+- Install with `mise use -g 'npm:@shllg/recense[allow_low_downloads=true]'`, as
+  [local.md](local.md#2-install-recense) says, or add `allow_low_downloads = true` to the
+  recense entry under `[tools]` in `~/.config/mise/config.toml`.
+- For the 24-hour hold, add `"npm:@shllg/recense"` to `minimum_release_age_excludes` under
+  `[settings]` in the same file. The release also arrives by itself after 24 hours.
 
 ## The skills links are broken after an update
 
