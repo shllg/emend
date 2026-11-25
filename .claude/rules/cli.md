@@ -42,12 +42,9 @@ The CLI runs in repos under review: treat them as hostile.
   only, skip symlinks that leave the doc's folder, and enforce the size, file-count and revision
   limits. A path behind a symlinked folder is absent, as git sees it, and no read or listing
   lands inside the git folder or the common git folder.
-- `recense prepare` reads the changed paths through git, their worktree copies, and each changed
-  Markdown or HTML doc the way publish reads a doc, its assets included. It writes one file,
-  `review.json`, in the folder the caller names. The directory must already exist, be owned by the
-  user, have no group or other write permission, and sit outside the worktree and its git folders.
-  Prepare refuses a symlinked directory. It creates the file with `O_EXCL` and `O_NOFOLLOW`,
-  mode 0600, and never replaces a file.
+- `recense prepare` reads changed paths via git, worktree copies, and changed docs with assets as
+  publish does. It writes `review.json` (`O_EXCL`, `O_NOFOLLOW`, 0600) in the given folder: no
+  symlink, user-owned, no group or other write, outside the worktree and git folders.
 - `recense publish <path>...` builds that manifest from its arguments: each file argument, and the
   text files found by listing each folder argument. Markdown and HTML render; other text files and
   docs under `--source` show as source. `--main` only picks one of those docs. Every source still
@@ -73,15 +70,11 @@ The CLI runs in repos under review: treat them as hostile.
   references it, at the preflight and on the opened file. Listing errors name only the caller's
   argument or a fixed reason; skip warnings and the nothing-to-publish error escape listed paths
   and give fixed reasons.
-- stdout is a contract: `recense prepare` prints one JSON line with the manifest path and diff and doc counts.
-  `recense publish --manifest` prints one JSON line; `recense publish <path>...`
+- stdout is a contract: `recense prepare` and `recense publish --manifest` print one JSON line; `recense publish <path>...`
   prints the review URL alone, escaped, or that JSON line with `--json`; `recense wait` and
   `recense feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and
-  exit 0. Errors print one line on stderr and nothing on stdout. The shared command handler in
-  `main.ts` exits 2 for a usage error (`CliUsageError`), preserves signal exit codes, and exits 1
-  for other errors. It handles
-  `prepare`, `wait`, `feedback`, `reply`, `ls`, `status`, `stop`, `mcp`, `service`, `update`,
-  `skills`, `config`, `theme`, `look`, `pair`, `devices`, `attach` and `detach`. `recense status --line`
+  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1 (2 for a usage
+  error in `main.ts`'s shared handler). `recense status --line`
   is the exception: it prints its one line or nothing, never writes stderr, and exits 0 on every
   error.
 - Tokens come from the state directory (`agent.token`, `admin.token`, `hub.token`). Never print a

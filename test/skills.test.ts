@@ -1170,15 +1170,14 @@ test("CLI rules document prepare's reads, exclusive create and shared usage exit
   const rules = read(".claude/rules/cli.md").replace(/\s+/g, " ");
   const prepare = rules.split("- `recense prepare` ")[1]?.split(" - ")[0] ?? "";
   for (const rule of [
-    "their worktree copies",
-    "its assets included",
-    "outside the worktree and its git folders",
-    "`O_EXCL` and `O_NOFOLLOW`",
-    "mode 0600",
-    "never replaces a file",
+    "worktree copies",
+    "changed docs with assets",
+    "outside the worktree and git folders",
+    "`O_EXCL`, `O_NOFOLLOW`, 0600",
+    "no symlink, user-owned, no group or other write",
   ])
     expect(prepare).toContain(rule);
-  expect(rules).toContain("shared command handler in `main.ts` exits 2 for a usage error");
+  expect(rules).toContain("(2 for a usage error in `main.ts`'s shared handler)");
 });
 
 test.each(["docs/api.md", "docs/usage.md"])("%s explains Markdown image discovery and skipped paths", (path) => {
