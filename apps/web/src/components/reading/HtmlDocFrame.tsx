@@ -116,8 +116,11 @@ export function HtmlDocFrame({
   const readyNow = useRef(false);
   const repoSent = useRef(false);
   const [ready, setReady] = useState(0);
-  const [target, setTarget] = useState<HtmlSpanTarget | null>(null);
-  const [composing, setComposing] = useState(false);
+  const [selectionTarget, setSelectionTarget] = useState<HtmlSpanTarget | null>(null);
+  const [formTarget, setFormTarget] = useState<HtmlSpanTarget | null>(null);
+  const composing = formTarget !== null;
+  const pressedPointer = useRef<number | null>(null);
+  const guardUntil = useRef(0);
   const [show, setShow] = useState<HtmlNavigation>();
   const [gallery, setGallery] = useState<{ items: LightboxSubject[]; index: number } | null>(null);
   const [diagramJob, setDiagramJob] = useState<DiagramJob | null>(null);
@@ -127,6 +130,7 @@ export function HtmlDocFrame({
   const mountFrame = useCallback((element: HTMLIFrameElement | null) => {
     frame.current = element;
     if (element) {
+      setSelectionTarget(null);
       setGallery(null);
       setDiagramJob(null);
       loads.current = 0;
@@ -195,8 +199,21 @@ export function HtmlDocFrame({
     setGallery(null);
     setDiagramJob(null);
     setReady(0);
-    if (!composing) setTarget(null);
-  }, [composing]);
+    setSelectionTarget(null);
+  }, []);
+  useEffect(() => {
+    const endPress = (event: PointerEvent) => {
+      if (event.pointerId !== pressedPointer.current) return;
+      pressedPointer.current = null;
+      guardUntil.current = Date.now() + 600;
+    };
+    document.addEventListener("pointerup", endPress, true);
+    document.addEventListener("pointercancel", endPress, true);
+    return () => {
+      document.removeEventListener("pointerup", endPress, true);
+      document.removeEventListener("pointercancel", endPress, true);
+    };
+  }, []);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (gone.current || !frame.current?.contentWindow || event.source !== frame.current.contentWindow) return;
@@ -244,9 +261,11 @@ export function HtmlDocFrame({
           index: kept.indexOf(clicked),
         });
       } else if (parsed.data.type === "recense:navigate") onNavigate?.(parsed.data);
-      else if (!readOnly && !composing && !composerOpen) {
+      else if (parsed.data.type === "recense:deselect") {
+        if (Date.now() >= guardUntil.current) setSelectionTarget(null);
+      } else if (!readOnly && !composerOpen && !(composing && commentsOpen)) {
         const { quote, prefix, suffix } = parsed.data;
-        setTarget({ kind: "html-span", path, quote, prefix, suffix });
+        setSelectionTarget({ kind: "html-span", path, quote, prefix, suffix });
       }
     };
     window.addEventListener("message", receive);
@@ -258,6 +277,7 @@ export function HtmlDocFrame({
     checkedRepoUrl,
     images,
     composing,
+    commentsOpen,
     composerOpen,
     onNavigate,
     headings,
@@ -357,8 +377,8 @@ export function HtmlDocFrame({
     lastScroll.current = show;
   }, [ready, show, placed, reading]);
   const close = () => {
-    setComposing(false);
-    setTarget(null);
+    setFormTarget(null);
+    setSelectionTarget(null);
   };
   return (
     <div ref={root} tabIndex={-1} className="em-html-doc" id={`html-doc-${path}`}>
@@ -433,36 +453,43 @@ export function HtmlDocFrame({
               key={draft.key}
               onClick={() => {
                 if (draft.target?.kind !== "html-span") return;
-                setTarget(draft.target);
+                setFormTarget(draft.target);
+                setSelectionTarget(null);
                 claimDraft(draft.key, "reading");
-                setComposing(true);
               }}
             >
               Resume selection comment
             </Button>
           ))}
-        {!readOnly && target && composing && !composerOpen && (
+        {!readOnly && formTarget && !composerOpen && (
           <Composer
             reviewId={reviewId}
             revision={revision}
-            target={target}
+            target={formTarget}
             topics={topics}
             onSaved={close}
-            onCancel={() => setComposing(false)}
+            onCancel={close}
             returnFocus={() => returnFocus?.() ?? root.current}
           />
         )}
       </Sheet>
-      {!readOnly && target && !composing && !composerOpen && (
+      {!readOnly && selectionTarget && !composerOpen && !(composing && commentsOpen) && (
         <div className="em-html-selection">
           <Button
             variant="primary"
             size="sm"
             icon={TextSelect}
+            // A tap can collapse the frame selection before the button receives its click.
+            onPointerDown={(event) => {
+              if (pressedPointer.current !== null) return;
+              pressedPointer.current = event.pointerId;
+              guardUntil.current = Number.POSITIVE_INFINITY;
+            }}
             onClick={() => {
-              claimDraft(draftKey(reviewId, target), "reading");
+              claimDraft(draftKey(reviewId, selectionTarget), "reading");
+              setFormTarget(selectionTarget);
+              setSelectionTarget(null);
               onCommentsOpenChange(true);
-              setComposing(true);
             }}
           >
             Comment on selection

@@ -86,6 +86,7 @@ const gallery = empty
 export const FrameToParent = span
   .extend({ type: literal("recense:anchor") })
   .or(empty.extend({ type: literal("recense:ready") }))
+  .or(empty.extend({ type: literal("recense:deselect") }))
   .or(empty.extend({ type: literal("recense:issue"), number: ThreadView.shape.createdOn.max(9_999_999) }))
   .or(HtmlPosition.safeExtend({ type: literal("recense:position") }))
   .or(gallery)

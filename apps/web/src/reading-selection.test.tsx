@@ -5,8 +5,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { BlockReader } from "./components/reading/BlockReader.tsx";
+import { BlockReader, type ReaderGroup } from "./components/reading/BlockReader.tsx";
 import { ToastProvider } from "./components/ui/Toast.tsx";
+import { draftKey } from "./lib/drafts.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const block: RenderedBlock = {
@@ -32,6 +33,7 @@ function mount(ui: ReactNode) {
 }
 beforeEach(() => {
   localStorage.clear();
+  window.dispatchEvent(new StorageEvent("storage", { key: null }));
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   for (const key of [["inbox"], ["review", id], ["revision", id, 1]]) client.setQueryData(key, {});
   fetchMock = vi.fn(async () => Response.json({ threadId: id, commentId: id, sendId: id }, { status: 201 }));
@@ -47,17 +49,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 const promptName = { name: "Comment on selection" };
-function touchReader() {
+function touchReader(groups: ReaderGroup[] = [{ key: "overview", blocks: [block, second] }]) {
   const view = mount(
     <div>
       <p data-testid="outside">outside text</p>
-      <BlockReader
-        reviewId={id}
-        revision={1}
-        changedBlocks={[]}
-        threads={[]}
-        groups={[{ key: "overview", blocks: [block, second] }]}
-      />
+      <BlockReader reviewId={id} revision={1} changedBlocks={[]} threads={[]} groups={groups} />
     </div>,
   );
   const paragraphs = [...view.container.querySelectorAll<HTMLElement>("[data-block-id] p")];
@@ -73,6 +69,15 @@ function touchReader() {
   };
   const settle = (ms = 250) => act(() => void vi.advanceTimersByTime(ms));
   const changed = () => document.dispatchEvent(new Event("selectionchange"));
+  const mouseCollapse = (element: HTMLElement) => {
+    fireEvent.pointerDown(element, { pointerType: "mouse" });
+    fireEvent.mouseDown(element);
+    required(window.getSelection()).collapse(element, 0);
+    changed();
+    settle(120);
+    fireEvent.pointerUp(element, { pointerType: "mouse" });
+    fireEvent.mouseUp(element);
+  };
   // A touch selection: no mouse events, only selectionchange, then the debounce.
   const reveal = () => {
     const selection = select(text, 1, 3);
@@ -80,7 +85,7 @@ function touchReader() {
     settle();
     return { selection, prompt: screen.getByRole("button", promptName) };
   };
-  return { ...view, paragraphs, text, select, settle, changed, reveal };
+  return { ...view, paragraphs, text, select, settle, changed, reveal, mouseCollapse };
 }
 test("a touch selection shows the comment prompt from selectionchange alone", () => {
   const { select, text, changed, settle } = touchReader();
@@ -105,6 +110,66 @@ test("a collapsed selection retires a visible prompt once no press guards it", (
   changed();
   settle();
   expect(screen.queryByRole("button", promptName)).toBeNull();
+});
+test.each([
+  { name: "writeup", path: undefined },
+  { name: "Markdown doc", path: "docs/seed.md" },
+])("a held mouse click outside a $name retires its selection prompt on release", ({ path }) => {
+  const { reveal, getByTestId, mouseCollapse } = touchReader([{ key: "overview", blocks: [block], path }]);
+  reveal();
+  mouseCollapse(getByTestId("outside"));
+  expect(screen.queryByRole("button", promptName)).toBeNull();
+});
+
+test.each(["topic", "details"])("a form inside a closed %s fold keeps its draft and allows a new selection", (fold) => {
+  const group: ReaderGroup =
+    fold === "topic"
+      ? {
+          key: "seeds",
+          heading: "Seeds",
+          topic: { slug: "seeds", title: "Seeds", importance: 1, summary: "" },
+          blocks: [block],
+        }
+      : { key: "seeds", blocks: [], subsections: [{ key: "body", kind: "body", heading: "Details", blocks: [block] }] };
+  const { reveal, paragraphs, select, changed, settle, mouseCollapse } = touchReader([
+    group,
+    { key: "other", blocks: [second] },
+  ]);
+  const toggle = fold === "topic" ? screen.getByRole("button", { name: "Seeds" }) : screen.getByText("Details");
+  const toggleFold = () => {
+    mouseCollapse(toggle);
+    fireEvent.click(toggle);
+  };
+  if (fold === "details") toggleFold();
+  const { prompt } = reveal();
+  fireEvent.click(prompt);
+  const editor = () => screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Comment" });
+  fireEvent.change(editor(), { target: { value: "Keep these letters" } });
+  const selectOther = (end = 4) => {
+    select(required(required(paragraphs[1]).firstChild), 0, end);
+    changed();
+    settle();
+  };
+  selectOther();
+  expect(screen.queryByRole("button", promptName)).toBeNull();
+  toggleFold();
+  selectOther();
+  expect(screen.getByRole("button", promptName)).toBeTruthy();
+  toggleFold();
+  expect(screen.queryByRole("button", promptName)).toBeNull();
+  expect(editor().value).toBe("Keep these letters");
+  expect(editor().form?.querySelector("mark")?.textContent).toBe("ee");
+  toggleFold();
+  selectOther();
+  fireEvent.click(screen.getByRole("button", promptName));
+  expect(editor().form?.querySelector("mark")?.textContent).toBe("plan");
+  expect(editor().value).toBe("");
+  const firstDraft = draftKey(id, { kind: "writeup-span", blockId: block.id, quote: "ee", prefix: "s", suffix: "d" });
+  expect(localStorage.getItem(firstDraft)).toBe("Keep these letters");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("button", promptName)).toBeNull();
+  selectOther(5);
+  expect(screen.getByRole("button", promptName)).toBeTruthy();
 });
 test("a touch tap opens the composer once with the latched text, though the selection clears in between", async () => {
   const { reveal, text, changed, settle } = touchReader();
