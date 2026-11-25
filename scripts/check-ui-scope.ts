@@ -77,7 +77,24 @@ const ignoredSkips = [
   /^\.claude\/scheduled_tasks\.lock$/,
 ];
 
-const splitPaths = (output: string) => output.split("\0").filter(Boolean);
+type Report = (path: string, prefix?: string) => void;
+
+function* nulRecords(output: Buffer) {
+  let start = 0;
+  while (start < output.length) {
+    const end = output.indexOf(0, start);
+    if (end < 0) throw new Error("Unterminated git record");
+    yield output.subarray(start, end);
+    start = end + 1;
+  }
+}
+
+function decodeName(bytes: Buffer, report: Report, parent = ""): string | undefined {
+  const name = bytes.toString("utf8");
+  if (Buffer.from(name).equals(bytes)) return name;
+  report(Buffer.from(parent).toString("hex") + bytes.toString("hex"), "undecodable name: ");
+}
+
 const sha256 = (bytes: Buffer | string) => createHash("sha256").update(bytes).digest("hex");
 type Entries = Map<string, string>;
 type Snapshot = { files: Entries; git: Entries; main: Entries };
@@ -114,7 +131,7 @@ const mainSkips = [/^\.claude\/(?:worktrees|\.cc-writes)\//, /^\.claude\/schedul
 const snapshotSkips = { files: ignoredSkips, git: [], main: mainSkips };
 
 async function collectFiles(entries: Entries, file: string, key: string, part: keyof Snapshot,
-  optional = false): Promise<void> {
+  report: Report, optional = false): Promise<void> {
   const skips = snapshotSkips[part];
   if (skips.some((skip) => skip.test(key))) return;
   const stat = optional ? lstatSync(file, { bigint: true, throwIfNoEntry: false }) :
@@ -122,30 +139,38 @@ async function collectFiles(entries: Entries, file: string, key: string, part: k
   if (!stat) return;
   if (stat.isDirectory()) {
     if (skips.some((skip) => skip.test(key + "/"))) return;
-    for (const name of readdirSync(file)) {
-      await collectFiles(entries, join(file, name), key + "/" + name, part);
+    for (const bytes of readdirSync(file, { encoding: "buffer" })) {
+      const name = decodeName(bytes, report, key + "/");
+      if (name !== undefined)
+        await collectFiles(entries, join(file, name), key + "/" + name, part, report);
     }
-  } else if (stat.isSymbolicLink()) {
-    const hash = sha256(readlinkSync(file, { encoding: "buffer" }));
-    entries.set(key, part === "files" ? "link:" + hash : hash);
+    return;
+  }
+  let hash: string;
+  if (stat.isSymbolicLink()) {
+    hash = sha256(readlinkSync(file, { encoding: "buffer" }));
+    if (part === "files") hash = "link:" + hash;
   } else if (stat.isFile() && part === "files" && workspaceInstall.test(key)) {
     const parts = [stat.size, stat.mode, stat.ino, stat.dev, stat.nlink,
       stat.mtimeNs, stat.ctimeNs];
-    entries.set(key, "meta:" + parts.join(":"));
+    hash = "meta:" + parts.join(":");
   } else if (stat.isFile()) {
-    entries.set(key, await fileHash(file));
+    hash = await fileHash(file);
   } else {
     throw new Error(`Cannot snapshot special file ${JSON.stringify(key)}`);
   }
+  entries.set(key, part === "git" ? sha256(stat.mode.toString(8) + "\0" + hash) : hash);
 }
 
-async function ignoredFiles(cwd: string): Promise<Entries> {
+async function ignoredFiles(cwd: string, report: Report): Promise<Entries> {
   const files: Entries = new Map();
   const roots = git(cwd, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory",
     "-z");
-  for (const root of splitPaths(roots.toString())) {
+  for (const bytes of nulRecords(roots)) {
+    const root = decodeName(bytes, report);
+    if (root === undefined) continue;
     const path = root.replace(/\/$/, "");
-    await collectFiles(files, join(cwd, path), path, "files");
+    await collectFiles(files, join(cwd, path), path, "files", report);
   }
   return files;
 }
@@ -157,9 +182,9 @@ function configDigest(cwd: string, head: Buffer): string {
   if (!ref.startsWith(prefix)) return sha256(config);
   const current = ref.slice(prefix.length);
   // Latin-1 round-trips every byte, including non-UTF-8 values and origin paths.
-  const fields = config.toString("latin1").split("\0");
+  const fields = Array.from(nulRecords(config), (bytes) => bytes.toString("latin1"));
   const hash = createHash("sha256");
-  for (let i = 0; i < fields.length - 1; i += 3) {
+  for (let i = 0; i < fields.length; i += 3) {
     const [scope, origin, setting] = fields.slice(i, i + 3);
     const newline = setting.indexOf("\n");
     const name = newline < 0 ? setting : setting.slice(0, newline);
@@ -173,17 +198,19 @@ function configDigest(cwd: string, head: Buffer): string {
   return hash.digest("hex");
 }
 
-async function gitSettings(cwd: string, common: string): Promise<Entries> {
+async function gitSettings(cwd: string, common: string, report: Report): Promise<Entries> {
   const entries: Entries = new Map();
   const head = symbolicHead(cwd);
   entries.set("config", configDigest(cwd, head));
   entries.set("HEAD", sha256(head));
+  const refs = git(cwd, "for-each-ref", "--format=%(refname)%00%(objectname)", "refs/replace/");
+  entries.set("replace", sha256(refs));
   const hooks = git(cwd, "rev-parse", "--git-path", "hooks").toString().trimEnd();
   const dir = git(cwd, "rev-parse", "--git-dir").toString().trimEnd();
   for (const [key, file] of [
     ["hooks", resolve(cwd, hooks)], ["info", join(common, "info")],
     ["config.worktree", resolve(cwd, dir, "config.worktree")],
-  ]) await collectFiles(entries, file, key, "git", true);
+  ]) await collectFiles(entries, file, key, "git", report, true);
   return entries;
 }
 
@@ -202,27 +229,31 @@ function pathStat(cwd: string, path: string, directories: Map<string, boolean>) 
   if (directory(dirname(path))) return lstatSync(join(cwd, path), { throwIfNoEntry: false });
 }
 
-async function mainCheckout(cwd: string, main: string): Promise<Entries> {
+async function mainCheckout(cwd: string, main: string, report: Report): Promise<Entries> {
   const entries: Entries = new Map();
   if (cwd === main) return entries;
   entries.set("HEAD", sha256(Buffer.concat([git(main, "rev-parse", "HEAD"), symbolicHead(main)])));
   const status = git(main, "status", "--porcelain=v2", "-z", "--untracked-files=all");
-  const records = splitPaths(status.toString());
+  const records = [...nulRecords(status)];
   const digest = createHash("sha256");
   const directories = new Map<string, boolean>();
   const pathFields: Record<string, number> = { "1": 8, "2": 9, u: 10, "?": 1 };
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
-    const type = record[0];
+    const type = String.fromCharCode(record[0]);
     const fields = pathFields[type];
     if (!fields) throw new Error("Unknown git status record");
-    const path = record.split(" ").slice(fields).join(" ");
-    const paths = type === "2" ? [path, records[++i]] : [path];
-    if (paths.every((p) => mainSkips.some((skip) => skip.test(p)))) continue;
-    digest.update(record + "\0");
-    if (type === "2") digest.update(paths[1] + "\0");
+    let start = 0;
+    for (let field = 0; field < fields; field++) start = record.indexOf(32, start) + 1;
+    const names = [record.subarray(start)];
+    if (type === "2") names.push(records[++i]);
+    const paths = names
+      .filter((bytes) => !mainSkips.some((skip) => skip.test(bytes.toString("latin1"))))
+      .map((bytes) => decodeName(bytes, report)).filter((path) => path !== undefined);
+    if (!paths.length) continue;
+    digest.update(record).update("\0");
+    if (type === "2") digest.update(names[1]).update("\0");
     for (const p of paths) {
-      if (mainSkips.some((skip) => skip.test(p))) continue;
       const stat = pathStat(main, p, directories);
       const file = join(main, p);
       if (stat?.isFile()) digest.update(await fileHash(file));
@@ -233,7 +264,7 @@ async function mainCheckout(cwd: string, main: string): Promise<Entries> {
   entries.set("status", digest.digest("hex"));
   const files: Entries = new Map();
   for (const key of ["bin", ".claude", "scripts"])
-    await collectFiles(files, join(main, key), key, "main", true);
+    await collectFiles(files, join(main, key), key, "main", report, true);
   for (const [path, hash] of files) entries.set("files/" + path, hash);
   return entries;
 }
@@ -282,29 +313,42 @@ export async function worktreeEntry(file: string, stat: Stats | undefined, forma
   return "special";
 }
 
-type Report = (path: string, prefix?: string) => void;
-
 async function checkPaths(cwd: string, base: string, restore: Set<string>, remove: Set<string>,
-  report: Report): Promise<Set<string>> {
+  ownerPaths: Set<string>, report: Report): Promise<Set<string>> {
   const tree: Entries = new Map();
   const index: Entries = new Map();
   const conflicts = new Set<string>();
   const links = new Set<string>();
-  for (const row of splitPaths(git(cwd, "ls-tree", "-r", "-z", "--full-tree", base).toString())) {
-    const tab = row.indexOf("\t");
-    const [mode, , id] = row.slice(0, tab).split(" ");
-    tree.set(row.slice(tab + 1), mode + " " + id);
+  const gitlinks = new Set<string>();
+  for (const row of nulRecords(git(cwd, "ls-tree", "-r", "-z", "--full-tree", base))) {
+    const tab = row.indexOf(9);
+    const path = decodeName(row.subarray(tab + 1), report);
+    if (path === undefined) continue;
+    const [mode, , id] = row.toString("ascii", 0, tab).split(" ");
+    tree.set(path, mode + " " + id);
+    if (mode === "160000") gitlinks.add(path);
   }
-  for (const row of splitPaths(git(cwd, "ls-files", "-s", "-z").toString())) {
-    const tab = row.indexOf("\t");
-    const [mode, id, stage] = row.slice(0, tab).split(" ");
-    const path = row.slice(tab + 1);
+  for (const row of nulRecords(git(cwd, "ls-files", "-s", "-z"))) {
+    const tab = row.indexOf(9);
+    const path = decodeName(row.subarray(tab + 1), report);
+    if (path === undefined) continue;
+    const [mode, id, stage] = row.toString("ascii", 0, tab).split(" ");
     index.set(path, mode + " " + id);
     if (stage !== "0") conflicts.add(path);
     if (mode === "120000") links.add(path);
+    if (mode === "160000") gitlinks.add(path);
   }
-  const others = splitPaths(git(cwd, "ls-files", "--others", "--exclude-standard", "-z")
-    .toString());
+  const others: string[] = [];
+  for (const row of nulRecords(git(cwd, "ls-files", "--others", "--exclude-standard", "-z"))) {
+    const path = decodeName(row, report);
+    if (path === undefined) continue;
+    if (path.endsWith("/")) {
+      report(path, "nested repository: ");
+      ownerPaths.add(path.slice(0, -1));
+    } else {
+      others.push(path);
+    }
+  }
   const format = git(cwd, "rev-parse", "--show-object-format").toString().trimEnd();
   const directories = new Map<string, boolean>();
   const trackedPaths = new Set([...tree.keys(), ...index.keys()]);
@@ -314,6 +358,11 @@ async function checkPaths(cwd: string, base: string, restore: Set<string>, remov
     const work = tracked ? await worktreeEntry(join(cwd, path), stat, format) : undefined;
     if (tracked && !conflicts.has(path) && index.get(path) === tree.get(path) &&
         work === tree.get(path)) continue;
+    if (gitlinks.has(path)) {
+      report(path, "gitlink: ");
+      ownerPaths.add(path);
+      continue;
+    }
     if (stat?.isSymbolicLink() || links.has(path)) report(path, "symlink: ");
     else if (!allowed(path)) report(path);
     else continue;
@@ -346,20 +395,23 @@ async function main(args: string[]): Promise<number> {
   const cwd = git(process.cwd(), "rev-parse", "--show-toplevel").toString().trimEnd();
   const restore = new Set<string>();
   const remove = new Set<string>();
-  let violations = false;
+  const ownerPaths = new Set<string>();
+  const findings = new Set<string>();
   function report(path: string, prefix = "") {
     const raw = /^[A-Za-z0-9._@+/-]+$/.test(path) && !path.startsWith("-");
-    console.log(prefix + (raw ? path : JSON.stringify(path)));
-    violations = true;
+    const line = prefix + (raw ? path : JSON.stringify(path));
+    if (!findings.has(line)) console.log(line);
+    findings.add(line);
   }
   const before = withSnapshot ? readSnapshot(args[3], args[5]) : undefined;
-  for (const entry of splitPaths(git(cwd, "ls-files", "-v", "-z").toString())) {
-    if (/^[a-zS] /.test(entry)) {
-      report(entry.slice(2), "index flag: ");
-      restore.add(entry.slice(2));
+  for (const row of nulRecords(git(cwd, "ls-files", "-v", "-z"))) {
+    const path = decodeName(row.subarray(2), report);
+    if (path !== undefined && /^[a-zS] /.test(row.toString("ascii", 0, 2))) {
+      report(path, "index flag: ");
+      restore.add(path);
     }
   }
-  if (snapshotOnly && violations) return 1;
+  if (snapshotOnly && findings.size) return 1;
   let tracked = new Set<string>();
   if (since) {
     const base = args[1].toLowerCase();
@@ -371,19 +423,21 @@ async function main(args: string[]): Promise<number> {
     }
     const head = git(cwd, "rev-parse", "HEAD").toString().trimEnd();
     if (head !== base) report(head, "head moved: ");
-    tracked = await checkPaths(cwd, base, restore, remove, report);
+    tracked = await checkPaths(cwd, base, restore, remove, ownerPaths, report);
   }
   const snapshot = snapshotOnly ? args[1] : args[3];
   if (snapshot) {
     const common = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
       .toString().trimEnd();
     const main = dirname(common);
-    const settings = await gitSettings(cwd, common);
-    const files = await ignoredFiles(cwd);
+    const settings = await gitSettings(cwd, common, report);
+    const files = await ignoredFiles(cwd, report);
     if (snapshotOnly) {
+      const checkout = await mainCheckout(cwd, main, report);
+      if (findings.size) return 1;
       const bytes = JSON.stringify({
         files: Object.fromEntries(files), git: Object.fromEntries(settings),
-        main: Object.fromEntries(await mainCheckout(cwd, main)),
+        main: Object.fromEntries(checkout),
       });
       writeFileSync(snapshot, bytes, { flag: "wx", mode: 0o600 });
       console.log("snapshot sha256: " + sha256(bytes));
@@ -391,7 +445,7 @@ async function main(args: string[]): Promise<number> {
       const changedSettings = differences(before.git, settings);
       for (const key of changedSettings) report(key, "git changed: ");
       if (!changedSettings.length) {
-        for (const key of differences(before.main, await mainCheckout(cwd, main)))
+        for (const key of differences(before.main, await mainCheckout(cwd, main, report)))
           report(key, "main changed: ");
       }
       for (const path of differences(before.files, files)) {
@@ -403,11 +457,15 @@ async function main(args: string[]): Promise<number> {
           if (tracked.has(path)) restore.add(path);
         }
       }
+      for (const path of ownerPaths) {
+        restore.delete(path);
+        remove.delete(path);
+      }
       writeList(snapshot, "restore.nul", restore);
       writeList(snapshot, "delete.nul", remove);
     }
   }
-  return violations ? 1 : 0;
+  return findings.size ? 1 : 0;
 }
 
 if (import.meta.main) {

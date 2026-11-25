@@ -176,21 +176,25 @@ test("the orchestrator snapshots and checks each finisher pass with the committe
     "git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <fresh>",
     "node <fresh> --since <full-id> --snapshot <temp>/ignored.json --snapshot-sha256 <digest>",
     "Report every printed line as a blocker",
-    "For `head moved`, `index flag`, `ignored changed`, `ignored removed`, `git changed` " +
-      "or `main changed`, or any exit other than 0 or 1",
+    "For `head moved`, `index flag`, `ignored changed`, `ignored removed`, `git changed`, " +
+      "`main changed`, `nested repository`, `gitlink` or `undecodable name`, stop for the owner",
+    "While any stop-for-owner line is printed, run no cleanup at all.",
+    "For any such line or any exit other than 0 or 1",
     "`<main>/bin/wt notify blocked`",
     "Never put a printed path on a command line",
     "xargs -0 -r rm -f -- < <temp>/delete.nul",
     "test ! -s <temp>/restore.nul || git --no-replace-objects --literal-pathspecs " +
-      "-c core.fsmonitor=false restore --source=<full-id> --staged --worktree " +
+      "-c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null " +
+      "restore --source=<full-id> --staged --worktree " +
       "--pathspec-from-file=<temp>/restore.nul --pathspec-file-nul",
     "Run the check again after cleanup. Continue only at exit 0",
     "Run `node scripts/ui-demo.ts stop`",
     "If `.wt/ui-demo.json` still exists, run `<main>/bin/wt notify blocked` and wait for the owner",
-    "Then run the check again",
+    "Then run the check again. Continue only at exit 0.",
     "Remove `node_modules/.vitest-cache`, `.tsbuild`, `apps/*/.tsbuild` and `packages/*/.tsbuild`",
     "then run `pnpm verify`",
-    "Stage the finish and run the check once more right before the commit",
+    "Stage the finish and run the check once more right before the commit. " +
+      "Continue only at exit 0.",
     "Commit the finish separately, then remove the temp folder",
   ];
   let index = -1;

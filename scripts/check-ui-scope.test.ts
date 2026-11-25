@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
@@ -409,6 +409,123 @@ test("changed links and .git names are reported even in an allowed folder", (t) 
     dir + ".gitattributes\0" + dir + "new\0");
 });
 
+function assertOwnerFinding(snapshot: string, result: SpawnSyncReturns<string>, lines: string[]) {
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  assert.deepEqual(result.stdout.trimEnd().split("\n").sort(), [...lines].sort());
+  for (const list of ["restore.nul", "delete.nul"])
+    assert.equal(readFileSync(join(dirname(snapshot), list)).length, 0, list);
+}
+
+test("a nested repository and its staged gitlink stay out of both cleanup lists", (t) => {
+  const { cwd, git, snapshot, takeSnapshot } = repository(t);
+  git("commit", "-qm", "base", "--allow-empty");
+  const compare = takeSnapshot();
+  const sub = "apps/web/public/sub";
+  mkdirSync(join(cwd, sub), { recursive: true });
+  git("init", "-q", sub);
+  symlinkSync("image.png", join(cwd, sub, "link"));
+  git("-C", sub, "add", "link");
+  git("-C", sub, "-c", "user.name=Example", "-c", "user.email=review@example.com",
+    "commit", "-qm", "asset");
+  assertOwnerFinding(snapshot, compare(), ["nested repository: " + sub + "/"]);
+  git("add", "--no-warn-embedded-repo", sub);
+  assertOwnerFinding(snapshot, compare(), ["gitlink: " + sub]);
+  git("update-index", "--assume-unchanged", sub);
+  assertOwnerFinding(snapshot, compare(), ["gitlink: " + sub, "index flag: " + sub]);
+});
+
+test("replacing or removing a base gitlink is reported even on an allowed path", (t) => {
+  const { cwd, git, snapshot, takeSnapshot } = repository(t);
+  git("commit", "-qm", "first", "--allow-empty");
+  const path = "apps/web/public/asset";
+  const id = git("rev-parse", "HEAD").toString().trimEnd();
+  git("update-index", "--add", "--cacheinfo", "160000", id, path);
+  git("commit", "-qm", "base gitlink");
+  const compare = takeSnapshot();
+  mkdirSync(dirname(join(cwd, path)), { recursive: true });
+  writeFileSync(join(cwd, path), "regular file");
+  assertOwnerFinding(snapshot, compare(), ["gitlink: " + path]);
+  git("rm", "--cached", path);
+  assertOwnerFinding(snapshot, compare(), ["gitlink: " + path]);
+});
+
+test("an undecodable link name is reported as its original path bytes", (t) => {
+  const { cwd, git, check, snapshot, takeSnapshot } = repository(t);
+  git("commit", "-qm", "base", "--allow-empty");
+  const compare = takeSnapshot();
+  const dir = "apps/web/public";
+  mkdirSync(join(cwd, dir), { recursive: true });
+  const name = Buffer.concat([Buffer.from(dir + "/"), Buffer.from([0xff])]);
+  const line = "undecodable name: " + name.toString("hex");
+  symlinkSync("missing", Buffer.concat([Buffer.from(cwd + "/"), name]));
+  assertOwnerFinding(snapshot, compare(), [line]);
+  git("add", dir);
+  assertOwnerFinding(snapshot, compare(), [line]);
+  const fresh = snapshot + ".new";
+  const refused = check("--snapshot", fresh);
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.equal(refused.stdout, line + "\n");
+  assert(!existsSync(fresh));
+  git("commit", "-qm", "link");
+  const base = git("rev-parse", "HEAD").toString().trimEnd();
+  git("rm", "-r", dir);
+  const treeOnly = check("--since", base);
+  assert.equal(treeOnly.status, 1, treeOnly.stderr);
+  assert.equal(treeOnly.stdout, line + "\n");
+});
+
+test("ignored roots and directory entries retain undecodable path bytes", (t) => {
+  const { cwd, git, check, snapshot, takeSnapshot } = repository(t);
+  writeFileSync(join(cwd, ".gitignore"), "*.ignored\ncache/\n");
+  git("add", ".gitignore");
+  git("commit", "-qm", "base");
+  const compare = takeSnapshot();
+  mkdirSync(join(cwd, "cache"));
+  const bad = Buffer.from([0xff]);
+  const names = [Buffer.concat([bad, Buffer.from(".ignored")]),
+    Buffer.concat([Buffer.from("cache/"), bad])];
+  for (const name of names) writeFileSync(Buffer.concat([Buffer.from(cwd + "/"), name]), "");
+  const lines = names.map((name) => "undecodable name: " + name.toString("hex"));
+  assertOwnerFinding(snapshot, compare(), lines);
+  const fresh = snapshot + ".new";
+  const refused = check("--snapshot", fresh);
+  assert.equal(refused.status, 1, refused.stderr);
+  assert.deepEqual(refused.stdout.trimEnd().split("\n").sort(), lines.sort());
+  assert(!existsSync(fresh));
+});
+
+test("the settings snapshot records hook permissions and distinguishes files from links", (t) => {
+  const { cwd, git, snapshot, takeSnapshot } = repository(t);
+  git("commit", "-qm", "base", "--allow-empty");
+  const hook = join(cwd, ".git", "hooks", "pre-push");
+  writeFileSync(hook, "hook-target");
+  chmodSync(hook, 0o644);
+  const compare = takeSnapshot();
+  chmodSync(hook, 0o755);
+  assertOwnerFinding(snapshot, compare(), ["git changed: hooks/pre-push"]);
+  chmodSync(hook, 0o644);
+  assert.equal(compare().status, 0);
+  rmSync(hook);
+  symlinkSync("hook-target", hook);
+  assertOwnerFinding(snapshot, compare(), ["git changed: hooks/pre-push"]);
+});
+
+test("adding, changing and removing replace refs changes the settings snapshot", (t) => {
+  const { cwd, git, snapshot, takeSnapshot } = repository(t);
+  for (const name of ["one", "two", "three"]) writeFileSync(join(cwd, name), name);
+  git("add", ".");
+  git("commit", "-qm", "base");
+  const compare = takeSnapshot();
+  git("replace", "HEAD:one", "HEAD:two");
+  assertOwnerFinding(snapshot, compare(), ["git changed: replace"]);
+  rmSync(snapshot);
+  const withRef = takeSnapshot();
+  git("replace", "-f", "HEAD:one", "HEAD:three");
+  assertOwnerFinding(snapshot, withRef(), ["git changed: replace"]);
+  git("replace", "-d", "HEAD:one");
+  assertOwnerFinding(snapshot, withRef(), ["git changed: replace"]);
+});
+
 test("an unmerged index entry counts as changed even with the original blob", (t) => {
   const { cwd, git, env, takeSnapshot } = repository(t);
   writeFileSync(join(cwd, "file"), "base");
@@ -456,7 +573,8 @@ test("step 2 restores and deletes literal names from separate, replaceable NUL l
   const cleanup = [
     'xargs -0 -r rm -f -- < "$1/delete.nul"',
     'test ! -s "$1/restore.nul" || git --no-replace-objects --literal-pathspecs ' +
-      '-c core.fsmonitor=false restore --source="$2" --staged --worktree ' +
+      '-c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null ' +
+      'restore --source="$2" --staged --worktree ' +
       '--pathspec-from-file="$1/restore.nul" --pathspec-file-nul',
   ].join("\n");
   execFileSync("sh", ["-ec", cleanup, "cleanup", temp, base], { cwd, env });
@@ -503,6 +621,13 @@ test("a linked worktree compares the main checkout only while its Git settings m
   mkdirSync(join(cwd, ".claude", "worktrees", "other"), { recursive: true });
   writeFileSync(join(cwd, ".claude", "worktrees", "other", "file"), "skip");
   assert.equal(compare().status, 0);
+  const badName = Buffer.concat([Buffer.from("bin/"), Buffer.from([0xff])]);
+  const badFile = Buffer.concat([Buffer.from(cwd + "/"), badName]);
+  writeFileSync(badFile, "new");
+  const undecodable = compare();
+  assert.equal(undecodable.status, 1, undecodable.stderr);
+  assert.equal(undecodable.stdout, "undecodable name: " + badName.toString("hex") + "\n");
+  rmSync(badFile);
   writeFileSync(dirty, "new");
   writeFileSync(tool, "edit");
   writeFileSync(join(cwd, ".claude", "settings.local.json"), "{}");

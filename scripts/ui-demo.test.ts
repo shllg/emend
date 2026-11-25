@@ -12,16 +12,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { buildWeb, rebuild, startDemo, stop } from "./ui-demo.ts";
+import { buildWeb, processStarted, procStartTicks, rebuild, startDemo, stop } from "./ui-demo.ts";
 
 const recense = join(import.meta.dirname, "..", "apps", "recense");
 const { build } = createRequire(join(recense, "package.json"))("esbuild");
 
-function startTime(pid: number) {
-  return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+test("the process start tick count follows the complete command name", () => {
+  const stat = "123 (a ) name)) S 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 987654 23";
+  assert.equal(procStartTicks(stat), "987654");
+});
+
+const selfStat = `/proc/${process.pid}/stat`;
+test("the process identity uses field 22 from procfs", { skip: !existsSync(selfStat) }, () => {
+  const fields = readFileSync(selfStat, "utf8").replace(/\([\s\S]*\)/, "(comm)").split(" ");
+  assert.match(fields[21], /^\d+$/);
+  assert.equal(processStarted(process.pid), `ticks:${fields[21]}`);
+});
+
+test("the process identity uses ps without procfs", { skip: existsSync(selfStat) }, () => {
+  const started = execFileSync("ps", ["-o", "lstart=", "-p", String(process.pid)], {
     env: { PATH: "/usr/bin:/bin", LC_ALL: "C", TZ: "UTC" }, encoding: "utf8",
   }).trim();
-}
+  assert.equal(processStarted(process.pid), `lstart:${started}`);
+});
 
 function writeWeb(dist: string, version: string) {
   mkdirSync(join(dist, "assets"), { recursive: true });
@@ -85,8 +98,19 @@ test("stop handles absent and stale state and refuses a live pid without ownersh
   const root = mkdtempSync(join(realpathSync(tmpdir()), "recense-ui-demo-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "recense"));
-  writeFileSync(join(root, "recense", "server.json"), JSON.stringify({ pid: process.pid }));
+  const serverFile = join(root, "recense", "server.json");
+  const server = { pid: process.pid, url: `http://127.0.0.1:${port}` };
+  writeFileSync(serverFile, JSON.stringify(server));
   writeFileSync(file, JSON.stringify({ ...stale, root }));
+  const other = join(top, "other-worktree");
+  mkdirSync(other);
+  for (const worktree of [undefined, realpathSync(other)]) {
+    if (worktree) writeFileSync(join(root, "worktree"), worktree);
+    await assert.rejects(stop(top, port), /does not belong to this worktree/);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { ...stale, root });
+    assert.deepEqual(JSON.parse(readFileSync(serverFile, "utf8")), server);
+  }
+  writeFileSync(join(root, "worktree"), realpathSync(top));
   await stop(top, port);
   assert(!existsSync(root));
   assert(!existsSync(file));
@@ -95,34 +119,57 @@ test("stop handles absent and stale state and refuses a live pid without ownersh
   assert(!existsSync(file));
 
   writeFileSync(file, JSON.stringify({
-    phase: "running", pid: process.pid, started: startTime(process.pid), port, origin: "wrong",
+    phase: "running", pid: process.pid, started: processStarted(process.pid), port, origin: "wrong",
     root, reviewId: "demo", build: 0,
   }));
   await assert.rejects(stop(top, port), /worktree's port/);
   assert(existsSync(file));
 });
 
-test("stop removes the starting record when SIGINT exits the controller directly", async (t) => {
+test("stop cannot signal an unrelated live owner or a server on another port", async (t) => {
   const top = mkdtempSync(join(tmpdir(), "recense-ui-stop-test-"));
   t.after(() => rmSync(top, { recursive: true, force: true }));
   mkdirSync(join(top, ".wt"));
   const file = join(top, ".wt", "ui-demo.json");
   const port = 40000;
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "recense-ui-demo-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const child = spawn(process.execPath, [
-    "-e", "setInterval(() => {}, 60_000); process.send('ready')",
+    "-e", "setInterval(() => {}, 60_000); process.send('ready')", join(root, "app", "recense.mjs"),
   ], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
   const exited = once(child, "exit");
   try {
     const [message] = await Promise.race([once(child, "message"), exited]);
     assert.equal(message, "ready");
     assert(child.pid);
-    writeFileSync(file, JSON.stringify({
-      phase: "starting", pid: child.pid, started: startTime(child.pid), port,
+    const kill = process.kill.bind(process);
+    t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | 0) => {
+      assert.equal(signal, 0);
+      return kill(pid, signal);
+    });
+    const forged = { phase: "starting", pid: child.pid, started: processStarted(child.pid), port };
+    writeFileSync(file, JSON.stringify(forged));
+    const refused = assert.rejects(stop(top, port, 200), /Timed out waiting for the UI demo/);
+    const request = `${file}.stop`;
+    assert.equal(statSync(request).mode & 0o777, 0o600);
+    assert.match(readFileSync(request, "utf8"), /^[\da-f-]{36}$/);
+    await refused;
+    assert(kill(child.pid, 0));
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), forged);
+    assert(!existsSync(request));
+
+    const otherPort = port + 1;
+    mkdirSync(join(root, "recense"));
+    writeFileSync(join(root, "worktree"), realpathSync(top));
+    writeFileSync(join(root, "recense", "server.json"), JSON.stringify({
+      pid: child.pid, url: `http://127.0.0.1:${otherPort}`,
     }));
-    const began = performance.now();
+    writeFileSync(file, JSON.stringify({
+      ...forged, pid: process.pid, started: "previous start", port: otherPort, root,
+    }));
     await stop(top, port);
-    assert(performance.now() - began < 5000, "stop kept waiting after the controller exited");
-    assert.deepEqual(await exited, [null, "SIGINT"]);
+    assert(kill(child.pid, 0));
+    assert(!existsSync(root));
     assert(!existsSync(file));
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
@@ -139,6 +186,7 @@ test("stale cleanup retains an unreaped server's state and succeeds on retry", a
   const port = 40000;
   mkdirSync(join(top, ".wt"));
   mkdirSync(join(root, "recense"));
+  writeFileSync(join(root, "worktree"), realpathSync(top));
   const file = join(top, ".wt", "ui-demo.json");
   writeFileSync(file, JSON.stringify({
     phase: "starting", pid: process.pid, started: "previous start", port, root,
@@ -152,7 +200,9 @@ test("stale cleanup retains an unreaped server's state and succeeds on retry", a
   try {
     const [message] = await Promise.race([once(server, "message"), exited]);
     assert.equal(message, "ready");
-    writeFileSync(join(root, "recense", "server.json"), JSON.stringify({ pid: server.pid }));
+    writeFileSync(join(root, "recense", "server.json"), JSON.stringify({
+      pid: server.pid, url: `http://127.0.0.1:${port}`,
+    }));
     // Advance past the grace period between deadline checks.
     let now = Date.now();
     const clock = t.mock.method(Date, "now", () => (now += 10_001));
@@ -307,7 +357,7 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
       // Even a live controller must own the sealed server on its port.
       const saved = readFileSync(stateFile);
       writeFileSync(stateFile, JSON.stringify({
-        ...state(), pid: process.pid, started: startTime(process.pid),
+        ...state(), pid: process.pid, started: processStarted(process.pid),
       }));
       const kill = process.kill.bind(process);
       const signals = t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | 0) => {
@@ -347,6 +397,7 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
       }
       const dead = spawnSync(process.execPath, ["-e", ""]);
       assert.equal(dead.status, 0);
+      assert.equal(processStarted(dead.pid), undefined);
       const sleeper = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
       const slept = once(sleeper, "exit");
       try {
@@ -434,12 +485,13 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
       assert.equal(state().phase, "starting");
       assert.equal(state().root, starting.root);
       assert.equal(state().pid, run.child.pid);
-      assert(existsSync(starting.root));
+      assert.equal(readFileSync(join(starting.root, "worktree"), "utf8"), realpathSync(top));
       await assert.rejects(startDemo(top, undefined, port), /already has a live UI demo/);
       await stop(top, port);
       assert.deepEqual(await run.exited, [130, null]);
       assert(!existsSync(starting.root));
       assert(!existsSync(stateFile));
+      assert(!existsSync(`${stateFile}.stop`));
       phase("stopped during start");
 
       run = forkController();

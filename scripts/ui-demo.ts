@@ -44,6 +44,7 @@ interface RunningDemo extends DemoOwner {
 type DemoState = StartingDemo | RunningDemo;
 
 const stateFile = (top: string) => join(top, ".wt", "ui-demo.json");
+const stopFile = (top: string) => `${stateFile(top)}.stop`;
 const webDist = (top: string) => join(top, "apps", "web", "dist");
 
 function isAlive(pid: number, group = false): boolean {
@@ -81,8 +82,23 @@ function processInfo(args: string[]): string | undefined {
   return result.stdout.trim() || undefined;
 }
 
-function processStarted(pid: number): string | undefined {
-  return processInfo(["-o", "lstart=", "-p", String(pid)]);
+export function procStartTicks(stat: string): string {
+  // Field 3 follows the closing parenthesis of the command name. Start time is field 22.
+  const end = stat.lastIndexOf(")");
+  const ticks = stat.slice(end + 1).trimStart().split(/\s+/)[19];
+  if (end < 0 || !ticks || !/^\d+$/.test(ticks)) throw new Error("Invalid process stat start time");
+  return ticks;
+}
+
+export function processStarted(pid: number): string | undefined {
+  try {
+    return `ticks:${procStartTicks(readFileSync(`/proc/${pid}/stat`, "utf8"))}`;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+  }
+  const started = processInfo(["-o", "lstart=", "-p", String(pid)]);
+  if (started) return `lstart:${started}`;
 }
 
 function liveOwner({ pid, started }: DemoOwner): boolean {
@@ -98,14 +114,18 @@ function removeRecord(top: string, owner: DemoOwner): void {
   if (ownedRecord(top, owner)) rmSync(stateFile(top), { force: true });
 }
 
-function writeJson(file: string, value: object, publish = renameSync): void {
+function writeAtomic(file: string, contents: string, publish = renameSync): void {
   const temp = `${file}.${randomUUID()}`;
   try {
-    writeFileSync(temp, JSON.stringify(value), { flag: "wx", mode: 0o600 });
+    writeFileSync(temp, contents, { flag: "wx", mode: 0o600 });
     publish(temp, file);
   } finally {
     rmSync(temp, { force: true });
   }
+}
+
+function writeJson(file: string, value: object, publish = renameSync): void {
+  writeAtomic(file, JSON.stringify(value), publish);
 }
 
 function demoFolder(root: string) {
@@ -171,7 +191,7 @@ async function waitForIndex(origin: string, expected: Buffer): Promise<void> {
   throw new Error("Timed out waiting for the demo to serve the rebuilt index.html");
 }
 
-async function stopOrphan(root: string, home: string, controllerPid: number): Promise<void> {
+async function stopOrphan(root: string, home: string, controllerPid: number, port: number) {
   let server;
   try {
     server = JSON.parse(readFileSync(join(home, "server.json"), "utf8"));
@@ -180,7 +200,7 @@ async function stopOrphan(root: string, home: string, controllerPid: number): Pr
     throw error;
   }
   const { pid } = server;
-  if (pid === controllerPid || !isAlive(pid)) return;
+  if (server.url !== sealedOrigin(port) || pid === controllerPid || !isAlive(pid)) return;
   const started = processStarted(pid);
   const matches = () => processInfo(["-ww", "-o", "args=", "-p", String(pid)])
     ?.includes(join(root, "app", "recense.mjs"));
@@ -204,11 +224,15 @@ async function stopOrphan(root: string, home: string, controllerPid: number): Pr
   }
 }
 
-async function cleanStale(top: string, state: DemoState): Promise<void> {
+async function cleanStale(top: string, state: DemoState, port?: number): Promise<void> {
   if (state.root !== undefined) {
     const env = demoFolder(state.root);
     if (env) {
-      await stopOrphan(state.root, env.RECENSE_HOME, state.pid);
+      const marker = join(state.root, "worktree");
+      if (!lstatSync(marker, { throwIfNoEntry: false })?.isFile() ||
+          readFileSync(marker, "utf8") !== realpathSync(top))
+        throw new Error("The UI demo folder does not belong to this worktree");
+      await stopOrphan(state.root, env.RECENSE_HOME, state.pid, port ?? worktreePort(top));
       rmSync(state.root, { recursive: true, force: true });
     }
   }
@@ -221,7 +245,7 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
   const previousState = existingState(top);
   if (previousState) {
     if (liveOwner(previousState)) throw new Error("This worktree already has a live UI demo");
-    await cleanStale(top, previousState);
+    await cleanStale(top, previousState, port);
   }
   const cliDist = join(top, "apps", "recense", "dist");
   if (!existsSync(join(cliDist, "recense.mjs")) || !existsSync(join(webDist(top), "index.html")))
@@ -231,6 +255,7 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
   if (!started) throw new Error("Could not identify the UI demo controller");
   const starting: StartingDemo = { phase: "starting", pid: process.pid, started, port };
   function forgetState() {
+    clearInterval(poll);
     process.off("exit", forgetState);
     removeRecord(top, starting);
   }
@@ -241,11 +266,20 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
       throw new Error("This worktree already has a live UI demo");
     throw error;
   }
+  const requestFile = stopFile(top);
+  let running = false;
+  const poll = setInterval(() => {
+    if (lstatSync(requestFile, { throwIfNoEntry: false })) {
+      rmSync(requestFile, { force: true });
+      process.kill(process.pid, "SIGINT");
+    } else if (running) pollRebuild();
+  }, 200).unref();
   process.once("exit", forgetState);
 
   const demo = await startSealedDemo({
     keep: false, port, out: join(top, ".wt", "ui"),
     entry(root) {
+      writeFileSync(join(root, "worktree"), realpathSync(top), { flag: "wx", mode: 0o600 });
       writeJson(stateFile(top), { ...starting, root });
       const app = join(root, "app");
       cpSync(cliDist, app, { recursive: true, filter: (path) => path !== join(cliDist, "web") });
@@ -298,7 +332,6 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
   }
 
   let installing: Promise<void> | undefined;
-  let poll: NodeJS.Timeout | undefined;
   function pollRebuild() {
     if (installing || !existsSync(ready)) return;
     installing = install().catch(async (error) => {
@@ -308,7 +341,7 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
     }).finally(() => { installing = undefined; });
   }
   async function stop() {
-    clearInterval(poll);
+    running = false;
     await demo.stop();
     forgetState();
   }
@@ -317,8 +350,8 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
       demo.browser.check();
       await demo.browser.close();
     }
-    poll = setInterval(pollRebuild, 200).unref();
     writeJson(stateFile(top), state);
+    running = true;
     return { root, origin, reviewId, stop };
   } catch (error) {
     await stop();
@@ -326,26 +359,38 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
   }
 }
 
-export async function stop(top: string, port?: number): Promise<void> {
+export async function stop(top: string, port?: number, timeout?: number): Promise<void> {
   const state = existingState(top);
   if (!state) {
     console.log("No UI demo runs in this worktree.");
     return;
   }
   if (!liveOwner(state)) {
-    await cleanStale(top, state);
+    await cleanStale(top, state, port);
     return;
   }
   if (state.phase !== "starting") runningDemo(top, port, state);
-  process.kill(state.pid, "SIGINT");
-  const deadline = Date.now() + (state.phase === "starting" ? 30_000 : 15_000);
-  while (liveOwner(state)) {
-    if (Date.now() >= deadline)
-      throw new Error("Timed out waiting for the UI demo to exit and remove its state file");
-    await delay(100);
+  const file = stopFile(top);
+  const request = randomUUID();
+  writeAtomic(file, request);
+  try {
+    const deadline = Date.now() + (timeout ?? (state.phase === "starting" ? 30_000 : 15_000));
+    while (liveOwner(state)) {
+      if (Date.now() >= deadline)
+        throw new Error("Timed out waiting for the UI demo to exit and remove its state file");
+      await delay(100);
+    }
+    const remaining = ownedRecord(top, state);
+    if (remaining) await cleanStale(top, remaining, port);
+  } finally {
+    try {
+      const info = lstatSync(file, { throwIfNoEntry: false });
+      if (info?.isFile() && info.size === request.length && readFileSync(file, "utf8") === request)
+        rmSync(file, { force: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
   }
-  const remaining = ownedRecord(top, state);
-  if (remaining) await cleanStale(top, remaining);
 }
 
 export function buildWeb(

@@ -91,7 +91,9 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
      ```
 
    - Report every printed line as a blocker. For `head moved`, `index flag`, `ignored changed`,
-     `ignored removed`, `git changed` or `main changed`, or any exit other than 0 or 1, run
+     `ignored removed`, `git changed`, `main changed`, `nested repository`, `gitlink` or
+     `undecodable name`, stop for the owner. While any stop-for-owner line is printed, run no
+     cleanup at all. For any such line or any exit other than 0 or 1, run
      `<main>/bin/wt notify blocked`, name the line and wait for the owner. A merge on main by the
      work loop also moves the main checkout's HEAD. The owner decides how to proceed.
      For other findings, delete then restore from the lists. Never put a printed path on a command
@@ -99,17 +101,18 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
 
      ```sh
      xargs -0 -r rm -f -- < <temp>/delete.nul
-     test ! -s <temp>/restore.nul || git --no-replace-objects --literal-pathspecs -c core.fsmonitor=false restore --source=<full-id> --staged --worktree --pathspec-from-file=<temp>/restore.nul --pathspec-file-nul
+     test ! -s <temp>/restore.nul || git --no-replace-objects --literal-pathspecs -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null restore --source=<full-id> --staged --worktree --pathspec-from-file=<temp>/restore.nul --pathspec-file-nul
      ```
 
      Run the check again after cleanup. Continue only at exit 0.
    - Run `node scripts/ui-demo.ts stop`. If `.wt/ui-demo.json` still exists, run
      `<main>/bin/wt notify blocked` and wait for the owner. Then run the check again.
+     Continue only at exit 0.
    - Remove `node_modules/.vitest-cache`, `.tsbuild`, `apps/*/.tsbuild` and `packages/*/.tsbuild`,
      then run `pnpm verify`. Clearing the Vitest cache and TypeScript build folders keeps
      verification from reading entries the pass left there.
-   - Stage the finish and run the check once more right before the commit. Commit the finish
-     separately, then remove the temp folder.
+   - Stage the finish and run the check once more right before the commit. Continue only at exit 0.
+     Commit the finish separately, then remove the temp folder.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
    Before each review round, with the change committed and `pnpm verify` green at that commit,
