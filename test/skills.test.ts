@@ -599,6 +599,33 @@ test.each(["plugin/skills/recense-review/SKILL.md", "plugin/skills/recense-revie
   },
 );
 
+test("the review skill prepares the manifest in its private folder and uses git to find doc references", () => {
+  const skill = read("plugin/skills/recense-review/SKILL.md");
+  const prepare = skill.indexOf('recense prepare --base <merge-base> --head <commit|worktree> --dir "<review-folder>"');
+  expect(prepare).toBeGreaterThan(0);
+  expect(skill.slice(0, prepare)).toContain("git merge-base");
+  expect(skill.slice(0, prepare)).toContain("mktemp -d");
+  expect(skill.slice(prepare)).toContain('recense publish --manifest "<review-folder>/review.json"');
+  const docs = skill.split("## Collect the docs the change rests on\n")[1]?.split("\n## ")[0] ?? "";
+  expect(docs).toContain("git log --no-color");
+  expect(docs).toContain("xargs -0 grep");
+  const guard =
+    "Never put a path into a command when it contains a single quote, a backslash, `$`, a backquote or a control character: cite that doc in prose without running a check.";
+  const commitCheck = "git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'";
+  const worktreeCheck = "test -f './<path>' && test ! -L './<path>' && test -r './<path>'";
+  expect(docs).toContain(guard);
+  expect(docs).toContain(commitCheck);
+  expect(docs).toContain(worktreeCheck);
+  const guardIndex = docs.indexOf(guard);
+  expect(guardIndex).toBeGreaterThan(-1);
+  expect(guardIndex).toBeLessThan(docs.indexOf(commitCheck));
+  expect(guardIndex).toBeLessThan(docs.indexOf(worktreeCheck));
+  expect(docs).toContain("A `not checked: …` refusal means prepare skipped that doc's check.");
+  expect(docs).toContain("publish request exceeds its size limit");
+  expect(docs).toContain("`docRefusal`");
+  expect(docs).not.toMatch(/--name-status|git ls-files --others/);
+});
+
 test("review guidance lists the opening fields in display order", () => {
   const text = read("plugin/skills/recense-review/SKILL.md");
   const writing = text.split("## Write for the reviewer\n")[1]?.split("\n## ")[0] ?? "";
@@ -1148,6 +1175,20 @@ test("CLI rules include bounded Markdown image discovery and secret-name filteri
   const rules = read(".claude/rules/cli.md").replace(/\s+/g, " ");
   expect(rules).toContain("the assets inside each doc's folder");
   expect(rules).toContain("Markdown images skip secret names; a worker finds them");
+});
+
+test("CLI rules document prepare's reads, exclusive create and shared usage exit", () => {
+  const rules = read(".claude/rules/cli.md").replace(/\s+/g, " ");
+  const prepare = rules.split("- `recense prepare` ")[1]?.split(" - ")[0] ?? "";
+  for (const rule of [
+    "worktree copies",
+    "changed docs with assets",
+    "outside the worktree and git folders",
+    "`O_EXCL`, `O_NOFOLLOW`, 0600",
+    "no symlink, user-owned, no group or other write",
+  ])
+    expect(prepare).toContain(rule);
+  expect(rules).toContain("(2 for a usage error in `main.ts`'s shared handler)");
 });
 
 test.each(["docs/api.md", "docs/usage.md"])("%s explains Markdown image discovery and skipped paths", (path) => {

@@ -42,6 +42,9 @@ The CLI runs in repos under review: treat them as hostile.
   only, skip symlinks that leave the doc's folder, and enforce the size, file-count and revision
   limits. A path behind a symlinked folder is absent, as git sees it, and no read or listing
   lands inside the git folder or the common git folder.
+- `recense prepare` reads changed paths via git, worktree copies, and changed docs with assets as
+  publish does. It writes `review.json` (`O_EXCL`, `O_NOFOLLOW`, 0600) in the given folder: no
+  symlink, user-owned, no group or other write, outside the worktree and git folders.
 - `recense publish <path>...` builds that manifest from its arguments: each file argument, and the
   text files found by listing each folder argument. Markdown and HTML render; other text files and
   docs under `--source` show as source. `--main` only picks one of those docs. Every source still
@@ -67,10 +70,11 @@ The CLI runs in repos under review: treat them as hostile.
   references it, at the preflight and on the opened file. Listing errors name only the caller's
   argument or a fixed reason; skip warnings and the nothing-to-publish error escape listed paths
   and give fixed reasons.
-- stdout is a contract: `recense publish --manifest` prints one JSON line; `recense publish <path>...`
+- stdout is a contract: `recense prepare` and `recense publish --manifest` print one JSON line; `recense publish <path>...`
   prints the review URL alone, escaped, or that JSON line with `--json`; `recense wait` and
   `recense feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and
-  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1. `recense status --line`
+  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1 (2 for a usage
+  error in `main.ts`'s shared handler). `recense status --line`
   is the exception: it prints its one line or nothing, never writes stderr, and exits 0 on every
   error.
 - Tokens come from the state directory (`agent.token`, `admin.token`, `hub.token`). Never print a

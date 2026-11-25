@@ -18,7 +18,7 @@ function endStatusLine() {
 let refusal: string | undefined;
 if (
   statusLine ||
-  ["publish", "look", "wait", "feedback", "reply", "mcp", "stop", "service", "update", "skills"].includes(
+  ["prepare", "publish", "look", "wait", "feedback", "reply", "mcp", "stop", "service", "update", "skills"].includes(
     process.argv[2] ?? "",
   )
 ) {

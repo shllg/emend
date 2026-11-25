@@ -86,15 +86,16 @@ export async function resolvePublish(
   warn: (line: string) => void,
   context?: Awaited<ReturnType<typeof publishContext>>,
   configRoots?: readonly string[],
+  execute?: Executor,
 ) {
   let worker: ReturnType<typeof workerExecutor> | undefined;
-  const execute: Executor = (work) => {
+  const ownedExecutor: Executor = (work) => {
     worker ??= workerExecutor();
     return worker(work);
   };
   try {
     return await resolveWithWorker(
-      execute,
+      execute ?? ownedExecutor,
       manifest,
       options,
       stateDir,

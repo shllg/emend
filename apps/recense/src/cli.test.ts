@@ -103,6 +103,7 @@ ${source}\n`,
 }
 
 test.each([
+  ["prepare", "--base", "a".repeat(40), "--head", "worktree", "--dir", "review"],
   ["publish", "--manifest", "missing.json", "--key", "synthetic"],
   ["wait", syntheticId],
   ["feedback", syntheticId],

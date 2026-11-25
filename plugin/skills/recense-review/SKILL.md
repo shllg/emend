@@ -19,7 +19,39 @@ publishing; a branch name is not a manifest commit. Resolve it with:
 git merge-base <target> HEAD
 ```
 
-If publish prints `git lookup failed`, resolve `base` again with `git merge-base` and check that the commit exists in this clone.
+Create one private temporary folder per review, outside the worktree. In a POSIX shell:
+
+```sh
+review_dir=$(mktemp -d "${TMPDIR:-/tmp}/recense-review.XXXXXX")
+printf '%s\n' "$review_dir"
+```
+
+GNU and BSD `mktemp` create this folder with mode 0700. On Windows, use an equivalent unique,
+private folder in the user's temporary directory. Record the literal folder path: shell variables
+do not survive between tool calls. Replace `<review-folder>` below with that literal path.
+Before reusing a review's folder, substitute its literal path for `<folder>`.
+Write the literal path without a trailing slash; a trailing slash makes `find` follow a symlink.
+Run:
+
+```sh
+find "<folder>" -maxdepth 0 -type d -user "$(id -u)" -perm 700
+```
+
+Reuse it only when this command prints the folder path. GNU and BSD `find` check ownership and exact mode 0700.
+The `-type d` check excludes symlinks. If the check fails, tell the user its literal path and that its saved results were not read.
+Then create a new folder with `mktemp` as above and rebuild the manifest.
+Keep manifests, saved hand-offs and reply files in this folder. Never use a fixed shared path
+or put them inside the worktree.
+
+For a code review, run this in the repository under review:
+
+```sh
+recense prepare --base <merge-base> --head <commit|worktree> --dir "<review-folder>"
+```
+
+Prepare writes `review.json` once. Edit the title, declare topics, assign file topics, add notes
+and write the writeup. Add any other docs the change rests on.
+For docs only, write `review.json` in that folder yourself.
 
 Report the commit count the review covers, its scope and any missing context.
 List the commit count and the scope in the writeup's `context`.
@@ -27,10 +59,9 @@ For a review containing only docs, omit both `base` and `head` and use `--key` f
 The first publication of a code review on a detached HEAD also needs `--key`.
 `--key` is only for a first publish; later revisions use `--review <review-id>`.
 
-Set file roles deliberately. A PRD changed by this work belongs in `diff`; a PRD supplied for
-reading belongs in `doc`. The same path can appear once in each role when both views matter.
-File extensions do not decide roles. Name each meaningful changed file and its topic; unassigned
-changes fall into Other changes. Never declare the reserved topic slug `other` yourself.
+The skeleton lists every changed file as a `diff`. A PRD supplied for reading belongs in `doc`.
+The same path can appear once in each role when both views matter. Assign each meaningful change
+to its topic. Never declare the reserved topic slug `other` yourself.
 
 Group the change by what the reader must decide. Give each topic a stable `slug`, a short
 `title` that names the effect and the stake, a one-sentence `summary`, and `importance` from 0
@@ -79,42 +110,20 @@ The reviewer approves the what and the how first, then reviews the code against 
 ## Collect the docs the change rests on
 
 Without `base` and `head`, skip Git commands and take the task's supported docs as `doc` entries only.
-Only readable `.md`, `.markdown`, `.html` and `.htm` files qualify for `doc` entries.
+Readable `.md`, `.markdown`, `.html` and `.htm` files can render as docs.
 
-For code reviews, find changed design docs, RFCs, ADRs, PRDs, runbooks and plans using the manifest's commits:
+For code, each diff entry's `prepared` object gives the status, old path for a rename,
+and added and removed line counts when available. A flag marks binary or oversized content.
+`lockfile: true` marks a lockfile.
 
-```sh
-git diff --no-color --name-status -M <base>...<head> -- '*.md' '*.markdown' '*.html' '*.htm' '*.rst' '*.adoc'
-```
-
-With `head: worktree`, include tracked changes and untracked docs:
-
-```sh
-git diff --no-color --name-status -M <base> -- '*.md' '*.markdown' '*.html' '*.htm' '*.rst' '*.adoc'
-git ls-files --others --exclude-standard -- '*.md' '*.markdown' '*.html' '*.htm' '*.rst' '*.adoc'
-```
-
-`R` lines contain old and new paths; use the new path.
-With `head: worktree`, a deleted doc whose content now lives at an untracked path is a move; declare the new path.
-Judge substance by reading docs; keep substantial docs and decision records, skipping generated indexes.
-
-- Give added, modified or renamed Markdown and HTML docs `diff` and `doc` entries, subject to the disk check.
-- Give deleted docs and changed `.rst` or `.adoc` docs only `diff` entries; cite unsupported formats in prose.
-
-When publish refuses an entry for a doc, whatever the reason (`not changed in …`, `doc not found`,
-`doc source must end in …`, `source is behind a symlink or non-folder`, a size limit),
-remove that entry, cite the doc in prose, and publish again.
-Unassigned changes still appear under Other changes.
-
-Run the check from the repository root, because publish reads `source ?? path` from disk there.
-With a commit `head`, add a repository `doc` entry only when its disk content matches that commit:
-
-```sh
-git cat-file -e <head>:<path> && git show <head>:<path> | cmp -s - <path>
-```
-
-Exit 0 means the doc exists at `head` and the file on disk is identical.
-Otherwise, keep only the changed doc's `diff` entry and say in its topic that the current text differs.
+For Markdown and HTML, `doc: "included"` means the doc entry follows the diff.
+`deleted` means the change removed it. `differs-from-head` means the disk copy is missing,
+is not a regular file, or differs from the head commit; with a worktree head, the copy changed
+while prepare ran. For `refused`, read the reason in `docRefusal`.
+Cite a left-out doc in prose.
+Read the docs to judge their substance. Keep design docs and decision records and skip generated indexes.
+If a doc disappears or exceeds its size limit before publish, remove its doc entry and cite it in prose.
+If publish refuses with `too many files in the review`, `the docs pass the revision size limit` or `publish request exceeds its size limit`, remove doc entries, those you added by hand first, until it publishes, and cite each removed doc in prose.
 
 Inspect record names and adapt the folder and patterns; a dated slug may itself be the identifier:
 
@@ -138,9 +147,25 @@ git ls-files -z --others --exclude-standard | xargs -0 grep -nHE 'ADR|RFC|PRD|[R
 ```
 
 Resolve references to supported, readable files; cite unavailable or unsupported docs in prose.
-Give unchanged cited docs only `doc` entries when they pass the format, readability and commit-content checks above.
+Prepare checked each changed doc it lists as `included`, `deleted`, `differs-from-head` or `refused`.
+A `not checked: …` refusal means prepare skipped that doc's check. Such a doc, and an unchanged
+cited doc, gets a `doc` entry only after the hand check below passes.
+
+Never put a path into a command when it contains a single quote, a backslash, `$`, a backquote or a control character: cite that doc in prose without running a check.
+Run the check from the repository root. With a commit head:
+
+```sh
+git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'
+```
+
+With a worktree head:
+
+```sh
+test -f './<path>' && test ! -L './<path>' && test -r './<path>'
+```
+
+Exit 0 means the doc may get a `doc` entry. On any other exit, cite it in prose only.
 Set each doc entry's `topic` to the topic whose prose leans on it.
-An eligible design doc among a topic's changed files without a `doc` entry was missed.
 
 Name the doc and its supporting heading in the topic's `why` or `body`.
 List candidate Markdown or HTML headings:
@@ -236,8 +261,7 @@ Each ref must be unique within its topic.
 
 ## Publish and offer the views
 
-Read [the manifest example](references/manifest.md) before creating the manifest. Replace the
-synthetic values with the review's paths, commit hashes and text. Docs use `source` only when
+Read [the manifest example](references/manifest.md) when filling in the manifest. Docs use `source` only when
 their local filename differs from the published path. Choose each doc's optional `view`:
 `"rendered"` (the default for Markdown and HTML) or `"source"` for literal text with line comments.
 Any other UTF-8 text file is a doc shown as source with line comments. One path may appear once
@@ -249,30 +273,7 @@ reference), `#123` in the writeup and in comments links to that issue.
 A doc's `source` must be inside the repository's worktree or inside a folder the user listed in
 `docRoots` in recense's global configuration.
 When publish prints `source is outside the allowed doc roots`, stop and ask the user to run `recense config add docRoots <folder>` for that folder, or to move the doc into the repository. Never run `recense config` or edit recense's configuration yourself.
-Create one private temporary folder per review, outside the worktree. In a POSIX shell:
-
-```sh
-review_dir=$(mktemp -d "${TMPDIR:-/tmp}/recense-review.XXXXXX")
-printf '%s\n' "$review_dir"
-```
-
-GNU and BSD `mktemp` create this folder with mode 0700. On Windows, use an equivalent unique,
-private folder in the user's temporary directory. Record the literal folder path: shell variables
-do not survive between tool calls. Replace `<review-folder>` below with that literal path.
-Before reusing a review's folder, substitute its literal path for `<folder>`.
-Write the literal path without a trailing slash; a trailing slash makes `find` follow a symlink.
-Run:
-
-```sh
-find "<folder>" -maxdepth 0 -type d -user "$(id -u)" -perm 700
-```
-
-Reuse it only when this command prints the folder path. GNU and BSD `find` check ownership and exact mode 0700.
-The `-type d` check excludes symlinks. If the check fails, tell the user its literal path and that its saved results were not read.
-Then create a new folder with `mktemp` as above and rebuild the manifest.
-Write `review.json` in the private folder. Never use a fixed shared
-path or put manifests, saved hand-offs or reply files inside the worktree.
-With `head: "worktree"`, those worktree files publish themselves under Other changes.
+Use the private folder from "Establish the review".
 Before taking another hand-off, check saved-file ownership and handle saved results as described in the wait loop below.
 
 If a recense error line mentions an agent sandbox, show the user that line and stop.

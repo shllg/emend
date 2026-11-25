@@ -3,7 +3,7 @@ import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
 import { DocTitle, DocView, docViewOf, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
 import { ManifestIssueRefs, PublishLinks, RepoUrl } from "./links.ts";
-import { FilePath, OTHER_TOPIC, TopicMeta, TopicSlug } from "./review.ts";
+import { FileFlag, FilePath, FileStatus, OTHER_TOPIC, TopicMeta, TopicSlug } from "./review.ts";
 
 const encoder = new TextEncoder();
 const markdown = z
@@ -223,6 +223,32 @@ function shownWriteupMarkdown(writeup: WriteupInput): (string | null | undefined
 }
 
 const commit = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/, "expected a full commit hash");
+export const PreparedDoc = z.enum(["included", "deleted", "differs-from-head", "refused"]);
+export type PreparedDoc = z.infer<typeof PreparedDoc>;
+
+const lineCount = z.number().int().nonnegative().max(LIMITS.diffSideBytes);
+export const PreparedFile = z
+  .object({
+    status: FileStatus,
+    oldPath: FilePath.optional(),
+    added: lineCount.optional(),
+    removed: lineCount.optional(),
+    flag: FileFlag.optional(),
+    lockfile: z.literal(true).optional(),
+    doc: PreparedDoc.optional(),
+    docRefusal: z
+      .string()
+      .min(1)
+      .max(LIMITS.errorMessageChars)
+      .regex(/^[^\r\n\v\f\u0085\u2028\u2029]+$/u)
+      .optional(),
+  })
+  .refine((file) => file.docRefusal === undefined || file.doc === "refused", {
+    path: ["docRefusal"],
+    message: "only a refused doc has a refusal reason",
+  });
+export type PreparedFile = z.infer<typeof PreparedFile>;
+
 const source = z
   .string()
   .min(1)
@@ -259,6 +285,7 @@ export const PublishManifest = z
             title: DocTitle.optional(),
             view: DocView.optional(),
             notes: AgentNotes.optional(),
+            prepared: PreparedFile.optional(),
           })
           .superRefine(validateDocView)
           .refine((file) => file.role === "doc" || file.title === undefined, {
@@ -268,6 +295,14 @@ export const PublishManifest = z
           .refine((file) => file.role === "diff" || file.notes === undefined, {
             path: ["notes"],
             message: "only diff files have agent notes",
+          })
+          .refine((file) => file.role === "diff" || file.prepared === undefined, {
+            path: ["prepared"],
+            message: "only diff files have prepared facts",
+          })
+          .refine((file) => file.prepared?.doc === undefined || docViewOf({ path: file.path }) === "rendered", {
+            path: ["prepared", "doc"],
+            message: "only Markdown and HTML paths have a prepared doc result",
           }),
       )
       .max(LIMITS.filesPerRevision),

@@ -19,7 +19,9 @@ find "<folder>" -maxdepth 0 -type d -user "$(id -u)" -perm 700
 Reuse it only when the command prints the folder path. GNU and BSD `find` check ownership and exact mode 0700.
 The `-type d` check excludes symlinks. If the check fails, tell the user its literal path and that its saved results were not read.
 Then create a new folder with the same `mktemp` command and rebuild the manifest.
-Save a manifest like this as `review.json` there. Report the literal folder path with the review id;
+For code, start with the `review.json` skeleton that `recense prepare` writes in this folder.
+Its `prepared` fields describe changed files and docs. Publish ignores them.
+For docs only, create `review.json` here. Report the literal folder path with the review id;
 shell variables do not survive between tool calls. Substitute that path for `<review-folder>` below.
 For code, run `recense publish --manifest "<review-folder>/review.json"` from the repository being reviewed.
 Keep saved wait output and reply body files in that same folder. Never read or write any of these
