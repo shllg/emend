@@ -1,6 +1,7 @@
 import type { AgentNoteView, PublishFile } from "@recense/contract";
 import type { agentNotes } from "../../db/schema.ts";
 import { ApiError, agentNoteDetail } from "../http/errors.ts";
+import { WorkTimeout } from "./executor.ts";
 import type { Executor, WorkResult } from "./work.ts";
 
 /** Batch every quote on the same content into one worker job, but report errors in request order. */
@@ -35,9 +36,16 @@ export async function resolveNoteRanges(
       if (!side) {
         const batch = quotes.get(hash);
         const bytes = await read(hash);
-        const result = await execute(
-          batch ? { kind: "note-quotes", bytes, quotes: [...batch] } : { kind: "line-count", bytes },
-        );
+        let result: WorkResult;
+        try {
+          result = await execute(
+            batch ? { kind: "note-quotes", bytes, quotes: [...batch] } : { kind: "line-count", bytes },
+          );
+        } catch (error) {
+          if (error instanceof WorkTimeout)
+            throw new ApiError("too_large", agentNoteDetail(file.path, index, "timeout"));
+          throw error;
+        }
         if (result.kind !== "note-quotes" && result.kind !== "line-count") throw new ApiError("invalid_request");
         side = result;
         sides.set(hash, side);

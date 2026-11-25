@@ -2129,8 +2129,10 @@ including a final line without LF. It drops whitespace-only lines at either end 
 and trims leading and trailing whitespace (including CR) from each line before comparison.
 The remaining quote lines must equal consecutive whole file lines. Interior blank lines match
 whitespace-only file lines. Exactly one match places the note on the first through last matched
-line, counting from 1. Publish refuses a missing match, multiple matches (even with a range),
-or a supplied range that differs from the unique match. It stores only the resolved range.
+line, counting from 1. Publish returns `400 invalid_request` with the file and zero-based note
+index for a missing match, multiple matches (even with a range), or a supplied range that differs
+from the unique match. If quote matching or range checking times out, publish returns `413 too_large` with
+the file and zero-based index of the note that started the job. Publish stores only the resolved range.
 
 For range-only notes, publish and import check that every line in `start..end` exists on the
 stored side. Unchanged lines within a file with changed content are valid and the diff opens

@@ -5,6 +5,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { snapshot } from "../../cli/attach/bundle.ts";
 import { agentNotes, files, revisions } from "../../db/schema.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import { WorkTimeout } from "../publish/executor.ts";
+import { executeWork } from "../publish/work.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 const note = {
@@ -207,6 +209,25 @@ test("a missing, ambiguous or disagreeing quote refuses publish with the file an
     });
   }
 });
+
+test.each(["note-quotes", "line-count"])(
+  "a %s timeout identifies the file and note that started the job",
+  async (kind) => {
+    f.deps.publishExecutor = async (work) => {
+      if (work.kind === kind) throw new WorkTimeout();
+      return executeWork(work);
+    };
+    const body = await input();
+    const quoted = { side: "old", quote: "before", summary: "Old ending" };
+    const notes = kind === "note-quotes" ? [note, quoted] : [quoted, note];
+    const response = await f.request("/publish", "POST", { ...body, files: [{ ...body.files[0], notes }] }, "agent");
+    expect(response.status).toBe(413);
+    expect(ErrorBody.parse(await response.json()).error).toEqual({
+      code: "too_large",
+      message: "Agent note 1 in src/a.ts: matching the note's quote or range took too long.",
+    });
+  },
+);
 
 test("range errors identify the file and note index and leave no partial revision", async () => {
   const body = await input();
