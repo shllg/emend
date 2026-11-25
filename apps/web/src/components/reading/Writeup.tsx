@@ -97,10 +97,11 @@ export function Writeup({
     const groups: ReaderGroup[] = [];
     const newLayout = usesOpeningCard({ sections: writeup.sections, area: writeup.area });
     const checked = writeup.sections.find((section) => section.key === "checked")?.blocks;
-    const proofs = checkedProofs(writeup.checked, checked)?.flatMap(({ kind, blocks }) => {
+    const proofItems = checkedProofs(writeup.checked, checked)?.flatMap(({ kind, blocks }) => {
       const first = blocks[0];
       return first ? [{ key: first.id, kind, label: checkedLabels[kind], blocks }] : [];
     });
+    const proofs = proofItems?.length ? proofItems : undefined;
     const lifted = new Set<string>();
     const risk: ReaderFact[] = [];
     const frame: ReaderFact[] = [];

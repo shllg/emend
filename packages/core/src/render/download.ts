@@ -115,7 +115,15 @@ const READING_STYLES = {
 `,
   dark: `:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81);${syntaxStyles("dark")}}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,var(--syn-plain))}`,
 };
-const PROOF_STYLES = `.em-proof-kind{display:inline-block;padding:1px 7px;border:1px solid var(--border);border-radius:1em;background:var(--sunken);color:var(--strong);font-size:11px;font-weight:500}`;
+const PROOF_STYLES = `
+.em-proofs{list-style:none;padding-left:0;margin-left:0}
+.em-proofs>li{display:flow-root}
+.em-proof-kind{float:inline-start;margin-inline-end:8px;margin-top:3.35px;padding:1px 7px;border:1px solid var(--muted);border-radius:1em;font-size:11px;font-weight:500;line-height:1.5}
+.em-proofs>li>.em-proof-kind+*{margin-top:0}
+[data-proof-kind=ran]>.em-proof-kind{background:var(--strong);color:var(--bg);border-color:var(--strong)}
+[data-proof-kind=read]>.em-proof-kind{background:var(--sunken);color:var(--strong)}
+[data-proof-kind=reasoned]>.em-proof-kind{border-style:dashed;background:transparent;color:var(--fg)}
+`;
 const THREAD_STYLES = {
   base: `
 .em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
@@ -895,7 +903,10 @@ export async function buildWriteupDownload(
           }
           groups.push({
             key: section.key,
-            node: element("section", [element("h2", [text("Checked")]), element("ul", items)]),
+            node: element("section", [
+              element("h2", [text("Checked")]),
+              element("ul", items, { className: ["em-proofs"] }),
+            ]),
           });
           continue;
         }

@@ -368,12 +368,12 @@ export function BlockReader({
     path?: string,
     presentation?: ReaderGroup["presentation"],
   ) =>
-    proofs ? (
+    proofs?.length ? (
       <ul className="em-proofs">
         {proofs.map((proof) => (
           <li key={proof.key} className="em-proof" data-proof-kind={proof.kind}>
             <span className="em-proof-kind">{proof.label}</span>
-            <div>{renderBlocks(proof.blocks, path)}</div>
+            {renderBlocks(proof.blocks, path)}
           </li>
         ))}
       </ul>

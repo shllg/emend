@@ -4,14 +4,14 @@ import type { RenderedBlock, RenderedWriteup } from "@recense/contract";
 export function checkedProofs(metadata: RenderedWriteup["checked"], blocks: RenderedBlock[] | undefined) {
   if (!metadata || !blocks) return undefined;
   const unclaimed = new Map(blocks.map((block) => [block.id, block]));
-  const proofs = metadata.map(({ kind, blockIds }) => ({
-    kind,
-    blocks: blockIds.flatMap((id) => {
+  const proofs = metadata.flatMap(({ kind, blockIds }) => {
+    const resolved = blockIds.flatMap((id) => {
       const block = unclaimed.get(id);
       if (!block) return [];
       unclaimed.delete(id);
       return [block];
-    }),
-  }));
-  return unclaimed.size ? undefined : proofs;
+    });
+    return resolved.length ? [{ kind, blocks: resolved }] : [];
+  });
+  return proofs.length && !unclaimed.size ? proofs : undefined;
 }

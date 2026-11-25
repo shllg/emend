@@ -346,9 +346,9 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
 - The topic states the migration facts: it rewrites about 1.2 million invoice rows. Only the
   backup taken before the deploy reverses it. After the deploy, watch the nightly totals report
   and failed invoice creation.
-- `checked`, Ran: a dry run on a copy of last week's data. Before: 1,204,311 rows summing to
-  48,113,902.17. After: the same rows, summing to 4,811,390,217 cents. Five sample rows match to
-  the cent.
+- `checked`, Ran: `bin/migrate --dry-run` on a copy of last week's data. Before: 1,204,311 rows
+  summing to 48,113,902.17. After: the same rows, summing to 4,811,390,217 cents. Five sample
+  rows match to the cent.
 - `notChecked`: the run time on the live table under load; a long lock could block new invoices.
 - `needsYou`: `[{ "kind": "decide", "text": "Run it in the nightly window, or now with a short lock?" }]`
 

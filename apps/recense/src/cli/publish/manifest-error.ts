@@ -55,6 +55,8 @@ export function manifestError(manifestIssues: readonly ManifestIssue[]): string 
       issue.path[1] === "checked"
     ) {
       // Checked is Markdown first, then a list. Branch issue paths are relative to the union.
+      if (typeof issue.input !== "string" && !Array.isArray(issue.input))
+        return [{ ...issue, message: "Markdown or a list of { kind, text } items" }];
       const branch = issue.errors[Array.isArray(issue.input) ? 1 : 0];
       if (branch) return branch.map((inner) => ({ ...inner, path: [...issue.path, ...inner.path] }));
     }

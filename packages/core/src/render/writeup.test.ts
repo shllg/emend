@@ -220,6 +220,7 @@ test("keeps each checked item's blocks together and lands a revision quote on th
       ...writeup,
       checked: [
         { kind: "ran", text: "Search tests.\n\nThree matches." },
+        { kind: "reasoned", text: "<!-- note -->" },
         { kind: "read", text: "Search tests." },
         { kind: "reasoned", text: "A single caller." },
       ],
@@ -240,6 +241,12 @@ test("keeps each checked item's blocks together and lands a revision quote on th
     { kind: "reasoned", blockIds: [blocks[3]?.id] },
   ]);
   expect(rendered.newInRevision?.[0]?.blockId).toBe(blocks[1]?.id);
+});
+
+test("omits the Checked section and its metadata when no item renders a block", async () => {
+  const rendered = await renderWriteup({ ...writeup, checked: [{ kind: "read", text: "<!-- note -->" }] }, topics);
+  expect(rendered.sections.map((section) => section.key)).not.toContain("checked");
+  expect(rendered).not.toHaveProperty("checked");
 });
 
 test.each([

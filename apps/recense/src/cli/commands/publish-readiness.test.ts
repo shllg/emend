@@ -75,7 +75,11 @@ test.each([
     "writeup.checked.0.text (must not be blank)",
   ],
   [{ writeup: { ...manifest().writeup, checked: " " } }, "writeup.checked (must not be blank)"],
-  [{ writeup: { ...manifest().writeup, checked: 42 } }, "writeup.checked (Invalid input: expected string)"],
+  [{ writeup: { ...manifest().writeup, checked: 42 } }, "writeup.checked (Markdown or a list of { kind, text } items)"],
+  [
+    { writeup: { ...manifest().writeup, checked: { kind: "read", text: "private text" } } },
+    "writeup.checked (Markdown or a list of { kind, text } items)",
+  ],
   [
     {
       writeup: {

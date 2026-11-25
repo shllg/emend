@@ -102,7 +102,7 @@ export async function renderWriteup(
         meta.mediaSizes,
         matcher,
       );
-      if (key === "newInRevision" && !rendered.length) continue;
+      if ((key === "newInRevision" || key === "checked") && !rendered.length) continue;
       for (const block of rendered) {
         const base = block.id.slice(0, key.length + 1 + 8);
         const count = (occurrences.get(base) ?? 0) + 1;

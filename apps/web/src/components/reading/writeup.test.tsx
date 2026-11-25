@@ -17,6 +17,7 @@ import { ReadOnlyReview } from "../../lib/read-only-review.ts";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
+import { BlockReader } from "./BlockReader.tsx";
 import { BlockView } from "./BlockView.tsx";
 import { DocView } from "./DocView.tsx";
 import { ReadingFoldContext } from "./ReadingGroup.tsx";
@@ -1246,6 +1247,25 @@ test.each([
   } else {
     expect(container.querySelectorAll('[data-reading-section="checked"] .em-proof-kind')).toHaveLength(3);
   }
+});
+
+test("a stored Checked section with no visible proofs shows no proof list", () => {
+  const writeup: RenderedWriteup = {
+    sections: [{ key: "checked", label: "Checked", topic: null, blocks: [] }],
+    checked: [{ kind: "read", blockIds: [] }],
+  };
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  expect(container.querySelector('[data-reading-section="checked"]')).not.toBeNull();
+  expect(container.querySelector("ul.em-proofs")).toBeNull();
+});
+
+test("the block reader shows the section blocks when given an empty proof list", () => {
+  const proof = { ...block, id: "checked-11111111", section: "checked" };
+  const { container } = mount(
+    <BlockReader {...props} groups={[{ key: "checked", heading: "Checked", blocks: [proof], proofs: [] }]} />,
+  );
+  expect(container.querySelector(`[data-block-id="${proof.id}"]`)).not.toBeNull();
+  expect(container.querySelector("ul.em-proofs")).toBeNull();
 });
 
 test("omits checks with no visible blocks and counts each referenced block once", () => {

@@ -2211,6 +2211,8 @@ without labels. `notChecked` is nonblank Markdown describing gaps.
 The CLI reports `writeup.checked.<index>.kind (ran, read or reasoned)` for an unknown kind,
 `writeup.checked (at most 12 items)` for an oversized list, `writeup.checked (at least 1 item)`
 for an empty list and `writeup.checked.<index>.text (must not be blank)` for blank text.
+For any value other than a string or an array, it reports
+`writeup.checked (Markdown or a list of { kind, text } items)`.
 When any of these fields or `whyItMatters` or `area` is present (`outOfScope`, `whereToLook` and
 `context` count even as an empty string), sections render as TL;DR, Why it matters, Checked,
 Not checked, Overview, Out of scope, Where to look, Context, Decisions and drift, Glossary, then
