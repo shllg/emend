@@ -52,10 +52,9 @@ recense.
   kind; docs (HTML, Markdown) are the other. Docs can also stand alone, without code. The agent
   that creates the review decides this on purpose, file by file, through the API, not by file
   type: a PRD changed in the branch belongs to the diff, and a PRD meant for reading is a doc.
-- **Responsive.** On a large screen, from left to right:
-  1. the hub: all reviews as an inbox, inspired by [T3 Code](https://github.com/pingdotgg/t3code);
-  2. the writeup, HTML, Markdown and references;
-  3. the code diff, sorted by topic.
+- **Responsive.** The writeup leads on every screen. On a large screen the inbox sits at the left
+  and folds to a narrow rail; the diff and the docs open in tabs beside the writeup, or split beside
+  it when the reader chooses.
 
   On a phone: the same content, one pane at a time. The code diff and the docs are separate tabs.
   The menu still needs design work.

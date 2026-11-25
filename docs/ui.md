@@ -1,12 +1,71 @@
 # UI guide
 
-Rules for changing what the reviewer sees in `apps/web`. Each names a value, a token, a behaviour
-or a state that must exist. Breaking a rule is a defect; anything beyond them is taste. Check at
-desktop 1600×1000 and phone 390×844, in Light and Dark (`localStorage["recense.theme"]` = `light` or
-`dark`, then reload). Values live in `apps/web/src/styles/`; where this guide and the code differ,
-the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` comes first.
+How to change what the reviewer sees in `apps/web`. Section 1 holds the north star and the UX
+principles: the direction every change moves in. Sections 2 to 10 hold the rules. Each rule names a
+value, a token, a behaviour or a state that must exist. Breaking a rule, or making a principle's
+check worse, is a defect; anything beyond the principles and the rules is taste. Check at desktop
+1600×1000 and phone 390×844, in Light and Dark (`localStorage["recense.theme"]` = `light` or
+`dark`, then reload). Values live in `apps/web/src/styles/`; where a rule and the code differ, the
+code wins and the rule gets fixed. The principles are targets: where the code still falls short of
+one, an issue moves the code and its rule toward it. `.claude/rules/content-isolation.md` comes
+first.
 
-## 1. Principles
+## 1. North star and UX principles
+
+**North star: the content is the interface.** The reviewer's attention belongs to the agent's work:
+the writeup, the pubs and, when they choose, the diff. recense should feel like paper, not like a
+tool.
+
+Each principle has a rule and a check that measures it. Where a rule in sections 2 to 10 still
+differs from a principle, that rule describes today's code and stays until an issue changes it.
+
+1. **Content first; chrome recedes.**
+   - Rule: the reading surface gets the screen. Chrome is quiet text on hairlines, with fills only
+     for a state. Headers fold away while reading.
+   - Check: measure the content share of the viewport. A change never lowers it.
+2. **Decision first, detail on demand.**
+   - Rule: every surface opens with what the reviewer must decide. Detail is one deliberate step
+     away, at most two levels deep. The first screen holds about four groups.
+   - Check: at 1280×800 and 390×844, the ask (decisions owed, TL;DR) shows without scrolling.
+3. **Writeups and pubs lead; the diff is ranked, chunked and honest.**
+   - Rule: reading comes first. When the reviewer opens the diff, it follows topic rank, then
+     reading order, never the alphabet. One topic reads as one chunk with a clear start and end.
+     Viewed state follows the file's content. Coverage shows calmly at Approve.
+   - Check: file order matches the topic order; a changed file loses its viewed mark; Approve
+     names what was not viewed, without blocking.
+4. **Comfortable reading by default.**
+   - Rule: by default, prose lines hold about 60 to 75 characters. The reader's width choice
+     (Narrow, Comfortable, Wide) persists, so readers who prefer longer lines keep them. Code,
+     tables and diagrams may use the full column. Prose stays at 16 px or more, with a line height
+     near 1.6. Light and dark both stay first-class.
+   - Check: count characters per prose line at 1280, 1600 and 1920 px with the default width.
+5. **The accent is scarce.**
+   - Rule: ochre marks only Needs you, the reviewer's unsent work, Send and focus. Links are text
+     colour with an underline. New in this revision uses the violet of "Changed in revision N".
+     Red stays for errors and High risk.
+   - Check: count accent elements on the opening screen.
+6. **Quiet, not hidden.**
+   - Rule: actions used on every review stay in reach: comment, Send, Approve. An action for one
+     item shows when the reader points at it, focuses it or picks it, never as a permanent icon
+     beside every paragraph. A pick or a text selection offers Comment in one bottom bar, on every
+     surface.
+   - Check: on the phone, count controls that are not content in the first screen.
+7. **Never move under the reader; resume exactly.**
+   - Rule: live updates never shift what the reader sees. Position, open folds and unsent drafts
+     come back per review. A returning reviewer sees what changed since they looked.
+   - Check: no layout shift during a live update; reload restores the reading position.
+8. **State is calm and certain.**
+   - Rule: every review answers three questions at a glance: reviewed, changed, PR state
+     (`VISION.md`). Agent state is one word, a mark and a time. No motion that never ends.
+   - Check: after five seconds, nothing on screen moves without the reader's action.
+9. **Configurable within guarantees.**
+   - Rule: the default theme is the product. Few settings: theme, text size, width, density.
+     Themes change semantic tokens only; contrast is checked when a theme loads; density changes
+     chrome, never reading text or touch targets.
+   - Check: every theme passes the readability pairs; tap targets stay 40 px or more at every
+     density.
+
+## 2. Core rules
 
 1. **Content first.** Writeup, docs and diff fill the page. Chrome is `--fg-2` and `--fg-3` text
    on `--border-1` hairlines. Fills appear only for a state.
@@ -45,7 +104,7 @@ the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` com
    - A file's role is the one the agent set; the UI never infers it from the file type.
    - An empty tab (Writeup, Files, Docs, Diff) is hidden. Comments always shows.
 
-## 2. Layout and density
+## 3. Layout and density
 
 - Breakpoints from `useLayout()` (`lib/layout.ts`): phone below 768 px, tablet 768–1279 px,
   desktop from 1280 px; CSS uses `max-width: 767px` and `min-width: 768px`. No other viewport
@@ -90,7 +149,7 @@ the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` com
   `--z-sheet` 40 (content +1, menus +2), `--z-toast` 60, `--z-tooltip` 70; plain 1–4 only inside
   one component.
 
-## 3. Type and colour tokens
+## 4. Type and colour tokens
 
 Type (`styles/typography.css`):
 
@@ -152,7 +211,7 @@ Colour (`styles/colors.css`; Tailwind names in `styles/theme.css`: `--bg-surface
 - Diagram change classes (added green, changed amber, removed red and dashed) come from
   `mermaid-classes.ts`, one palette per mode; the legend sits inside the diagram.
 
-## 4. Components and states
+## 5. Components and states
 
 Build with `components/ui/`: Button, IconButton, Tabs, SegmentedControl, Select, TextField,
 Textarea, Checkbox, RadioGroup, Menu, Dialog, Sheet, Tooltip, Toast, Banner, Kbd, Icon,
@@ -217,7 +276,7 @@ States. A part that can be in one of these states shows it:
   inbox row `aria-current="page"` and `--bg-active`; a segment `aria-checked` and `--bg-raised`;
   a toggle IconButton `aria-pressed` or `aria-expanded` and `--bg-active`; a menu choice a check.
 
-## 5. Writeup and docs
+## 6. Writeup and docs
 
 - The writeup runs in four layers: Decide, Frame, Topics, Trail. `DepthMarker` follows the
   scroll: in the reading tab row on desktop and tablet, compact in the header on the phone. A
@@ -253,7 +312,7 @@ Agent content (detail in `.claude/rules/content-isolation.md` and `doc-navigatio
 - Diff text renders through `@pierre/diffs` with the `recense` syntax theme on `--syn-*`
   (`components/diff/theme.ts`); style around it, never put HTML into it.
 
-## 6. Keyboard and focus
+## 7. Keyboard and focus
 
 - Every control is reachable with Tab in visual order and has an accessible name.
 - `:focus-visible` shows `--focus-ring` (2 px `--bg-surface` gap, 2 px `--focus-color`) through
@@ -283,7 +342,7 @@ Agent content (detail in `.claude/rules/content-isolation.md` and `doc-navigatio
   changeable key into a label. Announce without moving focus: `role="status"` for changes,
   `role="alert"` for failures.
 
-## 7. Phone
+## 8. Phone
 
 Below 768 px; check at 390×844.
 
@@ -315,7 +374,7 @@ Below 768 px; check at 390×844.
   sits under the home indicator.
 - Shortcuts are off; nothing depends on one. What waits for hover on a fine pointer shows always.
 
-## 8. Motion
+## 9. Motion
 
 - `--dur-1` 90 ms for hover, press, colour and tooltips; `--dur-2` 160 ms for overlay and dialog
   fades; `--dur-3` 240 ms for sheets and toasts; `--dur-pulse` 1600 ms for the Agent waiting dot
@@ -335,7 +394,7 @@ Below 768 px; check at 390×844.
   the inactive button keep the busy state clear. One-off highlights such as the inbox arrival are
   skipped there.
 
-## 9. Copy
+## 10. Copy
 
 `docs/standards.md`, section "UI text", holds the wording rules. This section adds the app's
 patterns only.
