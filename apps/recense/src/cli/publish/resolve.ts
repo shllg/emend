@@ -233,7 +233,7 @@ async function resolveWithWorker(
   };
   const add = (bytes: Buffer, read: BlobSource["read"]) => addBlob(sha256(bytes), bytes.length, read);
   const registered = new WeakSet<ImageBlob>();
-  const resolveImages = createImageResolver(root, git, gitDirs, (sources) => {
+  const images = createImageResolver(root, git, gitDirs, (sources) => {
     // Reserve the whole pair before registering either upload or any shared-blob rechecks.
     const missing = new Map(sources.filter(({ hash }) => !blobs.has(hash)).map(({ hash, size }) => [hash, size]));
     let size = totalBytes;
@@ -292,7 +292,7 @@ async function resolveWithWorker(
         oldBlob: null,
         newBlob: null,
       };
-      if (await resolveImages(resolved, change, manifest.head)) {
+      if (await images.resolveFile(resolved, change, manifest.head)) {
         files.push(resolved);
         continue;
       }
@@ -543,6 +543,8 @@ async function resolveWithWorker(
     if (size > LIMITS.htmlDocWithAssetsBytes)
       throw new CliError(docAssetSizeError(isRenderedHtmlDoc(doc) ? "html" : "markdown"));
   }
+  // Diff pictures use only the budget left after text sides, docs, assets and writeup media.
+  images.reservePictures();
   const keyFor = (id: string) => {
     const name = typeof options.key === "function" ? options.key(id) : options.key;
     return name || !code || !branch ? docsKey(id, name ?? options.review ?? "") : reviewKey(id, root, branch);

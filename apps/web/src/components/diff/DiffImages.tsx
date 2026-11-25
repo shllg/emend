@@ -53,8 +53,19 @@ function ModeGroup<T extends string>({
 
 type Picture = Extract<LightboxSubject, { kind: "image" }> & { label: "Before" | "After"; flag: "oversized" | null };
 
-function ImageSide({ picture, label, onOpen }: { picture: Picture; label: string; onOpen: () => void }) {
-  const [failed, setFailed] = useState(false);
+function ImageSide({
+  picture,
+  label,
+  failed,
+  onError,
+  onOpen,
+}: {
+  picture: Picture;
+  label: string;
+  failed: boolean;
+  onError: () => void;
+  onOpen: () => void;
+}) {
   const message = picture.flag
     ? `Not shown: larger than ${LIMITS.assetBytes / 1048576} MiB`
     : failed
@@ -75,7 +86,7 @@ function ImageSide({ picture, label, onOpen }: { picture: Picture; label: string
           className={cn("em-diff-image-frame", focusRing)}
           onClick={onOpen}
         >
-          <img src={picture.src} alt={picture.label} loading="lazy" decoding="async" onError={() => setFailed(true)} />
+          <img src={picture.src} alt={picture.label} loading="lazy" decoding="async" onError={onError} />
         </button>
       )}
     </figure>
@@ -84,7 +95,7 @@ function ImageSide({ picture, label, onOpen }: { picture: Picture; label: string
 
 const list = new Intl.ListFormat("en", { type: "conjunction" });
 
-function useSvgScan(file: FileView, side: "old" | "new", near: boolean) {
+function useSvgScan(file: FileView, side: "old" | "new", near: boolean, failed: boolean) {
   const source = useFileTexts();
   const svg = file.image?.[side]?.mediaType === "image/svg+xml";
   const readable = svg && !file.flag && (side === "old" ? file.hasOld : file.hasNew);
@@ -94,7 +105,8 @@ function useSvgScan(file: FileView, side: "old" | "new", near: boolean) {
     select: readable ? scanSvg : () => uncheckedSvg,
   });
   if (!svg) return undefined;
-  return !readable || query.isError ? uncheckedSvg : query.data;
+  if (!readable || query.isError || (failed && !query.data?.kinds.length)) return uncheckedSvg;
+  return query.data;
 }
 
 function sideLabel(before: boolean, after: boolean) {
@@ -102,9 +114,9 @@ function sideLabel(before: boolean, after: boolean) {
   return before ? "Before" : after ? "After" : undefined;
 }
 
-function SvgNotice({ file, near }: { file: FileView; near: boolean }) {
-  const before = useSvgScan(file, "old", near);
-  const after = useSvgScan(file, "new", near);
+function SvgNotice({ file, near, failed }: { file: FileView; near: boolean; failed: ReadonlySet<Picture["label"]> }) {
+  const before = useSvgScan(file, "old", near, failed.has("Before"));
+  const after = useSvgScan(file, "new", near, failed.has("After"));
   const active = sideLabel(!!before?.kinds.length, !!after?.kinds.length);
   const unchecked = sideLabel(!!before?.unchecked, !!after?.unchecked);
   if (!active && !unchecked) return null;
@@ -139,6 +151,7 @@ export function DiffImages({
   onModeChange: (mode: DiffImageMode) => void;
 }) {
   const [gallery, setGallery] = useState<{ items: Picture[]; index: number } | null>(null);
+  const [failed, setFailed] = useState(() => new Set<Picture["label"]>());
   const closeGallery = useCallback(() => setGallery(null), []);
   const { image } = file;
   if (!image) return null;
@@ -188,7 +201,7 @@ export function DiffImages({
           )}
         </div>
       )}
-      {svg && <SvgNotice file={file} near={near} />}
+      {svg && <SvgNotice file={file} near={near} failed={failed} />}
       {mode.format === "Pictures" && (
         <div className="em-diff-images" data-pair={visible.length === 2 || undefined}>
           {visible.map((picture) => (
@@ -196,6 +209,8 @@ export function DiffImages({
               key={picture.src}
               picture={picture}
               label={image.unchanged ? "Unchanged image" : picture.label}
+              failed={failed.has(picture.label)}
+              onError={() => setFailed((previous) => new Set(previous).add(picture.label))}
               onOpen={() => open(picture)}
             />
           ))}

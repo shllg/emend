@@ -106,6 +106,7 @@ export function createImageResolver(
   reserve: (sources: ImageBlob[]) => (() => void) | undefined,
 ) {
   const cache = new Map<string, ImageObject>();
+  const pending: { file: PublishFile; image: DiffImage; pictures: ImageBlob[] }[] = [];
   async function cached(key: string | undefined, read: ReadObject) {
     if (!key) return inspectObject(read);
     const hit = cache.get(key);
@@ -132,7 +133,7 @@ export function createImageResolver(
     }));
   }
 
-  return async (file: PublishFile, change: ChangedPath, head: string) => {
+  async function resolveFile(file: PublishFile, change: ChangedPath, head: string) {
     const sides = (["old", "new"] as const).filter((side) =>
       side === "old" ? change.status !== "added" : change.status !== "deleted",
     );
@@ -162,13 +163,18 @@ export function createImageResolver(
     if (!saveText) file.flag = "oversized";
     if (file.flag) file.oldBlob = file.newBlob = null;
     else saveText?.();
-    if (sides.every((side) => image[side])) {
+    if (sides.every((side) => image[side])) pending.push({ file, image, pictures });
+    return true;
+  }
+
+  function reservePictures() {
+    for (const { file, image, pictures } of pending) {
       const savePictures = reserve(pictures);
       if (savePictures) {
         savePictures();
         file.image = image;
       }
     }
-    return true;
-  };
+  }
+  return { resolveFile, reservePictures };
 }

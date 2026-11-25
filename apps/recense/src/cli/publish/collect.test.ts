@@ -73,6 +73,8 @@ async function repo(format = "sha1") {
   }
 }
 
+const imageWriteup = { overview: "", tldr: "", decisions: null, topics: {} };
+
 async function resolveImages(
   f: Awaited<ReturnType<typeof repo>>,
   base: string,
@@ -80,10 +82,12 @@ async function resolveImages(
     head = "worktree",
     context,
     docFolders,
+    media,
   }: {
     head?: string;
     context?: Awaited<ReturnType<typeof publishContext>>;
     docFolders?: PublishOptions["docFolders"];
+    media?: PublishManifest["media"];
   } = {},
 ) {
   return resolvePublish(
@@ -94,7 +98,8 @@ async function resolveImages(
       head,
       files: [],
       topics: [],
-      writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+      writeup: imageWriteup,
+      media,
     },
     { manifest: "synthetic", docFolders },
     f.state,
@@ -214,7 +219,7 @@ test("a second image side over the revision budget rolls back just that file's i
     const base = (await f.run("rev-parse", "HEAD")).stdout.trim();
     await writeFile(join(f.root, "b.png"), png(2));
     await writeFile(join(f.root, "note.txt"), "text");
-    const writeupSize = Buffer.byteLength(JSON.stringify({ overview: "", tldr: "", decisions: null, topics: {} }));
+    const writeupSize = Buffer.byteLength(JSON.stringify(imageWriteup));
     Object.assign(LIMITS, { revisionBytes: writeupSize + png(1).length + 4 });
     const { request, blobs } = await resolveImages(f, base);
     expect(request.files.find((file) => file.path === "b.png")).toMatchObject({
@@ -233,6 +238,46 @@ test("a second image side over the revision budget rolls back just that file's i
       new: null,
     });
     expect(new Set(retry.blobs.keys())).toEqual(new Set([digest("text"), digest(png(1))]));
+  } finally {
+    Object.assign(LIMITS, { revisionBytes: limit });
+    await f.cleanup();
+  }
+});
+
+test("later text and required writeup media get the revision budget before diff pictures", async () => {
+  const f = await repo();
+  const limit = LIMITS.revisionBytes;
+  try {
+    const medium = png(3);
+    const note = "later text";
+    await writeFile(join(f.root, "cover.png"), medium);
+    await f.run("add", ".");
+    await f.run("commit", "-m", "synthetic cover");
+    const base = (await f.run("rev-parse", "HEAD")).stdout.trim();
+    await writeFile(join(f.root, "a.png"), png(1));
+    await writeFile(join(f.root, "b.png"), png(2));
+    await writeFile(join(f.root, "copy.png"), medium);
+    await writeFile(join(f.root, "z.txt"), note);
+    Object.assign(LIMITS, {
+      revisionBytes: Buffer.byteLength(JSON.stringify(imageWriteup)) + medium.length + Buffer.byteLength(note),
+    });
+    const { request, blobs } = await resolveImages(f, base, { media: [{ path: "cover.png" }], docFolders: new Map() });
+    for (const path of ["a.png", "b.png"]) {
+      const file = request.files.find((entry) => entry.path === path);
+      expect(file).toMatchObject({ flag: "binary", oldBlob: null, newBlob: null });
+      expect(file).not.toHaveProperty("image");
+    }
+    expect(request.files).toContainEqual(expect.objectContaining({ path: "z.txt", flag: null, newBlob: digest(note) }));
+    expect(request.files).toContainEqual(
+      expect.objectContaining({ path: "cover.png", role: "asset", newBlob: digest(medium) }),
+    );
+    expect(request.files.find((entry) => entry.path === "copy.png")?.image).toEqual({
+      old: null,
+      new: { blob: digest(medium) },
+    });
+    expect(new Set(blobs.keys())).toEqual(new Set([digest(note), digest(medium)]));
+    await writeFile(join(f.root, "copy.png"), "changed");
+    await expect(blobs.get(digest(medium))?.read()).rejects.toThrow("image changed before upload");
   } finally {
     Object.assign(LIMITS, { revisionBytes: limit });
     await f.cleanup();

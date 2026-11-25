@@ -234,6 +234,20 @@ test("a single notice names both active SVG sides", async () => {
   expect(screen.getAllByText(/SVGs? holds?/)).toHaveLength(1);
 });
 
+test("a failed SVG picture marks only the side without reported kinds unchecked", async () => {
+  mount({ path: "leaf.svg", flag: null, hasOld: true, hasNew: true, image: { old: svg, new: svg } });
+  setNear(true);
+  const active = /The After SVG holds a script and an event handler\./;
+  expect(await screen.findByText(active)).toBeTruthy();
+  expect(screen.queryByText(/not checked/)).toBeNull();
+  fireEvent.error(screen.getByRole("img", { name: "After" }));
+  expect(screen.getByText(active)).toBeTruthy();
+  expect(screen.queryByText(/not checked/)).toBeNull();
+  fireEvent.error(screen.getByRole("img", { name: "Before" }));
+  expect(screen.getByText(/The Before SVG source was not checked/)).toBeTruthy();
+  expect(screen.getByText(active)).toBeTruthy();
+});
+
 test("flagged SVG sides show an unchecked notice without fetching text", () => {
   mount({ path: "large.svg", flag: "oversized", hasOld: true, hasNew: true, image: { old: svg, new: svg } });
   setNear(true);
