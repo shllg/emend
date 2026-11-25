@@ -55,6 +55,35 @@ test.each([
     {
       writeup: {
         ...manifest().writeup,
+        checked: [
+          { kind: "received-kind", text: "Probe." },
+          { kind: "read", text: "\t" },
+        ],
+      },
+    },
+    "writeup.checked.0.kind (ran, read or reasoned); writeup.checked.1.text (must not be blank)",
+  ],
+  [
+    {
+      writeup: { ...manifest().writeup, checked: Array.from({ length: 13 }, () => ({ kind: "ran", text: "Probe." })) },
+    },
+    "writeup.checked (at most 12 items)",
+  ],
+  [{ writeup: { ...manifest().writeup, checked: [] } }, "writeup.checked (at least 1 item)"],
+  [
+    { writeup: { ...manifest().writeup, checked: [{ kind: "read", text: " " }] } },
+    "writeup.checked.0.text (must not be blank)",
+  ],
+  [{ writeup: { ...manifest().writeup, checked: " " } }, "writeup.checked (must not be blank)"],
+  [{ writeup: { ...manifest().writeup, checked: 42 } }, "writeup.checked (Markdown or a list of { kind, text } items)"],
+  [
+    { writeup: { ...manifest().writeup, checked: { kind: "read", text: "private text" } } },
+    "writeup.checked (Markdown or a list of { kind, text } items)",
+  ],
+  [
+    {
+      writeup: {
+        ...manifest().writeup,
         newInRevision: Array.from({ length: 13 }, () => ({ text: "Raised the retry limit." })),
       },
     },

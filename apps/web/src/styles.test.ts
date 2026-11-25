@@ -105,6 +105,17 @@ test("topic metadata wraps whole desktop items and keeps the phone spacing", () 
   expect(phone).toMatch(/row-gap:\s*4px;/);
 });
 
+test("each proof contains its floated kind so later lines can use the full measure", () => {
+  const css = readFileSync(join(webSource, "styles/reading.css"), "utf8");
+  const proof = /\.em-proof\s*\{([^}]+)\}/.exec(css)?.[1];
+  const label = /\.em-proof-kind\s*\{([^}]+)\}/.exec(css)?.[1];
+  expect(proof).toMatch(/display:\s*flow-root;/);
+  expect(label).toMatch(/float:\s*inline-start;/);
+  expect(label).toMatch(/position:\s*relative;/);
+  expect(label).toMatch(/z-index:\s*1;/);
+  expect(label).toMatch(/margin-inline-end:\s*var\(--space-2\);/);
+});
+
 test("changed files keep the unviewed checkbox look", () => {
   const css = readFileSync(join(webSource, "styles/files.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   expect(css).not.toMatch(/\[data-stale[^\]]*\][^{}]*\.em-viewed-mark__box\b[^{}]*\{/);

@@ -749,6 +749,44 @@
   .em-needs-you dd {
     --reading-inset: calc(23px + var(--facts-label-width) + var(--facts-gap));
   }
+  .em-proofs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .em-proof {
+    display: flow-root;
+    overflow-wrap: anywhere;
+  }
+  .em-proof + .em-proof {
+    margin-top: var(--space-2);
+  }
+  .em-proof-kind {
+    float: inline-start;
+    /* Positioned reading blocks would otherwise paint over the float. */
+    position: relative;
+    z-index: 1;
+    margin-inline-end: var(--space-2);
+    /* Half the difference between the prose line and the pill's padded, bordered line. */
+    margin-top: calc((var(--reader-prose-size, var(--type-prose-size)) * var(--lh-prose) - 1lh - 4px) / 2);
+    padding: 1px 7px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-full);
+    font: 500 11px / 1.5 var(--font-sans);
+  }
+  [data-proof-kind="ran"] > .em-proof-kind {
+    background: var(--bg-inverse);
+    color: var(--fg-inverse);
+  }
+  [data-proof-kind="read"] > .em-proof-kind {
+    border-color: var(--info-fg);
+    background: var(--info-bg);
+    color: var(--info-fg);
+  }
+  [data-proof-kind="reasoned"] > .em-proof-kind {
+    border: 1px dashed var(--border-strong);
+    color: var(--fg-reading-muted);
+  }
   .em-writeup-fact .em-writeup-details {
     margin-top: 0;
   }

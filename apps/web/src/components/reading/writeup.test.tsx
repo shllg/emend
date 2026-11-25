@@ -17,6 +17,7 @@ import { ReadOnlyReview } from "../../lib/read-only-review.ts";
 import { revealReadingTarget } from "../../lib/reading-reveal.ts";
 import { blockAnchor } from "../../lib/selection.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
+import { BlockReader } from "./BlockReader.tsx";
 import { BlockView } from "./BlockView.tsx";
 import { DocView } from "./DocView.tsx";
 import { ReadingFoldContext } from "./ReadingGroup.tsx";
@@ -1202,6 +1203,109 @@ test("a block stored before the rename, with emend-* classes, still sizes its im
   expect(screen.getAllByRole("button").length).toBeGreaterThan(0);
 });
 
+test.each([
+  { opening: true, phone: false },
+  { opening: true, phone: true },
+  { opening: false, phone: false },
+  { opening: false, phone: true },
+])("labels every checked item once (opening=$opening, phone=$phone)", async ({ opening, phone }) => {
+  const rendered = await renderWriteup(
+    {
+      tldr: "",
+      overview: "",
+      topics: {},
+      decisions: "",
+      ...(opening ? { area: "Garden" } : {}),
+      checked: [
+        { kind: "ran", text: "Watered the bed.\n\nAll seeds sprouted." },
+        { kind: "read", text: "Read the schedule.\n\nWatering starts at dawn." },
+        { kind: "reasoned", text: "Every bed gets water." },
+      ],
+    },
+    [],
+  );
+  const { container } = mount(<Writeup {...props} phone={phone} writeup={RenderedWriteup.parse(rendered)} />);
+  const items = [...container.querySelectorAll("ul.em-proofs > li.em-proof")];
+  expect(items.map((item) => [item.getAttribute("data-proof-kind"), item.firstElementChild?.textContent])).toEqual([
+    ["ran", "Ran"],
+    ["read", "Read"],
+    ["reasoned", "Reasoned"],
+  ]);
+  expect(
+    items.map((item) =>
+      [...item.querySelectorAll("[data-block-id]")].map((block) => block.getAttribute("data-block-id")),
+    ),
+  ).toEqual(rendered.checked?.map((item) => item.blockIds));
+  for (const id of rendered.checked?.flatMap((item) => item.blockIds) ?? []) {
+    expect(container.querySelectorAll(`[id="block-${id}"]`)).toHaveLength(1);
+  }
+  if (opening) {
+    expect(items[0]?.closest('[data-fact="proof"]')).toBeTruthy();
+    const fold = container.querySelector('[data-fact="assurance"] details');
+    expect(fold?.querySelector("summary")?.textContent).toBe("and 2 more checks");
+    expect(items.slice(1).every((item) => fold?.contains(item))).toBe(true);
+  } else {
+    expect(container.querySelectorAll('[data-reading-section="checked"] .em-proof-kind')).toHaveLength(3);
+  }
+});
+
+test("a stored Checked section with no visible proofs shows no proof list", () => {
+  const writeup: RenderedWriteup = {
+    sections: [{ key: "checked", label: "Checked", topic: null, blocks: [] }],
+    checked: [{ kind: "read", blockIds: [] }],
+  };
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  expect(container.querySelector('[data-reading-section="checked"]')).not.toBeNull();
+  expect(container.querySelector("ul.em-proofs")).toBeNull();
+});
+
+test("the block reader shows the section blocks when given an empty proof list", () => {
+  const proof = { ...block, id: "checked-11111111", section: "checked" };
+  const { container } = mount(
+    <BlockReader {...props} groups={[{ key: "checked", heading: "Checked", blocks: [proof], proofs: [] }]} />,
+  );
+  expect(container.querySelector(`[data-block-id="${proof.id}"]`)).not.toBeNull();
+  expect(container.querySelector("ul.em-proofs")).toBeNull();
+});
+
+test("omits checks with no visible blocks and counts each referenced block once", () => {
+  const first = { ...block, id: "checked-11111111", section: "checked" };
+  const second = { ...first, id: "checked-22222222" };
+  const writeup: RenderedWriteup = {
+    area: "Garden",
+    sections: [{ key: "checked", label: "Checked", topic: null, blocks: [first, second] }],
+    checked: [
+      { kind: "ran", blockIds: ["checked-00000000"] },
+      { kind: "read", blockIds: [first.id] },
+      { kind: "reasoned", blockIds: [first.id, second.id] },
+    ],
+  };
+  const { container } = mount(<Writeup {...props} writeup={writeup} />);
+  expect(container.querySelector('[data-fact="proof"] .em-proof-kind')?.textContent).toBe("Read");
+  expect(container.querySelector('[data-fact="assurance"] summary')?.textContent).toBe("and 1 more check");
+  expect(container.querySelectorAll(`[id="block-${first.id}"]`)).toHaveLength(1);
+  expect(container.querySelectorAll(`[id="block-${second.id}"]`)).toHaveLength(1);
+});
+
+test.each([
+  {},
+  { checked: [] },
+  { checked: [{ kind: "unknown", blockIds: ["checked-12345678"] }] },
+  { checked: [{ kind: "ran", blockIds: ["checked-00000000"] }] },
+])("falls back to unlabelled Proof and Assurance for missing or unusable checked metadata %j", async (metadata) => {
+  const rendered = await renderWriteup(
+    { tldr: "", overview: "", topics: {}, decisions: "", area: "Garden", checked: "One.\n\nTwo." },
+    [],
+  );
+  const { container } = mount(<Writeup {...props} writeup={RenderedWriteup.parse({ ...rendered, ...metadata })} />);
+  expect(container.querySelector(".em-proofs, .em-proof-kind")).toBeNull();
+  expect(container.querySelector('[data-fact="proof"] dd > .em-reading-block .em-prose')?.textContent).toBe("One.");
+  expect(container.querySelector('[data-fact="assurance"] details > .em-reading-block .em-prose')?.textContent).toBe(
+    "Two.",
+  );
+  expect(container.querySelector('[data-fact="assurance"] summary')?.textContent).toBe("and 1 more check");
+});
+
 test("the new opening lifts commentable facts into Risk and Frame in order, with links below", async () => {
   const topics = [{ ...topic, attention: "review" as const }];
   const writeup = RenderedWriteup.parse(
@@ -1298,6 +1402,7 @@ test("the new opening lifts commentable facts into Risk and Frame in order, with
     );
   }
   const summary = container.querySelector('[data-fact="assurance"] summary');
+  expect(container.querySelector(".em-proof-kind")).toBeNull();
   expect(summary?.textContent).toBe("and 2 more checks");
   expect(summary?.closest("details")?.open).toBe(false);
   for (const [key, count] of [

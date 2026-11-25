@@ -2,6 +2,8 @@ import type { RenderedWriteup, RevisionView } from "@recense/contract";
 import { ChevronLeft, ChevronRight, CircleAlert, CircleCheck } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
+import { checkedProofs } from "../../../../../packages/core/src/render/checked.ts";
+import { checkedLabels } from "../../lib/checked.ts";
 import { type CodeFocus, sameCodeFocus } from "../../lib/code-focus.ts";
 import { plural } from "../../lib/count.ts";
 import { diffGroups } from "../../lib/diff-groups.ts";
@@ -94,6 +96,12 @@ export function Writeup({
     }
     const groups: ReaderGroup[] = [];
     const newLayout = usesOpeningCard({ sections: writeup.sections, area: writeup.area });
+    const checked = writeup.sections.find((section) => section.key === "checked")?.blocks;
+    const proofItems = checkedProofs(writeup.checked, checked)?.flatMap(({ kind, blocks }) => {
+      const first = blocks[0];
+      return first ? [{ key: first.id, kind, label: checkedLabels[kind], blocks }] : [];
+    });
+    const proofs = proofItems?.length ? proofItems : undefined;
     const lifted = new Set<string>();
     const risk: ReaderFact[] = [];
     const frame: ReaderFact[] = [];
@@ -136,16 +144,19 @@ export function Writeup({
       };
       lift(risk, "risk", "Biggest risk", "whereToLook");
       computed(risk, "undo", "Undo", undoFact({ sections: writeup.sections }, topics));
-      const checked = blocksFor("checked");
-      rows(risk, "proof", "Proof", checked.slice(0, 1));
+      const first = proofs?.[0];
+      if (first) risk.push({ key: "proof", label: "Proof", blocks: first.blocks, proofs: [first] });
+      else rows(risk, "proof", "Proof", checked?.slice(0, 1));
       rows(risk, "gaps", "Gaps", blocksFor("notChecked"));
       lift(risk, "look", "Look yourself", "whereToLook");
-      if (checked.length > 1) {
-        const count = checked.length - 1;
+      const count = (proofs?.length ?? checked?.length ?? 0) - 1;
+      if (count > 0) {
+        const remaining = proofs?.slice(1);
         risk.push({
           key: "assurance",
           label: "Assurance",
-          blocks: checked.slice(1),
+          blocks: remaining?.flatMap((item) => item.blocks) ?? checked?.slice(1),
+          proofs: remaining,
           fold: { key: "checked-more", summary: `and ${count} more ${plural(count, "check")}` },
         });
       }
@@ -176,7 +187,8 @@ export function Writeup({
                   ? "topics"
                   : "frame",
           heading: section.key === "decisions" ? "Decisions & drift" : section.label,
-          blocks,
+          blocks: section.key === "checked" && proofs ? proofs.flatMap((item) => item.blocks) : blocks,
+          proofs: section.key === "checked" ? proofs : undefined,
           presentation:
             newLayout &&
             section.key === "overview" &&
@@ -536,6 +548,7 @@ export function Writeup({
     writeup.area,
     writeup.newInRevision,
     writeup.needsYou,
+    writeup.checked,
     topics,
     files,
     docs,

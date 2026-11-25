@@ -185,6 +185,20 @@ test("rendered writeups omit invalid stored areas instead of refusing the revisi
   for (const changedSince of [null, 0, -1, 1.5]) expect(schema.safeParse(changedSince).success).toBe(false);
 });
 
+test("rendered checked preserves item block IDs and drops invalid stored metadata", () => {
+  const item = { kind: "ran", blockIds: ["checked-0123abcd", "checked-0123abcd-2"] };
+  expect(contract.RenderedWriteup.parse({ sections: [], checked: [item] }).checked).toEqual([item]);
+  expect(contract.RenderedWriteup.parse({ sections: [] })).not.toHaveProperty("checked");
+  for (const checked of [
+    [],
+    [{ ...item, kind: "other" }],
+    [{ ...item, blockIds: ["overview-0123abcd"] }],
+    Array.from({ length: 13 }, () => item),
+  ]) {
+    expect(contract.RenderedWriteup.parse({ sections: [], checked }).checked).toBeUndefined();
+  }
+});
+
 test("rendered needsYou preserves valid and empty lists and drops invalid stored values", () => {
   const item = { kind: "answer", topic: "routing", blockIds: ["needsYou-0123abcd", "needsYou-0123abcd-2"] };
   for (const needsYou of [[], [item]]) {

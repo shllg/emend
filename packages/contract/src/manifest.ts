@@ -159,6 +159,23 @@ export const NeedsYouItem = z.object({
 });
 export type NeedsYouItem = z.infer<typeof NeedsYouItem>;
 
+export const CheckedKind = z.enum(["ran", "read", "reasoned"]);
+export type CheckedKind = z.infer<typeof CheckedKind>;
+
+export const CheckedItem = z.object({ kind: CheckedKind, text: nonBlankMarkdown });
+export type CheckedItem = z.infer<typeof CheckedItem>;
+
+export const CheckedList = z
+  .array(CheckedItem)
+  .min(1, "at least 1 item")
+  .max(LIMITS.checkedItems, `at most ${LIMITS.checkedItems} checked items`)
+  .refine(
+    (items) =>
+      items.reduce((bytes, item) => bytes + encoder.encode(item.text).byteLength, 0) <= LIMITS.writeupSectionBytes,
+    "writeup section exceeds the UTF-8 byte limit",
+  );
+export type CheckedList = z.infer<typeof CheckedList>;
+
 const writeupInput = z.object({
   overview: markdown,
   tldr: markdown,
@@ -170,7 +187,7 @@ const writeupInput = z.object({
     .optional(),
   area: WriteupArea.optional(),
   review: ReviewVerdict.optional(),
-  checked: nonBlankMarkdown.optional(),
+  checked: z.union([nonBlankMarkdown, CheckedList]).optional(),
   notChecked: nonBlankMarkdown.optional(),
   outOfScope: markdown.optional(),
   whereToLook: markdown.optional(),
@@ -208,7 +225,7 @@ function shownWriteupMarkdown(writeup: WriteupInput): (string | null | undefined
     ...(writeup.whyItMatters !== undefined ? [writeup.whyItMatters] : []),
     ...(writeup.newInRevision ?? []).map((item) => item.text),
     ...(writeup.needsYou ?? []).map((item) => item.text),
-    writeup.checked,
+    ...(Array.isArray(writeup.checked) ? writeup.checked.map((item) => item.text) : [writeup.checked]),
     writeup.notChecked,
     writeup.outOfScope,
     writeup.whereToLook,

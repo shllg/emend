@@ -262,11 +262,22 @@ A choice the reviewer must make goes into `needsYou`.
 
 ### Checked and Not checked
 
-`checked` holds the proof: at most five items, strongest first. Each item says what it showed:
-"A test that fails the third attempt failed before the fix and passes now."
+`checked` holds the proof: at most five items, strongest first. Write it as a list of
+`{ "kind": …, "text": … }` items. Each text says what the item showed; its kind says how you know:
+
+- Ran (`ran`): a command or test ran against the reviewed revision. Name the command and what it
+  showed: "`pnpm test retry`: a test that fails the third attempt failed before the fix and
+  passes now."
+- Read (`read`): you inspected code or test source, and nothing ran: "`src/retry.ts` counts the
+  first call as an attempt."
+- Reasoned (`reasoned`): an argument from the code, with no test behind it: "Only the request
+  loop calls `send`, so the cap covers every request."
+
+Pick the weakest kind that is true: a test you read but did not run is Read. The writeup shows
+each kind as a label in front of its item.
 Leave out process, such as running the gate, the linter or the type check, or reading the diff.
 `notChecked` holds only real gaps, each with what could go wrong.
-Neither is ever empty. If you ran nothing, say so in `checked`.
+Neither is ever empty. If you ran nothing, no item is Ran.
 
 The higher the risk, the stronger the proof. A data migration shows row counts and sums before
 and after, plus a few sample rows.
@@ -314,7 +325,7 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
 - Topic "User pages keep loading after the loader rename": Low. The undo is a revert.
 - **Biggest risk:** a call the type checker cannot see, such as a lookup by string, still asks
   for `fetchUser`, and that page fails to load.
-- `checked`: a search finds no `fetchUser` outside the changelog.
+- `checked`, Ran: `rg fetchUser` finds it only in the changelog.
 - `notChecked`: plugins outside this repository; one that calls `fetchUser` breaks on upgrade.
 
 **Medium.** A change caps request retries at three.
@@ -325,7 +336,7 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
   error.
 - **Look yourself:** `src/retry.ts`, where the loop counts attempts: the tests fake the clock, so
   they cannot show real pauses.
-- `checked`: tests for one, two and three failed attempts; the third shows the error message.
+- `checked`, Ran: `pnpm test retry`: tests for one, two and three failed attempts pass; the third shows the error message.
 - `notChecked`: a real network that drops requests; a slow server could reach the cap sooner.
 
 **High.** A data migration moves invoice amounts from decimals to whole cents.
@@ -335,9 +346,9 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
 - The topic states the migration facts: it rewrites about 1.2 million invoice rows. Only the
   backup taken before the deploy reverses it. After the deploy, watch the nightly totals report
   and failed invoice creation.
-- `checked`: a dry run on a copy of last week's data. Before: 1,204,311 rows summing to
-  48,113,902.17. After: the same rows, summing to 4,811,390,217 cents. Five sample rows match to
-  the cent.
+- `checked`, Ran: `bin/migrate --dry-run` on a copy of last week's data. Before: 1,204,311 rows
+  summing to 48,113,902.17. After: the same rows, summing to 4,811,390,217 cents. Five sample
+  rows match to the cent.
 - `notChecked`: the run time on the live table under load; a long lock could block new invoices.
 - `needsYou`: `[{ "kind": "decide", "text": "Run it in the nightly window, or now with a short lock?" }]`
 
@@ -354,7 +365,8 @@ Keep it short enough to read in two minutes.
 - `needsYou`: the decisions you expect to need, as `decide` items, at most four. `[]` when you expect
   none. Write `decisions` as usual.
 - `whereToLook`: **Biggest risk** is the case most likely to go wrong.
-- `checked`: what you read or tried to plan the change. `notChecked`: what only the code will show.
+- `checked`: what you read or tried to plan the change, each item with its kind. Most are Read or
+  Reasoned; a spike or a query you ran is Ran. `notChecked`: what only the code will show.
 
 ### Deviations
 

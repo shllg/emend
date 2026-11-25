@@ -1,4 +1,5 @@
 import {
+  type CheckedKind,
   LIMITS,
   type NeedsYouKind,
   OTHER_TOPIC,
@@ -21,6 +22,7 @@ import { HTML_ELEMENT_LIMIT, parseDocHtml } from "../place/html.ts";
 import type { DownloadLook } from "../theme/download.ts";
 import { resolveTheme } from "../theme/theme.ts";
 import type { HtmlElement as Element, HtmlRoot as Root } from "./blocks.ts";
+import { checkedProofs } from "./checked.ts";
 import {
   asciiLower,
   type CssContext,
@@ -113,6 +115,15 @@ const READING_STYLES = {
 `,
   dark: `:root{--bg:oklch(.18 .004 260);--sunken:oklch(.125 .004 260);--fg:oklch(.79 .004 260);--strong:oklch(.895 .003 260);--muted:oklch(.7 .004 260);--border:oklch(.25 .004 260);--link:oklch(.85 .14 81);${syntaxStyles("dark")}}.shiki{background-color:var(--shiki-dark-bg,var(--sunken))}.shiki,.shiki span{color:var(--shiki-dark,var(--syn-plain))}`,
 };
+const PROOF_STYLES = `
+.em-proofs{list-style:none;padding-left:0;margin-left:0}
+.em-proofs>li{display:flow-root}
+.em-proof-kind{float:inline-start;margin-inline-end:8px;margin-top:3.35px;padding:1px 7px;border:1px solid var(--muted);border-radius:1em;font-size:11px;font-weight:500;line-height:1.5}
+.em-proofs>li>.em-proof-kind+*{margin-top:0}
+[data-proof-kind=ran]>.em-proof-kind{background:var(--strong);color:var(--bg);border-color:var(--strong)}
+[data-proof-kind=read]>.em-proof-kind{background:var(--sunken);color:var(--strong)}
+[data-proof-kind=reasoned]>.em-proof-kind{border-style:dashed;background:transparent;color:var(--fg)}
+`;
 const THREAD_STYLES = {
   base: `
 .em-threads{margin:24px 0}.em-thread{margin:12px 0;padding:10px 14px;border:1px solid var(--border,#d4d4d8);border-left:3px solid var(--link,#7c5a1e);border-radius:6px;background:var(--sunken,#f7f7f8);color:var(--fg,#3f3f46);font:400 14px/1.55 ui-sans-serif,system-ui,sans-serif;text-align:left}.em-thread[data-state=resolved]{border-left-color:var(--muted,#71717a)}.em-thread-head,.em-thread-note,.em-thread-omitted,.em-comment-head{margin:0 0 6px;font-size:12px;line-height:1.4;color:var(--muted,#71717a)}.em-thread-where,.em-comment-head strong{color:var(--strong,#18181b)}.em-thread-quote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--border,#d4d4d8)}.em-thread-quote p{margin:0}.em-thread-lines{margin:0 0 8px;padding:8px 10px;overflow:auto;font:400 12px/1.5 ui-monospace,"SF Mono",Menlo,monospace}.em-comments{margin:0;padding:0}.em-comment{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--border,#d4d4d8)}.em-comment:first-child{margin-top:0;padding-top:0;border-top:0}.em-comment-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.em-comment-body{overflow-wrap:anywhere}.em-comment-body>*{margin-top:0}.em-comment-body>:last-child{margin-bottom:0}
@@ -326,7 +337,7 @@ function resolverState(
 }
 type AssetState = ReturnType<typeof resolverState>;
 function frame(
-  input: PageInput,
+  input: PageInput & { writeup?: RenderedWriteup },
   content: ElementContent[],
   tooLarge: boolean,
   threadStyles = false,
@@ -369,6 +380,7 @@ function frame(
             element("meta", [], { name: "color-scheme", content: downloadThemeBase(input.theme) ?? "light dark" }),
             element("title", [text(title)]),
             style(downloadStyles(READING_STYLES, input.theme)),
+            ...(input.writeup?.checked ? [style(PROOF_STYLES)] : []),
             ...(threadStyles ? [style(downloadStyles(THREAD_STYLES, input.theme))] : []),
             ...(diffStyles ? [style(downloadStyles(DIFF_STYLES, input.theme))] : []),
             ...(lookStyles ? [style(lookStyles)] : []),
@@ -869,6 +881,7 @@ export async function buildWriteupDownload(
   const bySlug = new Map(ranked.map((topic) => [topic.slug, topic]));
   const groups: { key: string; node: Element }[] = [];
   const written = new Map<string, Element>();
+  const checkedLabels: Record<CheckedKind, string> = { ran: "Ran", read: "Read", reasoned: "Reasoned" };
   const needsYouLabels: Record<NeedsYouKind, string> = {
     decide: "Decide",
     accept: "Accept",
@@ -880,6 +893,24 @@ export async function buildWriteupDownload(
       // Older revisions stored a verdict section; recense shows it nowhere.
       if (section.key === "review") continue;
       if (section.key === "newInRevision" && input.details.seq < 2) continue;
+      if (section.key === "checked" && input.writeup.checked !== undefined) {
+        const proofs = checkedProofs(input.writeup.checked, section.blocks);
+        if (proofs) {
+          const items: Element[] = [];
+          for (const { kind, blocks } of proofs) {
+            const label = element("strong", [text(checkedLabels[kind])], { className: ["em-proof-kind"] });
+            items.push(element("li", [label, ...(await blocksContent(blocks, state, ctx))], { dataProofKind: kind }));
+          }
+          groups.push({
+            key: section.key,
+            node: element("section", [
+              element("h2", [text("Checked")]),
+              element("ul", items, { className: ["em-proofs"] }),
+            ]),
+          });
+          continue;
+        }
+      }
       if (section.key === "needsYou" && input.writeup.needsYou !== undefined) {
         const blocks = new Map(section.blocks.map((block) => [block.id, block]));
         const content: ElementContent[] = [element("h2", [text("Needs you")])];

@@ -216,7 +216,13 @@ Use these constraints when writing the manifest:
   Use plain text, never Markdown, control characters or line breaks.
   Leave it out to use the deepest folder the changed files share.
 - Leave out `writeup.review`. The reviewer gives the verdict.
-- `writeup.checked` and `writeup.notChecked` are Markdown and never blank.
+- `writeup.checked` is a list of 1 to 12 items `{ "kind": "ran" | "read" | "reasoned", "text": "<Markdown>" }`,
+  each text nonblank. A Markdown string still publishes, without labels. An older CLI refuses the
+  list with `writeup.checked (Invalid input: expected string)`: write `checked` as Markdown and
+  publish again. An older server answers `recense: invalid_request`, which other refusals print
+  too: publish once more with `checked` as Markdown. If that fails the same way, the list was not
+  the cause: put the list back and fix the other refusal.
+- `writeup.notChecked` is Markdown and never blank.
 - `title` is at most 200 characters; `summary` is at most 2000.
 - `links` is optional: at most 8 entries of `url`, `label` and `kind`. `url` is an `https:` URL
   without a user name or password, at most 2048 characters. `label` has 1 to 60 characters.
@@ -311,7 +317,10 @@ Fix those fields and publish again.
     "tldr": "Requests that kept failing retried without end and held the request loop. Each request now stops after three attempts, as the retry PRD asks.",
     "whyItMatters": "A failed service can no longer hold the request loop forever. Other requests can keep moving.",
     "area": "requests › retries",
-    "checked": "- A test that fails every attempt stops after the third and returns the error.\n- A test whose third attempt succeeds returns that answer.",
+    "checked": [
+      { "kind": "ran", "text": "`pnpm test retry`: a test that fails every attempt stops after the third and returns the error." },
+      { "kind": "reasoned", "text": "Only the request loop calls `send`, so the cap covers every request." }
+    ],
     "notChecked": "- A real network that drops requests: a slow server could reach the cap sooner.",
     "overview": "- **Goal:** After this, a failing request stops after three attempts and frees the request loop.\n- **Change:** Each request gets three attempts.",
     "outOfScope": "- The wait between attempts.",

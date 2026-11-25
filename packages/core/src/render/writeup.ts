@@ -1,4 +1,5 @@
 import {
+  type CheckedKind,
   type GlossaryTerm,
   type IssueRefs,
   type NeedsYouKind,
@@ -26,6 +27,7 @@ export type RenderedWriteup = {
   area?: string;
   newInRevision?: { topic?: string; section?: NewInRevisionSection; blockId?: string; blockIds: string[] }[];
   needsYou?: { kind: NeedsYouKind; topic?: string; blockIds: string[] }[];
+  checked?: { kind: CheckedKind; blockIds: string[] }[];
   /** Publish-level links and the repo base, kept beside the sections in the stored blob. */
   links?: PublishLinks;
   repoUrl?: string;
@@ -76,6 +78,7 @@ export async function renderWriteup(
   const matcher = entries ? termMatcher(entries) : undefined;
   let newsItems: { item: NewInRevisionItem; blockIds: string[] }[] = [];
   let needsYou: NonNullable<RenderedWriteup["needsYou"]> = [];
+  let checkedItems: NonNullable<RenderedWriteup["checked"]> = [];
   const appendItems = async <T extends { text: string }, M>(
     key: string,
     label: string,
@@ -99,7 +102,7 @@ export async function renderWriteup(
         meta.mediaSizes,
         matcher,
       );
-      if (key === "newInRevision" && !rendered.length) continue;
+      if ((key === "newInRevision" || key === "checked") && !rendered.length) continue;
       for (const block of rendered) {
         const base = block.id.slice(0, key.length + 1 + 8);
         const count = (occurrences.get(base) ?? 0) + 1;
@@ -163,7 +166,14 @@ export async function renderWriteup(
     await append("tldr", "TL;DR", writeup.tldr);
     await append("whyItMatters", "Why it matters", writeup.whyItMatters);
     await appendOpeningItems();
-    await append("checked", "Checked", writeup.checked);
+    if (Array.isArray(writeup.checked)) {
+      checkedItems = await appendItems("checked", "Checked", writeup.checked, (item, blockIds) => ({
+        kind: item.kind,
+        blockIds,
+      }));
+    } else {
+      await append("checked", "Checked", writeup.checked);
+    }
     await append("notChecked", "Not checked", writeup.notChecked);
     await append("overview", "Overview", writeup.overview);
     await append("outOfScope", "Out of scope", writeup.outOfScope);
@@ -256,6 +266,7 @@ export async function renderWriteup(
     sections,
     ...(newInRevision.length ? { newInRevision } : {}),
     ...(writeup.needsYou !== undefined ? { needsYou } : {}),
+    ...(checkedItems.length ? { checked: checkedItems } : {}),
     ...(writeup.area !== undefined ? { area: writeup.area.replace(/\s+/gu, " ").trim() } : {}),
     ...(terms.length ? { terms } : {}),
     ...(meta.links?.length ? { links: meta.links } : {}),

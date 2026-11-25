@@ -189,37 +189,106 @@ test.each(["outOfScope", "whereToLook", "context"] as const)(
   },
 );
 
-test.each(["whyItMatters", "checked", "notChecked", "outOfScope", "whereToLook", "context", "deviations"] as const)(
-  "sanitizes hostile Markdown in %s",
-  async (field) => {
-    const source = "graph TD; A-->B; click A callback";
-    const markdown = [
-      "<script>bad()</script>",
-      "Before <img src=x onerror=alert(1)> after",
-      "[Unsafe link](javascript:bad())",
-      '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
-      '<svg onload="bad()"><circle /></svg>',
-      `\`\`\`mermaid\n${source}\n\`\`\``,
-    ].join("\n\n");
-    const rendered = await renderWriteup({ ...writeup, [field]: markdown }, []);
-    const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
-    const html = blocks.map((block) => block.html).join("");
-    expect(html).toContain("Raw HTML");
-    expect(html).toContain("Unsafe link");
-    expect(html).toContain('id="user-content-raw"');
-    expect(html).toContain("user-content-injected");
-    expect(html).not.toMatch(
-      /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
-    );
-    expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
-      expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
-    ]);
-    for (const block of blocks) {
-      expect(block.section).toBe(field);
-      expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
-    }
-  },
-);
+test("string Checked keeps its section, HTML and duplicate block IDs", async () => {
+  const rendered = await renderWriteup(
+    { tldr: "", overview: "", topics: {}, decisions: "", checked: "Search tests.\n\nSearch tests." },
+    [],
+  );
+  const block = { section: "checked", kind: "paragraph", html: "<p>Search tests.</p>", text: "Search tests." };
+  expect(rendered).toEqual({
+    sections: [
+      { key: "tldr", label: "TL;DR", topic: null, blocks: [] },
+      {
+        key: "checked",
+        label: "Checked",
+        topic: null,
+        blocks: [
+          { ...block, id: "checked-fd2d2303" },
+          { ...block, id: "checked-fd2d2303-2" },
+        ],
+      },
+      { key: "overview", label: "Overview", topic: null, blocks: [] },
+      { key: "decisions", label: "Decisions and drift", topic: null, blocks: [] },
+    ],
+  });
+  expect(rendered).not.toHaveProperty("checked");
+});
+
+test("keeps each checked item's blocks together and lands a revision quote on the matching block", async () => {
+  const rendered = await renderWriteup(
+    {
+      ...writeup,
+      checked: [
+        { kind: "ran", text: "Search tests.\n\nThree matches." },
+        { kind: "reasoned", text: "<!-- note -->" },
+        { kind: "read", text: "Search tests." },
+        { kind: "reasoned", text: "A single caller." },
+      ],
+      newInRevision: [{ section: "checked", quote: "Three matches", text: "Counted the matches." }],
+    },
+    [],
+  );
+  const blocks = rendered.sections.find((section) => section.key === "checked")?.blocks ?? [];
+  expect(blocks.map((block) => block.text)).toEqual([
+    "Search tests.",
+    "Three matches.",
+    "Search tests.",
+    "A single caller.",
+  ]);
+  expect(rendered.checked).toEqual([
+    { kind: "ran", blockIds: [blocks[0]?.id, blocks[1]?.id] },
+    { kind: "read", blockIds: ["checked-fd2d2303-2"] },
+    { kind: "reasoned", blockIds: [blocks[3]?.id] },
+  ]);
+  expect(rendered.newInRevision?.[0]?.blockId).toBe(blocks[1]?.id);
+});
+
+test("omits the Checked section and its metadata when no item renders a block", async () => {
+  const rendered = await renderWriteup({ ...writeup, checked: [{ kind: "read", text: "<!-- note -->" }] }, topics);
+  expect(rendered.sections.map((section) => section.key)).not.toContain("checked");
+  expect(rendered).not.toHaveProperty("checked");
+});
+
+test.each([
+  "whyItMatters",
+  "checked",
+  "checked list",
+  "notChecked",
+  "outOfScope",
+  "whereToLook",
+  "context",
+  "deviations",
+] as const)("sanitizes hostile Markdown in %s", async (form) => {
+  const field = form === "checked list" ? "checked" : form;
+  const source = "graph TD; A --- B; click A callback";
+  const markdown = [
+    "<script>bad()</script>",
+    "Before <img src=x onerror=alert(1)> after",
+    "[Unsafe link](javascript:bad())",
+    '<div onclick="bad()" style="position:fixed" id="raw" class="injected" data-foo="x">Raw HTML</div>',
+    '<svg onload="bad()"><circle /></svg>',
+    `\`\`\`mermaid\n${source}\n\`\`\``,
+  ].join("\n\n");
+  const input =
+    form === "checked list" ? { checked: [{ kind: "read" as const, text: markdown }] } : { [field]: markdown };
+  const rendered = await renderWriteup({ ...writeup, ...input }, []);
+  const blocks = rendered.sections.find((section) => section.key === field)?.blocks ?? [];
+  const html = blocks.map((block) => block.html).join("");
+  expect(html).toContain("Raw HTML");
+  expect(html).toContain("Unsafe link");
+  expect(html).toContain('id="user-content-raw"');
+  expect(html).toContain("user-content-injected");
+  expect(html).not.toMatch(
+    /<(script|style|iframe|object|embed|form|svg)|\s(on\w+|style|data-[\w-]+)=|javascript:|data:|vbscript:/i,
+  );
+  expect(blocks.filter((block) => block.kind === "diagram")).toEqual([
+    expect.objectContaining({ kind: "diagram", source, text: source, html: "" }),
+  ]);
+  for (const block of blocks) {
+    expect(block.section).toBe(field);
+    expect(BlockId.parse(block.id)).toMatch(new RegExp(`^${field}-`));
+  }
+});
 
 test("sanitizes raw glossary HTML through the same pipeline", async () => {
   const rendered = await renderWriteup(

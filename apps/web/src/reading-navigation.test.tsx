@@ -1961,6 +1961,8 @@ test.each(["Comment on review", "Comment on block"])("fix1 %s scrolls its own co
     const slot = screen.getByRole("region", { name: "Resumed comment" });
     expect(slot.classList.contains("sticky")).toBe(true);
     expect(slot.classList.contains("bottom-0")).toBe(true);
+    // At z-1 the later editor paints above both the z-1 proof pill and the selection prompt.
+    expect(slot.classList.contains("z-1")).toBe(true);
   }
 });
 test("fix1 blank Comment on review cancellation leaves no draft or editor after a tab switch", async () => {

@@ -4,7 +4,7 @@ import { DocHeadings, DocTitle, HtmlLookValue, SourceContent } from "./doc.ts";
 import { InboxListGroup } from "./groups.ts";
 import { LIMITS } from "./limits.ts";
 import { IssueRefs, PublishLinks, RepoUrl } from "./links.ts";
-import { NeedsYouKind, NewInRevisionSection, WriteupArea } from "./manifest.ts";
+import { CheckedKind, NeedsYouKind, NewInRevisionSection, WriteupArea } from "./manifest.ts";
 import { Placement } from "./placement.ts";
 import { PublishRequest, Sha256 } from "./publish.ts";
 import { FileFlag, FilePath, FileRole, FileStatus, TopicMeta, TopicSlug } from "./review.ts";
@@ -198,6 +198,17 @@ export const RenderedWriteup = z
         }),
       )
       .max(LIMITS.needsYouItems)
+      .optional()
+      .catch(undefined),
+    checked: z
+      .array(
+        z.object({
+          kind: CheckedKind,
+          blockIds: z.array(BlockId.refine((id) => id.startsWith("checked-"))).max(LIMITS.blocksPerRevision),
+        }),
+      )
+      .min(1)
+      .max(LIMITS.checkedItems)
       .optional()
       .catch(undefined),
     terms: z.array(GlossaryTerm).max(LIMITS.glossaryTerms).optional(),

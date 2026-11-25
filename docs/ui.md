@@ -230,6 +230,8 @@ included, needs the owner's approval.
   Not picked up yet: hollow dot; Picked up: grey dot and time; Approved: check), ThreadStateBadge
   (Unsent: dashed ring; Resolved: hollow ring), OutcomeBadge, ChangedMarker, OriginBadge (8 tints by
   machine id).
+- The proof-kind pill (`.em-proof-kind`) sits at the start of the item's first line. It is filled
+  for Ran, tinted with a solid border for Read, and dashed for Reasoned.
 - Cards (`.em-card`, `styles/threads.css`): 1 px `--border-1`, `--radius-lg`, `--shadow-1`; a
   36 px `--bg-sunken` head with the target in `--type-path` and a state pill; a 3 px left bar in
   `--thread-open` (draft, unsent, open), `--thread-sent`, `--thread-answered`, none when resolved.

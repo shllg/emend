@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import { createHash } from "node:crypto";
-import type { RenderedBlock, RenderedWriteup, Target, ThemeBase, TopicMeta } from "@recense/contract";
+import { type RenderedBlock, RenderedWriteup, type Target, type ThemeBase, type TopicMeta } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -29,6 +29,7 @@ import {
 } from "./download-diff.ts";
 import { type DownloadThread, type FileThreads, routeDownloadThreads } from "./download-threads.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { renderWriteup } from "./writeup.ts";
 
 vi.mock("./download-css.ts", async (original) => ({
   ...(await original<typeof import("./download-css.ts")>()),
@@ -3731,6 +3732,109 @@ test("adding the pub look keeps the HTML download's hostile-content filtering", 
   expect(html).toContain(pubCss);
   for (const forbidden of ["<script", "onerror", "javascript:", "https://example.com", "<iframe"])
     expect(html).not.toContain(forbidden);
+});
+
+test("downloads Checked labels in order with the thread attached to its block", async () => {
+  const kinds = ["ran", "read", "reasoned"] as const;
+  const blocks = kinds.map((kind, index) => ({
+    ...block(`<p>Proof ${kind}.</p>`),
+    id: `checked-0123abc${index}`,
+    section: "checked" as const,
+  }));
+  const sections = [{ key: "checked" as const, label: "Checked", topic: null, blocks }];
+  const input = { title: "Search", details, topics: [], resolveMedia: async () => null };
+  const checked = kinds.map((kind, index) => ({ kind, blockIds: [`checked-0123abc${index}`] }));
+  const html = await buildWriteupDownload({
+    ...input,
+    writeup: { sections, checked },
+    threads: emptyThreads({ blocks: new Map([["checked-0123abc1", [sampleThread("Which file?")]]]) }),
+  });
+  const list = parsed(html).find(
+    (node) => node.tagName === "ul" && node.properties.className?.toString() === "em-proofs",
+  );
+  const items = list?.children.filter((node) => node.type === "element") ?? [];
+  expect(items.map((item) => item.tagName)).toEqual(["li", "li", "li"]);
+  expect(items.map((item) => item.properties.dataProofKind)).toEqual(kinds);
+  const children = items.map((item) => item.children.filter((node) => node.type === "element"));
+  expect(children.map((nodes) => nodes.map((node) => hastText(node)))).toEqual([
+    ["Ran", "Proof ran."],
+    ["Read", "Proof read.", expect.stringContaining("Which file?")],
+    ["Reasoned", "Proof reasoned."],
+  ]);
+  for (const nodes of children) expect(nodes[0]?.properties.className).toEqual(["em-proof-kind"]);
+  expect(html).toMatch(/\.em-proof-kind\{[^}]*float:inline-start/);
+  expect(html).toMatch(/\[data-proof-kind=ran\]>\.em-proof-kind\{[^}]*background:var\(--strong\)/);
+  expect(html).toMatch(/\[data-proof-kind=read\]>\.em-proof-kind\{[^}]*background:var\(--sunken\)/);
+  expect(html).toMatch(/\[data-proof-kind=reasoned\]>\.em-proof-kind\{[^}]*border-style:dashed/);
+
+  const plain = await buildWriteupDownload({ ...input, writeup: { sections } });
+  expect(plain).toContain(
+    "<section><h2>Checked</h2><p>Proof ran.</p><p>Proof read.</p><p>Proof reasoned.</p></section>",
+  );
+  expect(plain).not.toContain("em-proof-kind");
+});
+
+test("skips stored Checked labels whose block IDs resolve to nothing", async () => {
+  const proof = { ...block("<p>Three matches.</p>"), id: "checked-11111111", section: "checked" as const };
+  const section = { key: "checked" as const, label: "Checked", topic: null, blocks: [proof] };
+  const missing = { kind: "ran" as const, blockIds: ["checked-22222222"] };
+  const input = { title: "Search", details, topics: [], resolveMedia: async () => null };
+  const mixed = await buildWriteupDownload({
+    ...input,
+    writeup: { sections: [section], checked: [missing, { kind: "read", blockIds: [proof.id] }] },
+  });
+  expect(mixed).toContain('<strong class="em-proof-kind">Read</strong><p>Three matches.</p>');
+  expect(
+    parsed(mixed)
+      .filter((node) => node.tagName === "li")
+      .map((node) => node.properties.dataProofKind),
+  ).toEqual(["read"]);
+
+  const empty = await buildWriteupDownload({
+    ...input,
+    writeup: { sections: [{ ...section, blocks: [] }], checked: [missing] },
+  });
+  expect(empty).toContain("<section><h2>Checked</h2></section>");
+});
+
+test("labelled Checked downloads keep hostile Markdown inert", async () => {
+  const rendered = await renderWriteup(
+    {
+      tldr: "",
+      overview: "",
+      topics: {},
+      decisions: "",
+      checked: [
+        { kind: "ran", text: "Ran the probe.\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>" },
+        { kind: "read", text: "[x](javascript:alert(1))\n\n<iframe src=https://example.com></iframe>" },
+        {
+          kind: "reasoned",
+          text: "Diagram <svg onload=alert(1)></svg> follows.\n\n```mermaid\ngraph TD; A --- B; click A callback\n```",
+        },
+      ],
+    },
+    [],
+  );
+  const resolveMedia = vi.fn(async () => null);
+  const html = await buildWriteupDownload({
+    title: "Search",
+    details,
+    topics: [],
+    writeup: RenderedWriteup.parse(rendered),
+    resolveMedia,
+  });
+  expectHead(html);
+  const nodes = parsed(html);
+  expect(nodes.filter((node) => node.properties.className?.toString() === "em-proof-kind").map(hastText)).toEqual([
+    "Ran",
+    "Read",
+    "Reasoned",
+  ]);
+  expect(nodes.filter((node) => node.tagName === "code").map(hastText)).toContain(
+    "graph TD; A --- B; click A callback",
+  );
+  expect(html).not.toMatch(/<(?:script|iframe|svg)\b|onerror|onload|javascript:|https?:\/\//i);
+  expect(resolveMedia).not.toHaveBeenCalled();
 });
 
 test("downloads Needs you with each kind before its blocks and supports missing metadata", async () => {
