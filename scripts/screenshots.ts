@@ -22,9 +22,7 @@ import {
   MAIN_FIX,
   MAIN_ISSUE,
   MAIN_TITLE,
-  MAIN_TOPIC_TEXT,
   MAIN_TOPICS,
-  mainTldr,
   mainWriteup,
   REMOTE_URL,
   REPLIES,
@@ -250,12 +248,7 @@ async function main(): Promise<void> {
       main: "writeup",
       topics: MAIN_TOPICS,
       files,
-      writeup: {
-        overview: mainWriteup(revision),
-        tldr: mainTldr(revision),
-        decisions: null,
-        topics: Object.fromEntries(Object.entries(MAIN_TOPIC_TEXT).map(([slug, why]) => [slug, { why }])),
-      },
+      writeup: mainWriteup(revision),
     };
   };
   const reviewFolder = folder("main");
@@ -314,10 +307,16 @@ async function main(): Promise<void> {
   shots["send-desktop.png"] = await desktop.screenshot();
 
   step("pressing Send");
-  await desktop.eval(
-    "(() => { const button = [...document.querySelectorAll('button')].find((b) => /^Send 3/.test(b.innerText.trim())); " +
-      "if (!button) throw new Error('no Send button'); button.click(); })()",
-  );
+  const sendBar = `document.querySelector('section[aria-label="Send and approve"]')`;
+  await desktop.waitFor(`${sendBar}?.innerText.includes('3 to send')`, "three comments in the Send bar");
+  await desktop.eval(`(() => {
+    const section = ${sendBar};
+    if (!section) throw new Error('Send bar is missing');
+    const button = [...section.querySelectorAll('button[type="submit"]')].find((b) => b.innerText.trim() === 'Send');
+    if (!button) throw new Error('Send button is missing');
+    if (button.disabled) throw new Error('Send button is disabled');
+    button.click();
+  })()`);
   const delivered = JSON.parse((await firstWait).trim()) as {
     kind: string;
     comments: { id: string; body: string }[];

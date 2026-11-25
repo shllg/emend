@@ -17,7 +17,7 @@ import { test, type TestContext } from "node:test";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { BLOCK_SOCKETS, Browser, Page, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
-import { applyFixture } from "./screenshots/content.ts";
+import { applyFixture, MAIN_TOPICS, mainWriteup } from "./screenshots/content.ts";
 import { writeImages } from "./screenshots/images.ts";
 import {
   acceptsLoopbackConnection,
@@ -331,6 +331,24 @@ test("the output folder may not overlap real state, also through a symlink", (t)
   assert.throws(() => canonicalPath("relative"), { message: "Paths must be absolute" });
 });
 
+test("the main screenshot writeup fills the review cards and links to declared topics", () => {
+  const slugs = new Set<string>(MAIN_TOPICS.map(({ slug }) => slug));
+  for (const revision of [1, 2] as const) {
+    const writeup = mainWriteup(revision);
+    for (const field of ["area", "whyItMatters", "whereToLook", "checked", "notChecked", "decisions"] as const) {
+      assert.match(writeup[field], /\S/, field);
+    }
+    assert.deepEqual(writeup.needsYou.map(({ kind }) => kind).sort(), ["accept", "decide"]);
+    if (revision === 1) assert(!("newInRevision" in writeup));
+    else assert(writeup.newInRevision?.length);
+
+    for (const item of [...writeup.needsYou, ...(writeup.newInRevision ?? [])]) {
+      if (item.topic !== undefined) assert(slugs.has(item.topic), item.topic);
+      assert(!("topic" in item && "section" in item));
+    }
+  }
+});
+
 test("fixture deletions stay inside the fixture repository", (t) => {
   const fixture = mkdtempSync(join(realpathSync(tmpdir()), "recense-screenshots-fixture-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
@@ -429,6 +447,7 @@ test("the Chromium command line is exactly the sealed list", () => {
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
     "--hide-scrollbars",
     "--force-color-profile=srgb",
+    "--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2",
   ];
   assert.deepEqual(chromiumArgs(profile, "linux"), [...common, "about:blank"]);
   assert.deepEqual(chromiumArgs(profile, "darwin"), [

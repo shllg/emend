@@ -69,51 +69,94 @@ export function applyFixture(fixturesDir: string, fixture: string, repo: string)
 
 // ---- Main review: writeups -------------------------------------------------------------------
 
-export function mainWriteup(revision: 1 | 2): string {
-  if (revision === 1)
-    return `## What changed
-
-Reviews can now be pinned. A pinned review stays at the top of the Open group in the inbox until
-you unpin it. Issue #212.
-
-- A new migration adds \`pinned_at\` to \`reviews\`. Nothing is backfilled.
-- \`POST /api/v1/reviews/:id/pin\` and \`/unpin\` are reviewer-only and filter \`owner_id\`.
-- The inbox sorts pinned reviews first, newest pin on top.
-
-## What to look at
-
-1. **The pin limit.** Ten pins per owner; the eleventh returns \`409 pin_limit\`.
-2. **The sort order.** Pinned reviews sort first inside the Open group only.
-
-## How I checked it
-
-\`pnpm verify\` passes. New tests cover the limit, owner isolation and the sort order.
-`;
-  return `## What changed
-
-Reviews can now be pinned. A pinned review stays at the top of the Open group in the inbox until
-you unpin, approve or retire it. Issue #212.
-
-- A new migration adds \`pinned_at\` to \`reviews\`. Nothing is backfilled.
-- \`POST /api/v1/reviews/:id/pin\` and \`/unpin\` are reviewer-only and filter \`owner_id\`.
-- The inbox sorts pinned reviews first, newest pin on top.
-
-## What to look at
-
-1. **Retire and approve clear the pin.** Both clear pinned_at in the same transaction as the state change.
-2. **The pin limit.** Ten pins per owner; the eleventh returns \`409 pin_limit\`.
-3. **The sort order.** Pinned reviews sort first inside the Open group only. Reviews in Needs you stay above them.
-
-## How I checked it
-
-\`pnpm verify\` passes. New tests cover the limit, owner isolation and the sort order.
-`;
-}
-
-export function mainTldr(revision: 1 | 2): string {
-  return revision === 1
-    ? "- **Biggest risk:** A committed migration is never edited, so the column has to be right now.\n- **Check first:** The pin limit in `pins.ts`."
-    : "- **Biggest risk:** A committed migration is never edited, so the column has to be right now.\n- **Check first:** `closeReview` in `reviews.ts` now clears the pin.";
+export function mainWriteup(revision: 1 | 2) {
+  const pinEnds = revision === 1 ? "unpin it" : "unpin, approve or retire it";
+  return {
+    area: "inbox › pins",
+    tldr: `Pin a review in your inbox (#${MAIN_ISSUE}). It stays at the top of the Open group until you ${pinEnds}.`,
+    whyItMatters: "The reviews you return to stay in reach as the inbox grows.",
+    overview: [
+      "- **Goal:** After this, you can keep a review in sight when newer reviews arrive.",
+      "- **Change:** A nullable `pinned_at` column stores the pin. Two reviewer-only routes set or clear it. " +
+        "The inbox sorts pins first inside Open.",
+    ].join("\n"),
+    needsYou: [
+      { kind: "decide", text: "Keep the limit at ten pins per owner, or make it a setting?", topic: "api" },
+      {
+        kind: "accept",
+        text: "Keep `pinned_at` nullable with no backfill. Changing the column later takes a new migration.",
+        topic: "migration",
+      },
+    ],
+    ...(revision === 2 && {
+      newInRevision: [
+        { text: "Retire and approve now clear the pin in the same update that closes the review.", topic: "api" },
+        { text: "The sort rule now spells out that Needs you stays above pinned reviews.", topic: "inbox" },
+        { text: "Checked adds a test for retire and one for approve.", section: "checked" },
+      ],
+    }),
+    whereToLook: [
+      "- **Biggest risk:** Two pins can take an owner from nine to eleven if the count moves outside the transaction.",
+      revision === 1
+        ? "- **Look yourself:** Check the count and update in `pins.ts`. The limit test sends one request at a time."
+        : "- **Look yourself:** Check `closeReview` in `reviews.ts`. The tests see the final row. " +
+          "Only the update shows that the state and pin change together.",
+    ].join("\n"),
+    checked: [
+      "- The eleventh pin for one owner returned `409 pin_limit`.",
+      "- A request to pin another owner's review returned `404`.",
+      "- The sort tests put pins first in Open and kept a pinned Done review in Done. " +
+        "The group order keeps Needs you above pinned reviews in Open.",
+      ...(revision === 2
+        ? ["- Retiring a pinned review cleared `pinned_at`.", "- Approving a pinned review cleared `pinned_at`."]
+        : []),
+    ].join("\n"),
+    notChecked: "- No test pins from two browsers at once with one slot left. Both could claim that slot.",
+    decisions: [
+      "- **Decided for you:** Chose a nullable `pinned_at` over a pins table because one pin per review is enough. " +
+        "Would change if pins became per machine.",
+      revision === 1
+        ? "- **Trail:** An independent review found nothing blocking."
+        : "- **Trail:** The reviewer left three comments. Fixed the stale pin. Explained the sort order and pin limit.",
+    ].join("\n"),
+    topics: {
+      migration: {
+        why: [
+          "**What it is:** The reviews table holds each review's state.",
+          "**Problem:** A row has no record of when its owner pinned it.",
+          "**Fix:** Add a nullable `pinned_at` column and an index on `owner_id` and `pinned_at`.",
+          "**Undo:** Revert, then add a migration that drops `pinned_at`.",
+        ].join("\n\n"),
+        example: "Before: An existing row has no pin column.\nAfter: Its `pinned_at` is null until its owner pins it.",
+      },
+      api: {
+        why: [
+          "**What it is:** The review routes handle changes made by the reviewer.",
+          "**Problem:** A reviewer has no way to set or clear a pin.",
+          "**Fix:** Add reviewer-only pin and unpin routes. Count and set pins in one transaction." +
+            (revision === 2 ? " Retire and approve clear the pin in the update that closes the review." : ""),
+        ].join("\n\n"),
+        example: "Before: A reviewer cannot pin a review.\nAfter: Pinning it twice returns `204` both times.",
+      },
+      inbox: {
+        why: [
+          "**What it is:** Open lists reviews by their last update.",
+          "**Problem:** A new review can push one you need out of sight.",
+          "**Fix:** Sort pinned reviews first inside Open only, newest pin first. " +
+            "Needs you, Snoozed and Done keep their order." +
+            (revision === 2 ? " Needs you stays above pinned reviews." : ""),
+        ].join("\n\n"),
+        example: "Before: A new review pushes an older one down.\nAfter: Pin the older review and it leads Open.",
+      },
+      tests: {
+        why: [
+          "**What it is:** Route and inbox tests exercise the pin rules.",
+          "**Problem:** Pinning one review cannot show what happens at the limit or across owners and inbox groups.",
+          "**Fix:** Try an eleventh pin and a pin on another owner's review. Sort pinned rows in Open and Done.",
+        ].join("\n\n"),
+      },
+    },
+  };
 }
 
 export const MAIN_TOPICS = [
@@ -123,7 +166,6 @@ export const MAIN_TOPICS = [
     importance: 10,
     attention: "critical",
     summary: "A nullable pinned_at column and an index on (owner_id, pinned_at).",
-    door: "one-way",
     blastRadius: { scope: "owners", note: "Every inbox query reads the new column." },
   },
   {
@@ -132,7 +174,6 @@ export const MAIN_TOPICS = [
     importance: 20,
     attention: "review",
     summary: "Two reviewer-only routes with a limit of ten pins per owner.",
-    door: "two-way",
     blastRadius: { scope: "reviewers", note: "Two new reviewer-only routes." },
   },
   {
@@ -141,7 +182,6 @@ export const MAIN_TOPICS = [
     importance: 30,
     attention: "review",
     summary: "The Open group lists pinned reviews first, newest pin on top.",
-    door: "two-way",
     blastRadius: { scope: "reviewers", note: "Inbox order changes." },
   },
   {
@@ -150,18 +190,9 @@ export const MAIN_TOPICS = [
     importance: 99,
     attention: "skim",
     summary: "Route tests for the limit and owner isolation, and sort tests for the inbox.",
-    door: "two-way",
     blastRadius: { scope: "none", note: "Tests only." },
   },
 ] as const;
-
-export const MAIN_TOPIC_TEXT: Record<string, string> = {
-  migration:
-    "**What it is:** One nullable column and an index.\n\n**Why one-way:** A committed migration is never edited or removed.",
-  api: "**What it is:** `POST /pin` and `POST /unpin`, both reviewer-only.\n\n**Limit:** The eleventh pin returns `409 pin_limit`.",
-  inbox: "**What it is:** Pinned reviews sort first inside the Open group.\n\n**Scope:** Needs you, Snoozed and Done keep their order.",
-  tests: "**What it is:** Route tests and sort tests that follow the code.",
-};
 
 // ---- Other reviews ---------------------------------------------------------------------------
 

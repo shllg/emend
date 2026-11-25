@@ -305,6 +305,8 @@ export function chromiumArgs(profile: string, platform: string): string[] {
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
     "--hide-scrollbars",
     "--force-color-profile=srgb",
+    // Headless has no fine/hover mouse and shows touch UI. Phones use Emulation.setTouchEmulationEnabled in browser.ts.
+    "--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2",
     ...(platform === "darwin" ? ["--use-mock-keychain", "--password-store=basic"] : []),
     "about:blank",
   ];
