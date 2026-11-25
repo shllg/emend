@@ -150,11 +150,34 @@ async function ignoredFiles(cwd: string): Promise<Entries> {
   return files;
 }
 
+function configDigest(cwd: string, head: Buffer): string {
+  const config = git(cwd, "config", "--list", "--show-origin", "--show-scope", "-z");
+  const ref = head.toString("latin1").replace(/\n$/, "");
+  const prefix = "refs/heads/";
+  if (!ref.startsWith(prefix)) return sha256(config);
+  const current = ref.slice(prefix.length);
+  // Latin-1 round-trips every byte, including non-UTF-8 values and origin paths.
+  const fields = config.toString("latin1").split("\0");
+  const hash = createHash("sha256");
+  for (let i = 0; i < fields.length - 1; i += 3) {
+    const [scope, origin, setting] = fields.slice(i, i + 3);
+    const newline = setting.indexOf("\n");
+    const name = newline < 0 ? setting : setting.slice(0, newline);
+    const upstream = /^branch\.(.+)\.(remote|merge)$/s.exec(name);
+    if (upstream && upstream[1] !== current && newline >= 0) {
+      const expected = upstream[2] === "remote" ? "origin" : prefix + upstream[1];
+      if (setting.slice(newline + 1) === expected) continue;
+    }
+    hash.update(scope + "\0" + origin + "\0" + setting + "\0", "latin1");
+  }
+  return hash.digest("hex");
+}
+
 async function gitSettings(cwd: string, common: string): Promise<Entries> {
   const entries: Entries = new Map();
-  const config = git(cwd, "config", "--list", "--show-origin", "--show-scope", "-z");
-  entries.set("config", sha256(config));
-  entries.set("HEAD", sha256(symbolicHead(cwd)));
+  const head = symbolicHead(cwd);
+  entries.set("config", configDigest(cwd, head));
+  entries.set("HEAD", sha256(head));
   const hooks = git(cwd, "rev-parse", "--git-path", "hooks").toString().trimEnd();
   const dir = git(cwd, "rev-parse", "--git-dir").toString().trimEnd();
   for (const [key, file] of [

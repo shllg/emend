@@ -290,6 +290,73 @@ test("a same-size install edit is reported after restoring its mtime", (t) => {
   assert.equal(result.stdout, "ignored changed: node_modules/entry\n");
 });
 
+test("only the expected upstream values on other branches can change silently", (t) => {
+  const { git, takeSnapshot } = repository(t);
+  git("commit", "-qm", "base", "--allow-empty");
+  git("checkout", "-qb", "work/Topic.v1");
+  const current = git("symbolic-ref", "--short", "-q", "HEAD").toString().trimEnd();
+  git("config", `branch.${current}.merge`, "refs/heads/base");
+  const compare = takeSnapshot();
+  function expectConfigChange(changed: boolean) {
+    const result = compare();
+    assert.equal(result.status, changed ? 1 : 0, result.stderr + result.stdout);
+    assert.equal(result.stdout, changed ? "git changed: config\n" : "");
+  }
+
+  git("config", "branch.other.remote", "origin");
+  git("config", "branch.other.merge", "refs/heads/other");
+  expectConfigChange(false);
+  for (const remote of ["../other.git", "https://example.invalid/other.git", "origin\nextra"]) {
+    git("config", "branch.other.remote", remote);
+    expectConfigChange(true);
+  }
+  git("config", "branch.other.remote", "origin");
+  git("config", "branch.other.merge", "refs/heads/main");
+  expectConfigChange(true);
+  git("config", "branch.other.merge", "refs/heads/other");
+  expectConfigChange(false);
+  git("config", "--remove-section", "branch.other");
+  expectConfigChange(false);
+  git("config", "branch.other.pushRemote", "publish");
+  expectConfigChange(true);
+  git("config", "--unset", "branch.other.pushRemote");
+  git("config", `branch.${current}.merge`, "refs/heads/next");
+  expectConfigChange(true);
+  git("config", `branch.${current}.merge`, "refs/heads/base");
+  git("config", `branch.${current}.remote`, "origin");
+  expectConfigChange(true);
+});
+
+test("the current branch's merge setting is checked when a tag shares its name", (t) => {
+  const { git, takeSnapshot } = repository(t);
+  git("commit", "-qm", "base", "--allow-empty");
+  const current = "work/Topic.v1";
+  git("checkout", "-qb", current);
+  git("tag", current);
+  const compare = takeSnapshot();
+  git("config", `branch.${current}.merge`, `refs/heads/${current}`);
+  const result = compare();
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  assert.equal(result.stdout, "git changed: config\n");
+});
+
+for (const head of ["detached HEAD", "HEAD pointing at a tag"]) {
+  test(`a ${head} includes every branch's upstream in the config digest`, (t) => {
+    const { git, takeSnapshot } = repository(t);
+    git("commit", "-qm", "base", "--allow-empty");
+    if (head === "detached HEAD") git("checkout", "-q", "--detach");
+    else {
+      git("tag", "snapshot");
+      git("symbolic-ref", "HEAD", "refs/tags/snapshot");
+    }
+    const compare = takeSnapshot();
+    git("config", "branch.other.remote", "origin");
+    const result = compare();
+    assert.equal(result.status, 1, result.stderr + result.stdout);
+    assert.equal(result.stdout, "git changed: config\n");
+  });
+}
+
 test("a moved HEAD and changes to repository settings are reported by key", (t) => {
   const { cwd, git, takeSnapshot } = repository(t);
   git("commit", "-qm", "base", "--allow-empty");
