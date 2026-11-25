@@ -343,9 +343,9 @@ test("the screenshot runner's selectors and stored values match the app's source
   assert.match(store, /pane:\s*z\s*\.object\(\{\s*desktop:\s*paneChoice\b/);
   assert(runner.includes("recense.layout.v1"));
   assert(runner.includes("recense.layout.tabs-default"));
-  assert(runner.includes("desktop: \"split\""));
+  assert(runner.includes("layout.pane = { ...(layout.pane ?? {}), desktop: \"split\" };"));
 
-  assert(sendBar.includes("aria-label=\"Send and approve\""));
+  assert.match(sendBar, /<section\b[^>]*\saria-label="Send and approve"/);
   assert(sendBar.includes("{unsentCount} to send"));
   assert.match(sendBar, /<Button\b(?:[^<>{}]|\{[^{}]*\})*?\stype="submit"(?:[^<>{}]|\{[^{}]*\})*>\s*Send\s*<\/Button>/);
   assert(runner.includes("section[aria-label=\"Send and approve\"]"));
