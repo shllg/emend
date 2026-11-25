@@ -2,11 +2,11 @@
 
 How to change what the reviewer sees in `apps/web`. Section 1 holds the north star and the UX
 principles: the direction every change moves in. Sections 2 to 10 hold the rules. Each rule names a
-value, a token, a behaviour or a state that must exist. Breaking a rule is a defect; anything beyond
-them is taste. Check at desktop 1600×1000 and phone 390×844, in Light and Dark
-(`localStorage["recense.theme"]` = `light` or `dark`, then reload). Values live in
-`apps/web/src/styles/`; where this guide and the code differ, the code wins and the guide gets
-fixed. `.claude/rules/content-isolation.md` comes first.
+value, a token, a behaviour or a state that must exist. Breaking a rule, or making a principle's
+check worse, is a defect; anything beyond the principles and the rules is taste. Check at desktop
+1600×1000 and phone 390×844, in Light and Dark (`localStorage["recense.theme"]` = `light` or
+`dark`, then reload). Values live in `apps/web/src/styles/`; where this guide and the code differ,
+the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` comes first.
 
 ## 1. North star and UX principles
 
