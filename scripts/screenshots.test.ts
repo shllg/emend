@@ -16,8 +16,8 @@ import { dirname, join, resolve } from "node:path";
 import { test, type TestContext } from "node:test";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { BLOCK_SOCKETS, Browser, Page, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
-import { applyFixture } from "./screenshots/content.ts";
+import { BLOCK_SOCKETS, Browser, DESKTOP, Page, PHONE, SOCKET_BLOCKED_URLS } from "./screenshots/browser.ts";
+import { applyFixture, MAIN_TOPICS, mainWriteup } from "./screenshots/content.ts";
 import { writeImages } from "./screenshots/images.ts";
 import {
   acceptsLoopbackConnection,
@@ -331,6 +331,53 @@ test("the output folder may not overlap real state, also through a symlink", (t)
   assert.throws(() => canonicalPath("relative"), { message: "Paths must be absolute" });
 });
 
+test("the screenshot runner's selectors and stored values match the app's source", () => {
+  const store = readFileSync(new URL("../apps/web/src/lib/layout-store.ts", import.meta.url), "utf8");
+  const sendBar = readFileSync(new URL("../apps/web/src/components/send/SendBar.tsx", import.meta.url), "utf8");
+  const reader = readFileSync(new URL("../apps/web/src/components/reading/BlockReader.tsx", import.meta.url), "utf8");
+  const runner = readFileSync(new URL("./screenshots.ts", import.meta.url), "utf8");
+
+  assert.match(store, /const layoutKey\s*=\s*"recense\.layout\.v1"/);
+  assert.match(store, /const tabsDefaultKey\s*=\s*"recense\.layout\.tabs-default"/);
+  assert.match(store, /paneChoice\s*=\s*z\.enum\(\["split",\s*"tabs"\]\)/);
+  assert.match(store, /pane:\s*z\s*\.object\(\{\s*desktop:\s*paneChoice\b/);
+  assert(runner.includes("recense.layout.v1"));
+  assert(runner.includes("recense.layout.tabs-default"));
+  assert.match(
+    runner,
+    /\blayout\s*\.\s*pane\s*=\s*\{\s*\.\.\.\s*\(\s*layout\s*\.\s*pane\s*\?\?\s*\{\s*\}\s*\)\s*,\s*desktop\s*:\s*"split"\s*\}\s*;?/,
+  );
+
+  assert.match(sendBar, /<section\b(?:[^<>{}]|\{[^{}]*\})*?\saria-label="Send and approve"/);
+  assert(sendBar.includes("{unsentCount} to send"));
+  assert.match(sendBar, /<Button\b(?:[^<>{}]|\{[^{}]*\})*?\stype="submit"(?:[^<>{}]|\{[^{}]*\})*>\s*Send\s*<\/Button>/);
+  assert(runner.includes("section[aria-label=\"Send and approve\"]"));
+  assert(runner.includes("3 to send"));
+  assert(runner.includes("button[type=\"submit\"]"));
+  assert(runner.includes("=== 'Send'"));
+
+  assert.match(reader, /<dl\s+className="(?:[^"]*\s)?em-needs-you(?:\s[^"]*)?"/);
+  assert(runner.includes("dl.em-needs-you"));
+});
+
+test("the main screenshot writeup fills the review cards and links to declared topics", () => {
+  const slugs = new Set<string>(MAIN_TOPICS.map(({ slug }) => slug));
+  for (const revision of [1, 2] as const) {
+    const writeup = mainWriteup(revision);
+    for (const field of ["tldr", "overview", "area", "whyItMatters", "whereToLook", "checked", "notChecked", "decisions"] as const) {
+      assert.match(writeup[field], /\S/, field);
+    }
+    assert.deepEqual(writeup.needsYou.map(({ kind }) => kind).sort(), ["accept", "decide"]);
+    if (revision === 1) assert(!("newInRevision" in writeup));
+    else assert(writeup.newInRevision?.length);
+
+    for (const item of [...writeup.needsYou, ...(writeup.newInRevision ?? [])]) {
+      if (item.topic !== undefined) assert(slugs.has(item.topic), item.topic);
+      assert(!("topic" in item && "section" in item));
+    }
+  }
+});
+
 test("fixture deletions stay inside the fixture repository", (t) => {
   const fixture = mkdtempSync(join(realpathSync(tmpdir()), "recense-screenshots-fixture-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
@@ -429,6 +476,7 @@ test("the Chromium command line is exactly the sealed list", () => {
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
     "--hide-scrollbars",
     "--force-color-profile=srgb",
+    "--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2",
   ];
   assert.deepEqual(chromiumArgs(profile, "linux"), [...common, "about:blank"]);
   assert.deepEqual(chromiumArgs(profile, "darwin"), [
@@ -507,6 +555,17 @@ async function advanceBrowserClock(t: TestContext, fake: ReturnType<typeof fakeC
     await fake.yieldOnce();
   }
 }
+
+test("phone pages turn touch on and desktop pages keep the mouse", async () => {
+  const touchMethod = "Emulation.setTouchEmulationEnabled";
+  const phone = fakeChromium();
+  await new Page(phone.browser, "phone").configure(PHONE);
+  assert(phone.sent.some(({ method, params }) => method === touchMethod && params.enabled === true));
+
+  const desktop = fakeChromium();
+  await new Page(desktop.browser, "desktop").configure(DESKTOP);
+  assert(!desktop.sent.some(({ method }) => method === touchMethod));
+});
 
 test("dedicated-worker attaches and requests restart the full calm period without changing openRequests", async (t) => {
   t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });

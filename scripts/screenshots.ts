@@ -22,9 +22,7 @@ import {
   MAIN_FIX,
   MAIN_ISSUE,
   MAIN_TITLE,
-  MAIN_TOPIC_TEXT,
   MAIN_TOPICS,
-  mainTldr,
   mainWriteup,
   REMOTE_URL,
   REPLIES,
@@ -250,12 +248,7 @@ async function main(): Promise<void> {
       main: "writeup",
       topics: MAIN_TOPICS,
       files,
-      writeup: {
-        overview: mainWriteup(revision),
-        tldr: mainTldr(revision),
-        decisions: null,
-        topics: Object.fromEntries(Object.entries(MAIN_TOPIC_TEXT).map(([slug, why]) => [slug, { why }])),
-      },
+      writeup: mainWriteup(revision),
     };
   };
   const reviewFolder = folder("main");
@@ -314,10 +307,16 @@ async function main(): Promise<void> {
   shots["send-desktop.png"] = await desktop.screenshot();
 
   step("pressing Send");
-  await desktop.eval(
-    "(() => { const button = [...document.querySelectorAll('button')].find((b) => /^Send 3/.test(b.innerText.trim())); " +
-      "if (!button) throw new Error('no Send button'); button.click(); })()",
-  );
+  const sendBar = `document.querySelector('section[aria-label="Send and approve"]')`;
+  await desktop.waitFor(`${sendBar}?.innerText.includes('3 to send')`, "three comments in the Send bar");
+  await desktop.eval(`(() => {
+    const section = ${sendBar};
+    if (!section) throw new Error('Send bar is missing');
+    const button = [...section.querySelectorAll('button[type="submit"]')].find((b) => b.innerText.trim() === 'Send');
+    if (!button) throw new Error('Send button is missing');
+    if (button.disabled) throw new Error('Send button is disabled');
+    button.click();
+  })()`);
   const delivered = JSON.parse((await firstWait).trim()) as {
     kind: string;
     comments: { id: string; body: string }[];
@@ -415,6 +414,16 @@ async function main(): Promise<void> {
     `![...el.children].some((child) => child.textContent.includes(${JSON.stringify(text)}))) ?? null; })()`;
 
   step("capturing the review");
+  // Desktop reviews open in Tabs. Store the reader's Split choice as the View menu does
+  // so the screenshot shows the writeup next to the diff.
+  await desktop.eval(`(() => {
+    const LAYOUT_KEY = "recense.layout.v1";
+    const TABS_DEFAULT_KEY = "recense.layout.tabs-default";
+    const layout = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}");
+    layout.pane = { ...(layout.pane ?? {}), desktop: "split" };
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+    localStorage.setItem(TABS_DEFAULT_KEY, "1");
+  })()`);
   await desktop.goto(reviewUrl("?rev=2"));
   await desktop.settle("the desktop review");
   // The agent note above the thread must clear the sticky file header, with the thread below it.
@@ -425,6 +434,17 @@ async function main(): Promise<void> {
     "the agent note",
     0,
   );
+  // The README shot must show every opening card.
+  const overflow = await desktop.eval<number>(`(() => {
+    const pane = document.querySelector("[data-reading-scroll]");
+    if (!pane) throw new Error("The writeup pane is missing from the review shot");
+    const list = pane.querySelector("dl.em-needs-you");
+    if (!list) throw new Error("The Needs you list is missing from the writeup pane");
+    return Math.max(0, list.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom);
+  })()`);
+  if (overflow > 0) {
+    throw new Error(`The Needs you card ends ${Math.ceil(overflow)} px below the writeup pane in the review shot`);
+  }
   shots["review-desktop.png"] = await desktop.screenshot();
 
   await phone.goto(reviewUrl("?rev=2&tab=comments"));
