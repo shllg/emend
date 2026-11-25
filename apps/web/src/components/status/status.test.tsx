@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { ReviewState } from "@recense/contract";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
@@ -60,6 +62,32 @@ test.each([
   expect(screen.getByText(label)).toBeTruthy();
   expect(screen.queryByRole("status")).toBeNull();
   expect(container.querySelector('[aria-hidden="true"]')).toBeTruthy();
+});
+
+test("the waiting dot pulses a few times, ending within five seconds, then holds still", () => {
+  const { container } = render(<AgentStatus status="waiting" />);
+  const classes = container.querySelector('[aria-hidden="true"]')?.className ?? "";
+  expect(classes).toContain("em-pulse");
+  expect(classes).not.toContain("infinite");
+  const count = Number(/animate-\[em-pulse_var\(--dur-pulse\)_\S+_([1-9]\d*)\]/.exec(classes)?.[1]);
+  const css = readFileSync(resolve(import.meta.dirname, "../../styles/spacing.css"), "utf8");
+  const duration = Number(/--dur-pulse:\s*(\d+)ms;/.exec(css)?.[1]);
+  expect(count).toBeGreaterThanOrEqual(2);
+  expect(count * duration).toBeLessThanOrEqual(5000);
+});
+
+test("the still waiting dot has a ring that the other dots lack", () => {
+  const { container } = render(<AgentStatus status="waiting" />);
+  const classes = container.querySelector('[aria-hidden="true"]')?.classList;
+  expect(classes).toContain("outline-1");
+  expect(classes).toContain("outline-offset-1");
+  expect(classes).toContain("outline-current");
+
+  for (const status of ["pickedUp", "pending"] as const) {
+    cleanup();
+    const { container } = render(<AgentStatus status={status} />);
+    expect(container.querySelector('[aria-hidden="true"]')?.className).not.toContain("outline");
+  }
 });
 
 test("label priority: approved, waiting, not picked up, picked up, none", () => {

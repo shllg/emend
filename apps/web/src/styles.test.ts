@@ -72,6 +72,14 @@ test("inbox arrival fades the accent tint for one second only when reduced motio
   );
 });
 
+test("reduced motion runs every animation once in 1 ms and cuts transitions to 1 ms", () => {
+  const css = readFileSync(join(webSource, "styles/base.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\*\s*\{([^}]+)\}/.exec(css)?.[1];
+  expect(rule).toContain("animation-duration: 1ms !important;");
+  expect(rule).toContain("animation-iteration-count: 1 !important;");
+  expect(rule).toContain("transition-duration: 1ms !important;");
+});
+
 test("change bars define their base and continuation offsets in the components stylesheet", () => {
   const css = readFileSync(join(webSource, "styles/reading.css"), "utf8");
   expect(css).toMatch(/^@layer components\s*\{/);

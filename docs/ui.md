@@ -167,9 +167,10 @@ included, needs the owner's approval.
   `danger` for delete, retire and revoke. A destructive action confirms in a Dialog whose least
   destructive button has `data-autofocus`.
 - Status has one component each; reuse it, never restyle a state in place: StateBadge (Open,
-  Approved, Retired), SnoozeBadge, AgentStatus (Agent waiting: pulsing dot; Not picked up yet:
-  hollow dot; Picked up: grey dot and time; Approved: check), ThreadStateBadge (Unsent: dashed
-  ring; Resolved: hollow ring), OutcomeBadge, ChangedMarker, OriginBadge (8 tints by machine id).
+  Approved, Retired), SnoozeBadge, AgentStatus (Agent waiting: ringed dot that pulses three times;
+  Not picked up yet: hollow dot; Picked up: grey dot and time; Approved: check), ThreadStateBadge
+  (Unsent: dashed ring; Resolved: hollow ring), OutcomeBadge, ChangedMarker, OriginBadge (8 tints by
+  machine id).
 - Cards (`.em-card`, `styles/threads.css`): 1 px `--border-1`, `--radius-lg`, `--shadow-1`; a
   36 px `--bg-sunken` head with the target in `--type-path` and a state pill; a 3 px left bar in
   `--thread-open` (draft, unsent, open), `--thread-sent`, `--thread-answered`, none when resolved.
@@ -319,12 +320,18 @@ Below 768 px; check at 390×844.
   only. Entrances ease with `--ease-out`. Reuse the keyframes `em-fade`, `em-sheet-up`,
   `em-sheet-right`, `em-sheet-left`, `em-tooltip`, `em-pulse` and `em-spin`.
 - Motion only confirms a change: an overlay or toast arrives, a control answers, a spinner waits,
-  the waiting dot pulses, a new inbox row fades from `--accent-tint` over 1 s. Only the pulse and
-  spinners loop. No decorative motion and no entrance over 240 ms.
+  a new inbox row fades from `--accent-tint` over 1 s. When waiting starts, the waiting dot pulses
+  three times (4.8 s), then holds still. Its ring sets it apart from the grey Picked up dot.
+  The review header also shows the words "Agent waiting", and an inbox row names the dot
+  "Agent waiting" for screen readers. Only spinners loop, and only while work runs. No decorative
+  motion and no entrance over 240 ms.
 - Animate opacity, transform, colour and shadow only, never size or position; a resize drag
   follows the pointer. Jumps to a thread, file, topic or heading are instant, never smooth.
-- CSS animations and transitions only, so `prefers-reduced-motion: reduce` cuts each to 1 ms
-  (`styles/base.css`); one-off highlights such as the inbox arrival are skipped there.
+- CSS animations and transitions only. `prefers-reduced-motion: reduce` cuts each to 1 ms and runs
+  every animation once (`animation-iteration-count: 1` in `styles/base.css`) so it shows its end
+  state and holds still. The waiting dot stays still and spinners stand still, while `aria-busy` and
+  the inactive button keep the busy state clear. One-off highlights such as the inbox arrival are
+  skipped there.
 
 ## 9. Copy
 
