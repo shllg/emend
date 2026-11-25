@@ -69,10 +69,16 @@ export class ReviewEvents {
     const state = this.waiting.get(ownedKey(ownerId, reviewId));
     if (!state) return false;
     if (state.active || state.until > this.now()) return true;
-    clearTimeout(state.timer);
-    this.waiting.delete(ownedKey(ownerId, reviewId));
-    this.emit(state.ownerId, { type: "waiting", reviewId, revision: state.revision });
+    this.endGrace(ownerId, reviewId);
     return false;
+  }
+  endGrace(ownerId: string, reviewId: string) {
+    const key = ownedKey(ownerId, reviewId);
+    const state = this.waiting.get(key);
+    if (!state || state.active > 0) return;
+    clearTimeout(state.timer);
+    this.waiting.delete(key);
+    this.emit(state.ownerId, { type: "waiting", reviewId, revision: state.revision });
   }
   beginWaiting(ownerId: string, reviewId: string, revision: number) {
     const count = this.waitingByOwner.get(ownerId) ?? 0;

@@ -55,7 +55,11 @@ export function deliveryRoutes(app: Hono<AppEnv>, deps: AppDeps) {
           throw error;
         }
       }
-      if (result) deps.events?.emit(principal.ownerId, { type: "claimed", reviewId, revision: result.revision });
+      if (result) {
+        endWaiting?.();
+        deps.events?.endGrace(principal.ownerId, reviewId);
+        deps.events?.emit(principal.ownerId, { type: "claimed", reviewId, revision: result.revision });
+      }
       return c.json(result ?? { kind: "pending", reviewId, waitedSeconds: Math.max(0, (deps.now() - start) / 1000) });
     } finally {
       wait?.cancel();

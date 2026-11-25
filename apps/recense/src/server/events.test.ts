@@ -95,6 +95,34 @@ test("waiting covers concurrent takes and 35 seconds of grace, emitting only tra
   expect(owner.mock.calls.map(([event]) => event)).toEqual(changes);
   expect(foreign).not.toHaveBeenCalled();
 });
+test("ending grace emits one waiting event for its owner only after the last take ends", () => {
+  const events = new ReviewEvents(Date.now);
+  const id = randomUUID();
+  const endOne = events.beginWaiting("a", id, 1);
+  const endTwo = events.beginWaiting("a", id, 2);
+  const endB = events.beginWaiting("b", id, 1);
+  endB();
+  onTestFinished(() => events.endGrace("b", id));
+  const a = vi.fn();
+  const b = vi.fn();
+  events.subscribe("a", null, a);
+  events.subscribe("b", null, b);
+
+  endOne();
+  events.endGrace("a", id);
+  expect(events.agentWaiting("a", id)).toBe(true);
+  expect(a).not.toHaveBeenCalled();
+  endTwo();
+  expect(events.agentWaiting("a", id)).toBe(true);
+  expect(a).not.toHaveBeenCalled();
+  events.endGrace("a", id);
+  expect(events.agentWaiting("a", id)).toBe(false);
+  expect(a).toHaveBeenCalledExactlyOnceWith({ type: "waiting", reviewId: id, revision: 2 });
+  events.endGrace("a", id);
+  expect(a).toHaveBeenCalledOnce();
+  expect(events.agentWaiting("b", id)).toBe(true);
+  expect(b).not.toHaveBeenCalled();
+});
 test.each(["viewed", "pins"] as const)(
   "a %s event without a revision preserves the waiting revision through expiry",
   async (type) => {
@@ -267,11 +295,14 @@ test("a Send arriving between the empty read and wait is not missed", async () =
   const result = await taking;
   expect(result).toMatchObject({ kind: "go", instructions: ["Between read and wait"] });
 });
-test("a 25-second take wakes on Send, without blocking other work", async () => {
+test("a 25-second take woken by a Send clears waiting before the owner receives claimed", async () => {
   const f = await mailboxFixture();
   onTestFinished(() => f.cleanup());
   const events = f.deps.events;
-  expect(events).toBeDefined();
+  const types: string[] = [];
+  events?.subscribe(f.ownerId, null, (event) => {
+    if ("reviewId" in event && event.reviewId === f.reviewId) types.push(event.type);
+  });
   const registered = nextWaiting(events, f.ownerId, f.reviewId);
   const controller = new AbortController();
   const waiting = f.take(25, controller.signal);
@@ -283,9 +314,45 @@ test("a 25-second take wakes on Send, without blocking other work", async () => 
   expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
   await f.send({ revision: 1, kind: "go", instruction: "Wake" });
   expect(await waiting).toMatchObject({ kind: "go", instructions: ["Wake"] });
-  expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
-  f.advance(35000);
   expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
+  expect(types).toEqual(["waiting", "send", "waiting", "claimed"]);
+});
+test("a take that claims a Send between rounds clears waiting immediately", async () => {
+  const f = await mailboxFixture();
+  onTestFinished(() => f.cleanup());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  await expectPendingAfterWait(f);
+  expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  await f.send({ revision: 1, kind: "go", instruction: "Between rounds" });
+  expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  expect(await f.take(25)).toMatchObject({ kind: "go", instructions: ["Between rounds"] });
+  expect(f.deps.events?.agentWaiting(f.ownerId, f.reviewId)).toBe(false);
+});
+test("waiting stays true across take rounds without another waiting event", async () => {
+  const f = await mailboxFixture();
+  onTestFinished(() => f.cleanup());
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const events = f.deps.events;
+  const changes = vi.fn();
+  events?.subscribe(f.ownerId, null, changes);
+  await expectPendingAfterWait(f);
+  expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  const registered = nextWaiting(events, f.ownerId, f.reviewId);
+  const controller = new AbortController();
+  const waiting = f.take(25, controller.signal);
+  onTestFinished(async () => {
+    controller.abort();
+    await waiting;
+  });
+  await registered;
+  expect(events?.agentWaiting(f.ownerId, f.reviewId)).toBe(true);
+  expect(changes).toHaveBeenCalledExactlyOnceWith({ type: "waiting", reviewId: f.reviewId, revision: 1 });
 });
 test("a take timeout returns pending and an aborted take releases waiting state", async () => {
   const f = await mailboxFixture();
