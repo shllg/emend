@@ -24,7 +24,7 @@ import { IMAGE_HEAD_BYTES } from "../publish/image-size.ts";
 import { abortable } from "../publish/lifecycle.ts";
 import { fileMediaType } from "../publish/media.ts";
 import { memoizedHeads, ownerHead } from "../publish/media-head.ts";
-import { validateNoteRanges } from "../publish/notes.ts";
+import { resolveNoteRanges } from "../publish/notes.ts";
 import { renderRevision } from "../publish/render.ts";
 import { type Executor, packIds, previousHtmlIds, type Work, type WorkResult } from "../publish/work.ts";
 import { derivedRowBytes } from "./bytes.ts";
@@ -234,7 +234,7 @@ export async function prepareImport(
           if (total > LIMITS.htmlDocWithAssetsBytes) throw new ApiError("too_large");
         }
       }
-      await validateNoteRanges(input.files, read, execute);
+      await resolveNoteRanges(input.files, read, execute);
       revisionsToCount.push({ id: revision.id, files: input.files });
       // Keep only this revision's and its predecessor's writeup heads; doc heads are not retained.
       const media = input.files

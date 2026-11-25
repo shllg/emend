@@ -29,6 +29,29 @@ test("notes preserve hostile text literally and view adds an id", () => {
   expect(PublishManifest.parse(manifest).files[0]?.notes).toEqual([note]);
   expect(PublishRequest.parse(request).files[0]?.notes).toEqual([note]);
 });
+test("publish accepts a whole-line quote, a range, or both", () => {
+  const { start, end, ...fields } = note;
+  const quote = "  first line\nsecond line ";
+  for (const placement of [{ start, end }, { quote }, { quote, start, end }]) {
+    const input = { ...fields, ...placement };
+    expect(AgentNote.parse(input)).toEqual(input);
+  }
+  for (const placement of [
+    {},
+    { start },
+    { end },
+    { quote, start },
+    { quote, end },
+    { quote: " \r\n\t" },
+    { quote: "x".repeat(2001) },
+  ])
+    expect(AgentNote.safeParse({ ...fields, ...placement }).success).toBe(false);
+  const view = { ...fields, id: "11111111-1111-4111-8111-111111111111" };
+  for (const placement of [{ quote }, { quote, start }, { quote, end }])
+    expect(AgentNoteView.safeParse({ ...view, ...placement }).success).toBe(false);
+  expect(AgentNoteView.parse({ ...view, start, end, quote })).toEqual({ ...view, start, end });
+});
+
 test("only diff entries accept notes, even when empty", () => {
   for (const notes of [[], [note]]) {
     expect(PublishManifest.safeParse({ ...manifest, files: [{ ...file, role: "doc", notes }] }).success).toBe(false);

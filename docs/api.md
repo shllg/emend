@@ -1133,8 +1133,9 @@ or the revision's counting budget, and for revisions published before the field 
 The app also uses counts from diffs it has loaded. It marks a total as partial while a changed
 text file has neither server nor loaded counts; the mark goes once every such file has loaded.
 
-`notes` is present only for files with agent notes. Each `AgentNoteView` adds a UUID `id` to
-`AgentNote` below. Notes are read-only revision content, separate from reviewer comments.
+`notes` is present only for files with agent notes. Each `AgentNoteView` carries a UUID `id`, the side,
+the resolved `start` and `end`, a `summary`, and optional `rationale` and `ref`. Notes are read-only
+revision content, separate from reviewer comments.
 `oldPath`, `status`, `topic` and `flag` are nullable. Files are in their stored order; assets
 are omitted. `hasOld` and `hasNew` indicate stored sides, without exposing blob hashes.
 For tracked diff files, `viewed` is `"viewed"` when the marked old/new blob pair and rename
@@ -1771,7 +1772,7 @@ object construction (when Zod captures this setting), so validation never probes
 `Function` under the app CSP. The normal contract index also exports the function.
 
 `Capabilities = { api: 1, version: string, features: string[] }`. The current feature list is
-`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "review-pin-order", "agent-review-key", "diff-images"]`,
+`["attach", "html-docs", "mcp", "review-lifecycle", "review-bin", "review-groups", "review-pins", "review-pin-order", "agent-review-key", "diff-images", "note-quotes"]`,
 plus `server-stop` when the server supports stopping through the API; clients accept additional feature strings.
 
 `PairingPurpose = "device" | "machine"`. `PairingRequest = { purpose? }` defaults to `"device"`.
@@ -1921,7 +1922,7 @@ Unknown keys, including owner ids, moved-to URLs, content keys, media types, `pl
 | `files` | `id, revisionId, path, oldPath, role, status, topicSlug, ord, oldBlob, newBlob, renderedBlob, flag, parentDocId, title?, view?: DocView, look?: "recense" \| "custom" \| null, colorScheme?: "light" \| null`; nullable sides, status, topic, flag, parent |
 | `docAssets` | `revisionId, docId, assetId` |
 | `diffImages` | `fileId, side, blob, flag` per image side of a diff row in `files`. Each old or new side occurs once per file and carries either a SHA-256 blob or the oversized flag, with the other field null. |
-| `agentNotes` | `id, fileId, ord` plus `AgentNote`; optional array, ordered per file, at most 8 per file and 64 per revision |
+| `agentNotes` | `fileId, ord` plus `AgentNoteView`; optional array, ordered per file, at most 8 per file and 64 per revision |
 | `writeups` | `id, revisionId, sourceBlob, renderedBlob` |
 | `threads` | `id, reviewId, target, state, createdRevisionId, createdAt, updatedAt` |
 | `comments` | `id, reviewId, threadId, author, body, outcome, sendId, createdAt, updatedAt`; user outcome is null; agent outcome is required and sendId null |
@@ -2112,22 +2113,32 @@ media row as an image asset. The writeup embeds an image with
 `![Alt](path)`.
 
 Only a `diff` entry accepts `notes`; docs and assets reject the field, even an empty array.
-`AgentNote = { side: "old" | "new", start, end, summary, rationale?, ref? }` uses positive integer
-line numbers, with `end >= start`. `summary` is 1–160 characters on one line; `rationale` is at
+`AgentNote = { side: "old" | "new", start?, end?, quote?, summary, rationale?, ref? }` requires a quote,
+a range, or both. A range has two positive integer line numbers with `end >= start`. A quote
+has 1–2000 characters and includes at least one non-whitespace character.
+`summary` is 1–160 characters on one line. `rationale` is at
 most 1200 characters. Neither summary nor a present rationale may be blank (whitespace only).
 Both are plain text, never rendered as Markdown or HTML. `ref` is one
 capital ASCII letter (`A`–`Z`), unique within the file's topic in that revision, including Other
 changes. There are at most `agentNotesPerFile` (8) per file and `agentNotesPerRevision` (64) per
-revision. The CLI carries notes unchanged into publish.
+revision. The CLI carries notes unchanged into publish. To send a quote over HTTP, the destination
+must advertise `note-quotes`. Otherwise the CLI refuses publish and names the file and note index.
 
-Publish and import check every note against the stored side: every line in `start..end` must
-exist, from 1 through that side's line count. Unchanged lines within a file with changed content
-are valid and the diff opens collapsed context around notes. Equal old and new blobs (a pure
-rename or mode-only change) refuse notes with "the file's content does not change" and the file
-and zero-based note index. A missing side, a flagged file (binary or oversized), or an
-out-of-bounds range is refused with `400 invalid_request`, naming the file and zero-based note
-index. Notes are never silently dropped. They are immutable revision content: publishing again
-adds new rows, and export/import carry them with their ids and order. There is no note-edit API.
+Publish matches the quote against the named side decoded as UTF-8. It splits both texts on LF,
+including a final line without LF. It drops whitespace-only lines at either end of the quote
+and trims leading and trailing whitespace (including CR) from each line before comparison.
+The remaining quote lines must equal consecutive whole file lines. Interior blank lines match
+whitespace-only file lines. Exactly one match places the note on the first through last matched
+line, counting from 1. Publish refuses a missing match, multiple matches (even with a range),
+or a supplied range that differs from the unique match. It stores only the resolved range.
+
+For range-only notes, publish and import check that every line in `start..end` exists on the
+stored side. Unchanged lines within a file with changed content are valid and the diff opens
+collapsed context around notes. A missing side, a flagged file (binary or oversized), an
+out-of-bounds range, or identical old and new blobs (a pure rename or mode-only change) also
+refuse the note. These refusals return `400 invalid_request` with the file and zero-based note
+index. Notes are immutable revision content. Publishing again adds new rows. Revision views
+and export/import bundles carry ranges only and preserve note ids and order. There is no note-edit API.
 A topic writeup may cite a note with `<span class="ref">ref A</span>`; matching refs navigate to
 the note in that topic, while unmatched refs remain text. Chips are offered only for notes on
 files with a topic; refs remain unique among files without a topic (shown as "Other files").

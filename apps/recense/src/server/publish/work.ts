@@ -47,6 +47,7 @@ import {
   stripHtmlLook,
 } from "@recense/core";
 import { type ImageSize, imageSize } from "./image-size.ts";
+import { matchNoteQuotes, type QuoteMatch } from "./note-quotes.ts";
 
 /** One comment's rendered HTML is at most this many characters; a larger one is null. */
 export const COMMENT_HTML_CHARS = 262144;
@@ -75,6 +76,7 @@ export type Work =
       media?: [string, string][];
       parts?: boolean;
     }
+  | { kind: "note-quotes"; bytes: ArrayBuffer; quotes: string[] }
   | { kind: "line-count"; bytes: ArrayBuffer }
   | { kind: "writeup-source"; bytes: ArrayBuffer }
   | { kind: "placement-doc"; format: "html" | "markdown" | "writeup"; bytes: ArrayBuffer }
@@ -140,6 +142,7 @@ export type WorkResult =
   | { kind: "doc-images"; references: string[]; capped: boolean }
   | { kind: "image-sizes"; sizes: [string, ImageSize][] }
   | ({ kind: "doc-metadata" } & DocMetadata)
+  | { kind: "note-quotes"; count: number; matches: Map<string, QuoteMatch> }
   | { kind: "line-count"; count: number }
   | { kind: "writeup-source"; source: WriteupInput; links?: PublishLinks; repoUrl?: string; issueRefs?: IssueRefs }
   | ({ kind: "placement-doc" } & EncodedPlacementDoc)
@@ -244,6 +247,7 @@ export const executeWork: Executor = async (work) => {
     const blocks = await renderMetadataBlocks(decode(work.bytes), new Map(work.media));
     return { kind: "doc-metadata", title: markdownTitle(blocks), headings: markdownHeadings(blocks) };
   }
+  if (work.kind === "note-quotes") return { kind: "note-quotes", ...matchNoteQuotes(work.bytes, work.quotes) };
   if (work.kind === "line-count") {
     // Count LF only (including CRLF): lone CR must not invent selectable lines beyond the diff's LF-based lines.
     const bytes = new Uint8Array(work.bytes);

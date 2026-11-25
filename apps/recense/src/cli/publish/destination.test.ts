@@ -1,5 +1,11 @@
-import { DIFF_IMAGES_FEATURE, type PublishFile, type PublishRequest } from "@recense/contract";
+import {
+  AGENT_NOTE_QUOTES_FEATURE,
+  DIFF_IMAGES_FEATURE,
+  type PublishFile,
+  type PublishRequest,
+} from "@recense/contract";
 import { expect, test } from "vitest";
+import { CliError } from "../http.ts";
 import { publishForDestination } from "./destination.ts";
 
 test("legacy destinations receive text, docs and assets even when images share their hashes", () => {
@@ -51,4 +57,40 @@ test("legacy destinations receive text, docs and assets even when images share t
   const current = publishForDestination(request, blobs, [DIFF_IMAGES_FEATURE]);
   expect(current.request.files[0]?.image).toEqual(file.image);
   expect(current.blobs.has(only)).toBe(true);
+});
+
+test("note quotes require destination support and retain the original request when supported", () => {
+  const request: PublishRequest = {
+    reviewKey: "a".repeat(64),
+    repo: null,
+    branch: null,
+    title: "Synthetic",
+    base: null,
+    head: null,
+    topics: [],
+    writeup: { overview: "", tldr: "", decisions: null, topics: {} },
+    files: [
+      {
+        path: "src/quoted\u202eline.ts",
+        role: "diff",
+        flag: null,
+        oldPath: null,
+        oldBlob: null,
+        newBlob: "b".repeat(64),
+        notes: [
+          { side: "new", start: 1, end: 1, summary: "First" },
+          { side: "new", quote: "next", start: 2, end: 2, summary: "Next" },
+        ],
+      },
+    ],
+  };
+  const blobs = new Map();
+  const legacy = () => publishForDestination(request, blobs, [DIFF_IMAGES_FEATURE]);
+  expect(legacy).toThrow(CliError);
+  expect(legacy).toThrow(
+    "Agent note 1 in src/quoted\\u{202e}line.ts: the recense server needs an update to place note quotes.",
+  );
+  const supported = publishForDestination(request, blobs, [AGENT_NOTE_QUOTES_FEATURE]);
+  expect(supported.request).toBe(request);
+  expect(supported.blobs).toBe(blobs);
 });

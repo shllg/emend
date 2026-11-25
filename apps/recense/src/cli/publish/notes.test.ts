@@ -31,7 +31,10 @@ test("the CLI carries manifest notes into resolved and re-keyed publish requests
   const root = join(dir, "repo");
   try {
     await mkdir(join(root, ".git"), { recursive: true });
-    const notes = [{ side: "new" as const, start: 1, end: 1, summary: "A boundary.", ref: "A" }];
+    const notes = [
+      { side: "new" as const, start: 1, end: 1, summary: "A boundary.", ref: "A" },
+      { side: "new" as const, quote: "new", summary: "The added line." },
+    ];
     const result = await resolvePublish(
       {
         version: 1,
@@ -58,7 +61,7 @@ test("the CLI carries manifest notes into resolved and re-keyed publish requests
           ...result.forInstance(id),
           files: result.request.files.map((file) => ({
             ...file,
-            notes: file.notes?.map((note) => ({ ...note, end: 2 })),
+            notes: file.notes?.map((note) => (note.start === undefined ? note : { ...note, end: 2 })),
           })),
         }),
       }),

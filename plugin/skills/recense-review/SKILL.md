@@ -250,9 +250,13 @@ Never write “this adds a method”. Keep notes in single digits across a large
 The `summary` is one sentence of 15 words or fewer. Add a short `rationale` when it helps.
 Both fields are plain text, never Markdown or HTML. Notes are read-only and belong to the revision.
 
-Put `notes` only on a `diff` file. Take every range from the patch's `@@` headers or the file.
-Never guess a line number. Publish refuses ranges outside the stored diff side and names the file and note index.
-It also refuses a missing side or a flagged file. Fix the note and publish again; nothing is silently dropped.
+Put `notes` only on a `diff` file. Give every note a `quote` of the whole lines it covers.
+Copy from the `new` side for added or kept lines and the `old` side for removed lines.
+Omit `@@` hunk headers, line numbers and the patch's `+`, `-` or space prefix.
+Usually one to three lines suffice. Quote enough to appear only once on that side.
+Leave out `start` and `end` because publish finds the lines.
+If the quote matches nowhere or more than once, publish refuses it and names the file and note index.
+Fix the copy or add a neighbouring line and publish again. A missing side or flagged file also refuses the note.
 Publish and import refuse notes when the file's old and new content is identical.
 Use at most eight notes per file and 64 per revision.
 

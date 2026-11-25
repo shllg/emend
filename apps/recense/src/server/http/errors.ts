@@ -56,6 +56,9 @@ const DETAILS = {
 const NOTE_REASONS = {
   range: "the range must exist on a stored, unflagged file side.",
   unchanged: "the file's content does not change.",
+  quote_missing: "the quote matches no lines on the note's side.",
+  quote_ambiguous: "the quote matches more than one place; quote more lines.",
+  quote_range: "the quote and the start and end name different lines.",
 } as const;
 type NoteDetail = { kind: "agent_note"; path: string; index: number; reason: keyof typeof NOTE_REASONS };
 type Detail = keyof typeof DETAILS | NoteDetail;

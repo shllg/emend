@@ -52,7 +52,21 @@ async function view(fixture: typeof f, id: string, seq = 1) {
 }
 test("notes survive publish, revision view, export and import as immutable plain text", async () => {
   const body = await input();
-  const published = await publish(body);
+  const { start, end, ...fields } = note;
+  const published = await publish({
+    ...body,
+    files: body.files.map((file) =>
+      file.notes ? { ...file, notes: [{ ...fields, quote: "\n  same  \n\tline\r\n  " }] } : file,
+    ),
+  });
+  expect(
+    await f.db.read((q) =>
+      q
+        .select({ start: agentNotes.startLine, end: agentNotes.endLine })
+        .from(agentNotes)
+        .where(eq(agentNotes.ownerId, f.ownerId)),
+    ),
+  ).toEqual([{ start, end }]);
   const first = await view(f, published.reviewId);
   expect(first.files[0]?.notes).toEqual([{ ...note, id: expect.any(String) }]);
   expect(first.files[1]).not.toHaveProperty("notes");
@@ -87,7 +101,9 @@ test("notes survive publish, revision view, export and import as immutable plain
     snapshot(q, f.ownerId, f.instanceId, published.reviewId, "https://example.test", f.deps.now(), false),
   );
   if (exported.kind !== "bundle") throw new Error("Missing export");
-  expect(exported.bundle.agentNotes?.find((n) => n.id === id)).toMatchObject(note);
+  const exportedNote = exported.bundle.agentNotes?.find((n) => n.id === id);
+  expect(exportedNote).toMatchObject(note);
+  expect(exportedNote).not.toHaveProperty("quote");
   const hub = await mailboxFixture();
   try {
     const pairing = PairingCreated.parse(await (await hub.request("/pairings", "POST", { purpose: "machine" })).json());
@@ -144,6 +160,51 @@ test("notes survive publish, revision view, export and import as immutable plain
     expect((await view(hub, published.reviewId)).files[0]?.notes).toEqual(first.files[0]?.notes);
   } finally {
     await hub.cleanup();
+  }
+});
+
+test("capabilities advertise note quotes", async () => {
+  expect(await (await f.request("/capabilities", "GET")).json()).toMatchObject({
+    features: expect.arrayContaining(["note-quotes"]),
+  });
+});
+
+test("quotes resolve on the named side and accept a matching supplied range", async () => {
+  const body = await input();
+  const published = await publish({
+    ...body,
+    files: [
+      {
+        ...body.files[0],
+        notes: [
+          { side: "old", summary: "Old ending", quote: "line\nbefore" },
+          { side: "new", summary: "New ending", quote: "changed", start: 3, end: 3 },
+        ],
+      },
+    ],
+  });
+  expect((await view(f, published.reviewId)).files[0]?.notes).toEqual([
+    { id: expect.any(String), side: "old", summary: "Old ending", start: 2, end: 3 },
+    { id: expect.any(String), side: "new", summary: "New ending", start: 3, end: 3 },
+  ]);
+});
+
+test("a missing, ambiguous or disagreeing quote refuses publish with the file and note index", async () => {
+  const body = await input();
+  const newBlob = await f.deps.blobs.put(f.ownerId, Buffer.from("one\ntwo\none\n"), "text/plain");
+  for (const [placement, reason] of [
+    [{ quote: "gone" }, "the quote matches no lines on the note's side."],
+    [{ quote: "one" }, "the quote matches more than one place; quote more lines."],
+    [{ quote: "one", start: 1, end: 1 }, "the quote matches more than one place; quote more lines."],
+    [{ quote: "two", start: 1, end: 1 }, "the quote and the start and end name different lines."],
+  ] as const) {
+    const file = { ...body.files[0], newBlob, notes: [note, { side: "new", summary: "Check", ...placement }] };
+    const response = await f.request("/publish", "POST", { ...body, files: [file] }, "agent");
+    expect(response.status).toBe(400);
+    expect(ErrorBody.parse(await response.json()).error).toEqual({
+      code: "invalid_request",
+      message: `Agent note 1 in src/a.ts: ${reason}`,
+    });
   }
 });
 

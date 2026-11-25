@@ -83,6 +83,7 @@ export function workerExecutor(timeouts = { render: 10000, place: 30000 }): Work
                   work.kind === "resection" ||
                   work.kind === "placement-doc" ||
                   work.kind === "writeup-source" ||
+                  work.kind === "note-quotes" ||
                   work.kind === "line-count" ||
                   work.kind === "doc-images"
                 ? [work.bytes]

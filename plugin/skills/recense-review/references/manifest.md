@@ -257,9 +257,12 @@ Only `diff` files accept `notes`. Use single-digit notes on a large change, at m
 Each note earns its place with a decision, trade-off, risk, or something easy to get wrong.
 Never write “this adds a method”. Write `summary` as one sentence of 15 words or fewer, at most 160 characters.
 It must fit on one line. Optional `rationale` has at most 1200 characters. Both fields are plain text, never Markdown or HTML.
-Set `side` to `old` or `new`. Take `start` and `end` from the patch's `@@` headers or the file; never guess.
-They are positive integers, with `end` at least `start`.
-Publish refuses a range outside the stored diff side, a missing side, or a flagged file, naming the file and note index.
+Give every note a `quote` of whole lines from its `side` (`new` for added or kept lines, `old` for removed lines).
+Omit `@@` hunk headers, line numbers and the patch's `+`, `-` or space prefix. Usually one to three lines
+suffice. Include enough to appear only once on that side, up to 2000 characters. Leave out `start` and `end`
+because publish finds the lines. If the quote matches nowhere or more than once, publish refuses it and names
+the file and note index. Fix the copy or add a neighbouring line and publish again. Publish also refuses a missing
+side or a flagged file.
 Unchanged stored lines are valid in a file with changed content.
 Publish and import refuse notes when the file's old and new content is identical.
 Notes are read-only revision content, carried by export and import.
@@ -301,8 +304,7 @@ Fix those fields and publish again.
       "notes": [
         {
           "side": "new",
-          "start": 38,
-          "end": 44,
+          "quote": "for (let attempt = 1; attempt <= 3; attempt++) {",
           "summary": "The first call consumes one attempt, keeping the retry budget finite.",
           "rationale": "Counting only retries would allow a fourth call.",
           "ref": "A"
