@@ -86,6 +86,7 @@ const gallery = empty
 export const FrameToParent = span
   .extend({ type: literal("recense:anchor") })
   .or(empty.extend({ type: literal("recense:ready") }))
+  .or(empty.extend({ type: literal("recense:deselect") }))
   .or(empty.extend({ type: literal("recense:issue"), number: ThreadView.shape.createdOn.max(9_999_999) }))
   .or(HtmlPosition.safeExtend({ type: literal("recense:position") }))
   .or(gallery)
@@ -100,6 +101,7 @@ export const FrameToParent = span
 export type DocNavigation = Extract<typeof FrameToParent._output, { type: "recense:navigate" }>;
 export const ParentToFrame = empty
   .extend({ type: literal("recense:highlight"), anchors: span.extend({ threadId }).array() })
+  .or(empty.extend({ type: literal("recense:clear-selection") }))
   .or(empty.extend({ type: literal("recense:repo"), url: RepoUrl }))
   .or(HtmlDocChanges.safeExtend({ type: literal("recense:changed") }))
   .or(diagramResult.extend(diagramAddress))

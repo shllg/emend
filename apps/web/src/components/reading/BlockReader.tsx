@@ -20,6 +20,7 @@ import { useReaderThreads } from "./use-reader-threads.ts";
 import { WriteupDetails } from "./WriteupDetails.tsx";
 
 const emptyFiles: RevisionView["files"] = [];
+const hiddenByFold = "[hidden], details:not([open]) > :not(summary)";
 
 export type ReaderProps = {
   reviewId: string;
@@ -110,14 +111,17 @@ export function BlockReader({
   const root = useRef<HTMLDivElement>(null);
   useAgentNoteRefs(root, groups, files, onNote);
   const selectionPrompt = useRef<HTMLDivElement>(null);
+  const editorWrapper = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   // A press on the prompt: the target latched at pointerdown, and until when selection changes are ignored
   // (Infinity while the pointer is down, then 600 ms past its release).
   const latched = useRef<Target | null>(null);
   const guardUntil = useRef(0);
   const mouseHeld = useRef(false);
-  const [target, setTarget] = useState<Target | null>(null);
-  const [composing, setComposing] = useState(false);
+  const [selectionTarget, setSelectionTarget] = useState<Target | null>(null);
+  const hasSelectionTarget = selectionTarget !== null;
+  const [formTarget, setFormTarget] = useState<Target | null>(null);
+  const composing = formTarget !== null;
   const [error, setError] = useState("");
   const phone = useLayout() === "phone";
   const screenshotOpener = useRef<HTMLElement | null>(null);
@@ -133,7 +137,7 @@ export function BlockReader({
     () => {
       latched.current = null;
       guardUntil.current = 0;
-      if (!composing) setTarget(null);
+      setSelectionTarget(null);
       setError("");
     },
     (blockId) => {
@@ -153,20 +157,21 @@ export function BlockReader({
         ? document.activeElement
         : null);
     claimDraft(draftKey(reviewId, next), "reading");
-    setTarget(next);
-    setComposing(true);
+    setFormTarget(next);
+    setSelectionTarget(null);
     setError("");
   };
   const close = () => {
     latched.current = null;
-    setComposing(false);
-    setTarget(null);
+    setFormTarget(null);
+    setSelectionTarget(null);
+    setError("");
     // On phones Sheet restores focus after its focus trap unmounts.
     if (!phone && screenshotOpener.current?.isConnected) screenshotOpener.current.focus({ preventScroll: true });
   };
   useEffect(() => {
-    if (!target) latched.current = null;
-  }, [target]);
+    if (!selectionTarget) latched.current = null;
+  }, [selectionTarget]);
   const changes = new Map(changedBlocks.map((block) => [block.blockId, block.revision]));
   const latestChange = (blocks: RenderedBlock[]) =>
     blocks.reduce((latest, block) => Math.max(latest, changes.get(block.id) ?? 0), 0) || undefined;
@@ -222,8 +227,24 @@ export function BlockReader({
     composing: composing || !!resumedBlockId,
   });
   useEffect(() => {
+    if (readOnly || !composing || !hasSelectionTarget || !root.current) return;
+    const observer = new MutationObserver(() => {
+      if (!editorWrapper.current?.closest(hiddenByFold)) {
+        setSelectionTarget(null);
+        setError("");
+      }
+    });
+    observer.observe(root.current, { subtree: true, attributes: true, attributeFilter: ["hidden", "open"] });
+    return () => observer.disconnect();
+  }, [readOnly, composing, hasSelectionTarget]);
+  useEffect(() => {
     const capture = (event?: Event) => {
-      if (readOnly || !root.current || composing) return;
+      if (readOnly || !root.current) return;
+      if (composing && !editorWrapper.current?.closest(hiddenByFold)) {
+        setSelectionTarget(null);
+        setError("");
+        return;
+      }
       if (event?.target instanceof Node && selectionPrompt.current?.contains(event.target)) return;
       const selection = window.getSelection();
       if (!event) {
@@ -235,19 +256,19 @@ export function BlockReader({
           !selection.isCollapsed &&
           !(root.current.contains(selection.anchorNode) && root.current.contains(selection.focusNode))
         ) {
-          setTarget(null);
+          setSelectionTarget(null);
           setError("");
           return;
         }
       }
       if (!selection || selection.isCollapsed) {
-        setTarget(null);
+        setSelectionTarget(null);
         setError("");
         return;
       }
       const anchor = selectionToAnchor(selection, root.current);
       if ("error" in anchor) {
-        setTarget(null);
+        setSelectionTarget(null);
         setError(
           anchor.error === "cross-block"
             ? "Select text within one paragraph"
@@ -257,15 +278,17 @@ export function BlockReader({
         );
         return;
       }
-      if ("slug" in anchor) setTarget({ kind: "topic", ...anchor });
+      if ("slug" in anchor) setSelectionTarget({ kind: "topic", ...anchor });
       else {
         const path = targets.get(anchor.blockId);
-        setTarget(path === undefined ? { kind: "writeup-span", ...anchor } : { kind: "doc-span", path, ...anchor });
+        setSelectionTarget(
+          path === undefined ? { kind: "writeup-span", ...anchor } : { kind: "doc-span", path, ...anchor },
+        );
       }
       setError("");
     };
     const element = root.current;
-    element?.addEventListener("mouseup", capture);
+    document.addEventListener("mouseup", capture);
     element?.addEventListener("keyup", capture);
     let timer = 0;
     const onSelectionChange = () => {
@@ -291,15 +314,15 @@ export function BlockReader({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("pointerup", onPointerEnd, true);
       document.removeEventListener("pointercancel", onPointerEnd, true);
-      element?.removeEventListener("mouseup", capture);
+      document.removeEventListener("mouseup", capture);
       element?.removeEventListener("keyup", capture);
     };
   }, [readOnly, composing, targets]);
-  const composer = !readOnly && composing && target && (
+  const composer = !readOnly && formTarget && (
     <Composer
       reviewId={reviewId}
       revision={revision}
-      target={target}
+      target={formTarget}
       topics={topics}
       onSaved={close}
       onCancel={close}
@@ -308,7 +331,11 @@ export function BlockReader({
           ? opener.current
           : (root.current?.closest<HTMLElement>("[data-reading-scroll]") ?? root.current)
       }
-      wrap={(editor) => <div className="mt-3">{editor}</div>}
+      wrap={(editor) => (
+        <div ref={editorWrapper} className="mt-3">
+          {editor}
+        </div>
+      )}
     />
   );
   const renderBlocks = (blocks: RenderedBlock[], path?: string, presentation?: ReaderGroup["presentation"]) =>
@@ -320,7 +347,7 @@ export function BlockReader({
         changedIn={presentation === "newInRevision" ? undefined : changes.get(block.id)}
         continuesChange={index > 0 && changes.get(blocks[index - 1]?.id ?? "") === changes.get(block.id)}
         commenting={
-          resumedBlockId === block.id || (composing && !!target && "blockId" in target && target.blockId === block.id)
+          resumedBlockId === block.id || (!!formTarget && "blockId" in formTarget && formTarget.blockId === block.id)
         }
         onComment={() => {
           const anchor = blockAnchor(block);
@@ -330,7 +357,7 @@ export function BlockReader({
           );
         }}
       >
-        {target && "blockId" in target && target.blockId === block.id && composer}
+        {formTarget && "blockId" in formTarget && formTarget.blockId === block.id && composer}
       </Block>
     ));
   const renderNews = (news: NonNullable<ReaderGroup["news"]>, path?: string) => (
@@ -360,7 +387,7 @@ export function BlockReader({
             headingId={`${headingBase}-${index}`}
             changedIn={group.presentation === "newInRevision" ? undefined : latestChange(groupBlocks(group))}
             onCommentTopic={(slug, from) => openComposer({ kind: "topic", slug }, from)}
-            discussion={group.topic && target?.kind === "topic" && target.slug === group.topic.slug && composer}
+            discussion={group.topic && formTarget?.kind === "topic" && formTarget.slug === group.topic.slug && composer}
           >
             {group.content}
             {group.news && (
@@ -467,7 +494,7 @@ export function BlockReader({
         changedBlocks={changedBlocks}
         topics={topics}
       />
-      {!readOnly && !composing && (error || target) && (
+      {!readOnly && (error || selectionTarget) && (
         <div
           ref={selectionPrompt}
           className="sticky bottom-0 space-y-3 rounded-lg border border-line-2 bg-raised p-3 shadow-2"
@@ -480,7 +507,7 @@ export function BlockReader({
           }}
         >
           {error && <p role="status">{error}</p>}
-          {target && (
+          {selectionTarget && (
             <Button
               variant="primary"
               size="sm"
@@ -488,13 +515,13 @@ export function BlockReader({
               // Keep the selection and its native handles: a press here must not move focus or collapse it.
               onPointerDown={(event) => {
                 event.preventDefault();
-                latched.current = target;
+                latched.current = selectionTarget;
                 guardUntil.current = Number.POSITIVE_INFINITY;
               }}
               onClick={() => {
                 const latch = Date.now() < guardUntil.current ? latched.current : null;
                 latched.current = null;
-                openComposer(latch ?? target);
+                openComposer(latch ?? selectionTarget);
               }}
             >
               Comment on selection

@@ -108,6 +108,7 @@ export function HtmlDocFrame({
   ) as ReturnType<typeof listDrafts>;
   const frame = useRef<HTMLIFrameElement>(null);
   const root = useRef<HTMLDivElement>(null);
+  const selectionPrompt = useRef<HTMLDivElement>(null);
   const loads = useRef(0);
   const gone = useRef(false);
   const [away, setAway] = useState(false);
@@ -116,8 +117,10 @@ export function HtmlDocFrame({
   const readyNow = useRef(false);
   const repoSent = useRef(false);
   const [ready, setReady] = useState(0);
-  const [target, setTarget] = useState<HtmlSpanTarget | null>(null);
-  const [composing, setComposing] = useState(false);
+  const [selectionTarget, setSelectionTarget] = useState<HtmlSpanTarget | null>(null);
+  const hasSelectionTarget = selectionTarget !== null;
+  const [formTarget, setFormTarget] = useState<HtmlSpanTarget | null>(null);
+  const composing = formTarget !== null;
   const [show, setShow] = useState<HtmlNavigation>();
   const [gallery, setGallery] = useState<{ items: LightboxSubject[]; index: number } | null>(null);
   const [diagramJob, setDiagramJob] = useState<DiagramJob | null>(null);
@@ -127,6 +130,7 @@ export function HtmlDocFrame({
   const mountFrame = useCallback((element: HTMLIFrameElement | null) => {
     frame.current = element;
     if (element) {
+      setSelectionTarget(null);
       setGallery(null);
       setDiagramJob(null);
       loads.current = 0;
@@ -188,6 +192,46 @@ export function HtmlDocFrame({
   const post = useCallback((message: ParentToFrame) => {
     if (readyNow.current && !gone.current) frame.current?.contentWindow?.postMessage(message, "*");
   }, []);
+  const retireSelection = useCallback(() => {
+    setSelectionTarget(null);
+    post({ type: "recense:clear-selection" });
+  }, [post]);
+  useEffect(() => {
+    if (readOnly) return;
+    // A touch selection may still be settling in the frame before its first anchor arrives.
+    const onPointerUp = (event: PointerEvent) => {
+      if (event.target instanceof Node && selectionPrompt.current?.contains(event.target)) return;
+      retireSelection();
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || selectionPrompt.current?.contains(target)) return;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target.isContentEditable
+      )
+        retireSelection();
+    };
+    document.addEventListener("pointerup", onPointerUp, true);
+    document.addEventListener("focusin", onFocusIn, true);
+    return () => {
+      document.removeEventListener("pointerup", onPointerUp, true);
+      document.removeEventListener("focusin", onFocusIn, true);
+    };
+  }, [readOnly, retireSelection]);
+  useEffect(() => {
+    if (readOnly || !hasSelectionTarget) return;
+    const onSelectionChange = () => {
+      if (document.activeElement === frame.current) return;
+      const selection = document.getSelection();
+      if (selection && !selection.isCollapsed && !selectionPrompt.current?.contains(selection.anchorNode))
+        retireSelection();
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [readOnly, hasSelectionTarget, retireSelection]);
   const markAway = useCallback(() => {
     gone.current = true;
     readyNow.current = false;
@@ -195,8 +239,8 @@ export function HtmlDocFrame({
     setGallery(null);
     setDiagramJob(null);
     setReady(0);
-    if (!composing) setTarget(null);
-  }, [composing]);
+    setSelectionTarget(null);
+  }, []);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (gone.current || !frame.current?.contentWindow || event.source !== frame.current.contentWindow) return;
@@ -244,9 +288,10 @@ export function HtmlDocFrame({
           index: kept.indexOf(clicked),
         });
       } else if (parsed.data.type === "recense:navigate") onNavigate?.(parsed.data);
-      else if (!readOnly && !composing && !composerOpen) {
+      else if (parsed.data.type === "recense:deselect") setSelectionTarget(null);
+      else if (!readOnly && !composerOpen && !(composing && commentsOpen)) {
         const { quote, prefix, suffix } = parsed.data;
-        setTarget({ kind: "html-span", path, quote, prefix, suffix });
+        setSelectionTarget({ kind: "html-span", path, quote, prefix, suffix });
       }
     };
     window.addEventListener("message", receive);
@@ -258,6 +303,7 @@ export function HtmlDocFrame({
     checkedRepoUrl,
     images,
     composing,
+    commentsOpen,
     composerOpen,
     onNavigate,
     headings,
@@ -357,8 +403,8 @@ export function HtmlDocFrame({
     lastScroll.current = show;
   }, [ready, show, placed, reading]);
   const close = () => {
-    setComposing(false);
-    setTarget(null);
+    setFormTarget(null);
+    setSelectionTarget(null);
   };
   return (
     <div ref={root} tabIndex={-1} className="em-html-doc" id={`html-doc-${path}`}>
@@ -433,36 +479,37 @@ export function HtmlDocFrame({
               key={draft.key}
               onClick={() => {
                 if (draft.target?.kind !== "html-span") return;
-                setTarget(draft.target);
+                setFormTarget(draft.target);
+                setSelectionTarget(null);
                 claimDraft(draft.key, "reading");
-                setComposing(true);
               }}
             >
               Resume selection comment
             </Button>
           ))}
-        {!readOnly && target && composing && !composerOpen && (
+        {!readOnly && formTarget && !composerOpen && (
           <Composer
             reviewId={reviewId}
             revision={revision}
-            target={target}
+            target={formTarget}
             topics={topics}
             onSaved={close}
-            onCancel={() => setComposing(false)}
+            onCancel={close}
             returnFocus={() => returnFocus?.() ?? root.current}
           />
         )}
       </Sheet>
-      {!readOnly && target && !composing && !composerOpen && (
-        <div className="em-html-selection">
+      {!readOnly && selectionTarget && !composerOpen && !(composing && commentsOpen) && (
+        <div ref={selectionPrompt} className="em-html-selection">
           <Button
             variant="primary"
             size="sm"
             icon={TextSelect}
             onClick={() => {
-              claimDraft(draftKey(reviewId, target), "reading");
+              claimDraft(draftKey(reviewId, selectionTarget), "reading");
+              setFormTarget(selectionTarget);
+              setSelectionTarget(null);
               onCommentsOpenChange(true);
-              setComposing(true);
             }}
           >
             Comment on selection

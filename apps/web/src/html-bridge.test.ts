@@ -749,6 +749,106 @@ test("bridge posts a touch selection from a debounced selectionchange and keeps 
   }
 });
 
+test.each(["mouse", "touch"])("bridge reports a collapsed %s selection once capture runs", async (pointerType) => {
+  vi.useFakeTimers();
+  const b = bridge("<p>Seeds grow</p>");
+  Object.assign(b.window, { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout });
+  try {
+    const doc = b.window.document;
+    const paragraph = doc.querySelector("p");
+    if (!paragraph?.firstChild) throw new Error("Missing paragraph text");
+    const selectionMessages = () =>
+      b.post.mock.calls.filter(([data]) => data.type === "recense:anchor" || data.type === "recense:deselect");
+    const range = doc.createRange();
+    range.selectNodeContents(paragraph);
+    expect(b.select(range)).toMatchObject({ type: "recense:anchor", quote: "Seeds grow" });
+    b.post.mockClear();
+    if (pointerType === "mouse") {
+      paragraph.dispatchEvent(new b.window.PointerEvent("pointerdown", { bubbles: true, pointerType }));
+      paragraph.dispatchEvent(new b.window.MouseEvent("mousedown", { bubbles: true }));
+    }
+    b.window.getSelection()?.collapse(paragraph.firstChild, 0);
+    doc.dispatchEvent(new b.window.Event("selectionchange"));
+    vi.advanceTimersByTime(pointerType === "mouse" ? 120 : 199);
+    expect(selectionMessages()).toEqual([]);
+    if (pointerType === "mouse") {
+      paragraph.dispatchEvent(new b.window.PointerEvent("pointerup", { bubbles: true, pointerType }));
+      paragraph.dispatchEvent(new b.window.MouseEvent("mouseup", { bubbles: true }));
+    } else vi.advanceTimersByTime(1);
+    expect(selectionMessages()).toEqual([[{ type: "recense:deselect" }, "*"]]);
+    b.post.mockClear();
+    doc.dispatchEvent(new b.window.Event("keyup"));
+    expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "recense:deselect" }, "*");
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("only the parent can clear the selection and the bridge reports deselect after it settles", async () => {
+  vi.useFakeTimers();
+  const b = bridge("<p>Seeds grow</p>");
+  Object.assign(b.window, { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout });
+  try {
+    const doc = b.window.document;
+    const range = doc.createRange();
+    range.selectNodeContents(doc.body);
+    expect(b.select(range)).toMatchObject({ type: "recense:anchor", quote: "Seeds grow" });
+    vi.advanceTimersByTime(200);
+    b.post.mockClear();
+    const selection = doc.getSelection();
+    Object.defineProperty(doc, "getSelection", { value: null });
+    Object.defineProperty(selection, "removeAllRanges", { value: null });
+    const clear = { type: "recense:clear-selection" };
+    b.message(clear, b.window);
+    vi.advanceTimersByTime(200);
+    expect(selection.getRangeAt(0)).toBe(range);
+    expect(b.post).not.toHaveBeenCalled();
+
+    b.message(clear);
+    expect(selection.rangeCount).toBe(0);
+    vi.advanceTimersByTime(199);
+    expect(b.post).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "recense:deselect" }, "*");
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    await b.window.happyDOM.close();
+  }
+});
+
+test("glossary card events are ignored and a selection in the card retires the document quote", async () => {
+  const b = bridge("<p>Seeds grow.</p><h2>Glossary</h2><dl><dt>Seeds</dt><dd>Grains.</dd></dl>");
+  try {
+    const doc = b.window.document;
+    const attach = vi.spyOn(b.window.Element.prototype, "attachShadow");
+    const mark = doc.querySelector("span[aria-haspopup]");
+    if (!mark?.firstChild) throw new Error("Missing glossary mark");
+    const range = doc.createRange();
+    range.selectNodeContents(mark.firstChild);
+    expect(b.select(range)).toMatchObject({ type: "recense:anchor", quote: "Seeds" });
+    mark.dispatchEvent(new b.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const result = attach.mock.results[0];
+    const definition = result?.type === "return" ? result.value.querySelector("p") : null;
+    if (!definition?.firstChild) throw new Error("Missing glossary definition");
+    range.selectNodeContents(definition.firstChild);
+    const selection = b.window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    expect(selection?.toString()).toBe("Grains.");
+    b.post.mockClear();
+    definition.dispatchEvent(new b.window.MouseEvent("mouseup", { bubbles: true, composed: true }));
+    expect(b.post).not.toHaveBeenCalled();
+    doc.dispatchEvent(new b.window.Event("mouseup"));
+    expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "recense:deselect" }, "*");
+  } finally {
+    vi.restoreAllMocks();
+    await b.window.happyDOM.close();
+  }
+});
+
 test.each([
   ["other.html#heading", "docs/other.html", "heading"],
   ["a%20%23%C3%A9.html#part%20%C3%A9%25%23", "docs/a #é.html", "part é%#"],
@@ -880,7 +980,7 @@ test("highlight registry methods are called through their prototype", async () =
   }
 });
 
-test("overlong selections post nothing and highlights require unique exact context, including overlaps", async () => {
+test("overlong selections post deselect and highlights require unique exact context, including overlaps", async () => {
   const b = bridge(`<body><p>${"x".repeat(2001)}</p><div>aaa red seed blue</div></body>`);
   try {
     const range = b.window.document.createRange();
@@ -888,6 +988,7 @@ test("overlong selections post nothing and highlights require unique exact conte
     if (!paragraph) throw new Error("Missing paragraph");
     range.selectNodeContents(paragraph);
     expect(b.select(range)).toBeUndefined();
+    expect(b.post).toHaveBeenLastCalledWith({ type: "recense:deselect" }, "*");
     const before = b.window.document.body.textContent;
     const anchors = [{ threadId: "one", quote: "seed", prefix: "red ", suffix: " blue" }];
     b.message({ type: "recense:highlight", anchors }, null);

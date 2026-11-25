@@ -5,7 +5,7 @@ import { FilePath, type HtmlDocChanges, LIMITS, type ThreadView } from "@recense
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { HtmlDocFrame } from "./components/reading/HtmlDocFrame.tsx";
 import { DIAGRAM_DRAW_TIMEOUT_MS } from "./components/reading/MermaidBlock.tsx";
 import * as mermaidColors from "./components/reading/mermaid-colors.ts";
@@ -339,21 +339,26 @@ function FrameContent({
 }) {
   const [open, setOpen] = useState(values.length > 0);
   return (
-    <HtmlDocFrame
-      reviewId={id}
-      revision={2}
-      changedBlocks={[]}
-      path={path}
-      contentUrl={doc.contentUrl}
-      images={images}
-      look={look}
-      colorScheme={colorScheme}
-      threads={values}
-      navigation={navigation}
-      docNavigation={docNavigation}
-      commentsOpen={open}
-      onCommentsOpenChange={setOpen}
-    />
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open panel
+      </button>
+      <HtmlDocFrame
+        reviewId={id}
+        revision={2}
+        changedBlocks={[]}
+        path={path}
+        contentUrl={doc.contentUrl}
+        images={images}
+        look={look}
+        colorScheme={colorScheme}
+        threads={values}
+        navigation={navigation}
+        docNavigation={docNavigation}
+        commentsOpen={open}
+        onCommentsOpenChange={setOpen}
+      />
+    </>
   );
 }
 function mount(
@@ -709,6 +714,7 @@ test("all production web frames use the exact sandbox without DOM string inserti
 test("closed strict message schemas enforce every contract limit", () => {
   for (const data of [
     { type: "recense:ready", extra: true },
+    { type: "recense:deselect", extra: true },
     { type: "size", height: 400 },
     { type: "recense:anchor", ...anchor, quote: "x".repeat(2001) },
     { type: "recense:anchor", ...anchor, prefix: "x".repeat(33) },
@@ -724,12 +730,15 @@ test("closed strict message schemas enforce every contract limit", () => {
     { type: "recense:navigate", path: "other.html", fragment: "\ud800" },
   ])
     expect(FrameToParent.safeParse(data).success).toBe(false);
+  expect(FrameToParent.parse({ type: "recense:deselect" })).toEqual({ type: "recense:deselect" });
   expect(FrameToParent.safeParse({ type: "recense:anchor", ...anchor, quote: "x".repeat(2000) }).success).toBe(true);
   expect(
     ParentToFrame.safeParse({ type: "recense:highlight", anchors: [{ threadId: id, ...anchor, state: "open" }] })
       .success,
   ).toBe(false);
   expect(ParentToFrame.safeParse({ type: "recense:scroll", threadId: id }).success).toBe(true);
+  expect(ParentToFrame.safeParse({ type: "recense:clear-selection" }).success).toBe(true);
+  expect(ParentToFrame.safeParse({ type: "recense:clear-selection", extra: true }).success).toBe(false);
   for (const fragment of ["", "x".repeat(1024)])
     expect(FrameToParent.safeParse({ type: "recense:navigate", path: "other.html", fragment }).success).toBe(true);
 });
@@ -787,11 +796,14 @@ test("the drawer includes this doc's unplaced threads without offering a frame j
 });
 
 test("parent fragment changes and Reload establish fresh baselines; unexpected loads still lock the frame", () => {
-  const { fragment: navigateFragment, frame } = mount();
+  const { fragment: navigateFragment, frame, message } = mount();
   fireEvent.load(frame);
+  message({ type: "recense:anchor", ...anchor });
+  expect(screen.getByText("Comment on selection")).toBeTruthy();
   const original = frame;
   for (const fragment of ["first", "second", "second"]) {
     navigateFragment(fragment);
+    expect(screen.queryByText("Comment on selection")).toBeNull();
     const target = frameByTitle() as HTMLIFrameElement;
     const post = vi.fn();
     Object.defineProperty(target, "contentWindow", { value: { postMessage: post } });
@@ -846,6 +858,8 @@ test("only this frame proposes anchors; composer freezes the quote and only revi
   expect(screen.getByText("seeds").tagName).toBe("MARK");
   message({ type: "recense:anchor", ...anchor, quote: "replacement" });
   expect(screen.queryByText("replacement")).toBeNull();
+  expect(screen.queryByText("Comment on selection")).toBeNull();
+  message({ type: "recense:deselect" });
   fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Please explain" } });
   expect(localStorage.getItem(draftKey(id, thread.target))).toBe("Please explain");
   expect(fetchMock).not.toHaveBeenCalled();
@@ -856,6 +870,189 @@ test("only this frame proposes anchors; composer freezes the quote and only revi
     expect.objectContaining({ body: JSON.stringify({ revision: 2, target: thread.target, body: "Please explain" }) }),
   );
   expect(frame.isConnected).toBe(true);
+});
+test("only the current frame can retire its selection prompt", () => {
+  const { message } = mount();
+  message({ type: "recense:anchor", ...anchor });
+  const prompt = screen.getByRole("button", { name: "Comment on selection" });
+  message({ type: "recense:deselect" }, window);
+  expect(prompt.isConnected).toBe(true);
+  message({ type: "recense:deselect" });
+  expect(screen.queryByText("Comment on selection")).toBeNull();
+});
+
+describe("pressing Comment on selection", () => {
+  const mouse = { pointerType: "mouse", button: 0 };
+  const advance = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function pressSelection() {
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    fireEvent.pointerDown(prompt, mouse);
+    advance(120);
+    fireEvent.pointerUp(prompt, mouse);
+    fireEvent.mouseUp(prompt);
+    return prompt;
+  }
+
+  function openSelection() {
+    fireEvent.click(pressSelection());
+  }
+
+  test("only a completed press outside the prompt clears the frame selection", () => {
+    const { message, post } = mount();
+    message({ type: "recense:ready" });
+    message({ type: "recense:anchor", ...anchor });
+    post.mockClear();
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    const touch = { pointerType: "touch" };
+    fireEvent.pointerDown(document.body, touch);
+    advance(120);
+    fireEvent.pointerCancel(document.body, touch);
+    expect(prompt.isConnected).toBe(true);
+    expect(post).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(document.body, mouse);
+    advance(120);
+    expect(prompt.isConnected).toBe(true);
+    fireEvent.pointerUp(document.body, mouse);
+    expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+    fireEvent.mouseUp(document.body);
+    fireEvent.click(document.body);
+    expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
+
+    post.mockClear();
+    message({ type: "recense:anchor", ...anchor });
+    const button = pressSelection();
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
+  });
+
+  test("keyboard focus keeps the selection on buttons and clears it in a text field", () => {
+    const { message, post } = mount();
+    message({ type: "recense:ready" });
+    message({ type: "recense:anchor", ...anchor });
+    post.mockClear();
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    const input = document.createElement("input");
+    document.body.append(input);
+    try {
+      fireEvent.focusIn(screen.getByRole("button", { name: "Open panel" }));
+      expect(prompt.isConnected).toBe(true);
+      expect(post).not.toHaveBeenCalled();
+      fireEvent.focusIn(prompt);
+      expect(prompt.isConnected).toBe(true);
+      expect(post).not.toHaveBeenCalled();
+      fireEvent.focusIn(input);
+      expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+      expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
+    } finally {
+      input.remove();
+    }
+  });
+
+  test("selecting text in the app clears the frame selection once focus leaves the frame", () => {
+    const { frame, message, post } = mount();
+    message({ type: "recense:ready" });
+    message({ type: "recense:anchor", ...anchor });
+    post.mockClear();
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    const appText = screen.getByRole("button", { name: "Open panel" });
+    const selection = document.getSelection();
+    try {
+      frame.focus();
+      expect(document.activeElement).toBe(frame);
+      act(() => selection?.selectAllChildren(appText));
+      expect(selection?.isCollapsed).toBe(false);
+      fireEvent(document, new Event("selectionchange"));
+      expect(prompt.isConnected).toBe(true);
+      expect(post).not.toHaveBeenCalled();
+
+      frame.blur();
+      fireEvent(document, new Event("selectionchange"));
+      expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+      expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
+    } finally {
+      selection?.removeAllRanges();
+      frame.blur();
+    }
+  });
+
+  test("a tap outside the frame clears a touch selection before its first anchor arrives", () => {
+    const { message, post } = mount();
+    message({ type: "recense:ready" });
+    post.mockClear();
+    const touch = { pointerType: "touch" };
+    fireEvent.pointerDown(document.body, touch);
+    advance(120);
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.pointerUp(document.body, touch);
+    expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
+  });
+
+  test("Cancel retires the selection prompt until the frame proposes a new anchor", () => {
+    const { message } = mount();
+    message({ type: "recense:anchor", ...anchor });
+    openSelection();
+    expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Comment on selection")).toBeNull();
+    message({ type: "recense:anchor", ...anchor, quote: "roots" });
+    expect(screen.getByText("Comment on selection")).toBeTruthy();
+  });
+
+  test.each(["Escape", "Close", "outside press"])(
+    "closing Comments with %s preserves the form and allows a new quote",
+    (dismiss) => {
+      const { message } = mount();
+      const closePanel = () => {
+        if (dismiss === "Escape")
+          fireEvent.keyDown(screen.getByRole("dialog", { name: "Comments" }), { key: "Escape" });
+        else if (dismiss === "Close") fireEvent.click(screen.getByRole("button", { name: "Close" }));
+        else {
+          // Radix installs its outside-press listener in a timer and dismisses on the ensuing click.
+          advance(1);
+          fireEvent.pointerDown(document.body, { button: 0, pointerType: "mouse" });
+          fireEvent.pointerUp(document.body, { button: 0, pointerType: "mouse" });
+          fireEvent.click(document.body);
+        }
+        expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
+      };
+      message({ type: "recense:anchor", ...anchor });
+      openSelection();
+      fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep this draft" } });
+      closePanel();
+      const next = { type: "recense:anchor", ...anchor, quote: "roots" };
+      message(next);
+      const offeredSelection = !!screen.queryByRole("button", { name: "Comment on selection" });
+      fireEvent.click(screen.getByRole("button", { name: "Open panel" }));
+      const draft = screen.queryByRole<HTMLTextAreaElement>("textbox", { name: "Comment" })?.value;
+      expect({ offeredSelection, draft }).toEqual({ offeredSelection: true, draft: "Keep this draft" });
+      expect(screen.queryByText("Comment on selection")).toBeNull();
+      expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
+      closePanel();
+      message(next);
+      openSelection();
+      expect(screen.getByText(next.quote, { selector: "mark" })).toBeTruthy();
+      expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Comment" }).value).toBe("");
+      expect(localStorage.getItem(draftKey(id, thread.target))).toBe("Keep this draft");
+    },
+  );
+
+  test("a frame deselection during a press immediately hides the button", () => {
+    const { message } = mount();
+    message({ type: "recense:anchor", ...anchor });
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Comment on selection" }), mouse);
+    message({ type: "recense:deselect" });
+    expect(screen.queryByText("Comment on selection")).toBeNull();
+  });
 });
 test("ready and changed threads post only placed anchors for this doc; Show in doc scrolls", () => {
   const outerScroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});

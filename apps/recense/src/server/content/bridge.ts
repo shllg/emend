@@ -418,17 +418,18 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     }
     return { text, range, boundary };
   }
+  const deselect = () => post({ type: "recense:deselect" });
   function capture(event) {
     // The glossary card is recense's own: events and selections inside it never become comment anchors.
     if (card && event && dom(window.Event.prototype, "composedPath", event).includes(card.host)) return;
     const selection = dom(window.Document.prototype, "getSelection", document);
-    if (!selection || read(window.Selection.prototype, "isCollapsed", selection) || read(window.Selection.prototype, "rangeCount", selection) !== 1 || !body()) return;
+    if (!selection || read(window.Selection.prototype, "isCollapsed", selection) || read(window.Selection.prototype, "rangeCount", selection) !== 1 || !body()) return deselect();
     const range = dom(window.Selection.prototype, "getRangeAt", selection, 0);
     const inCard = node => card && (node === card.host || dom(window.Node.prototype, "contains", card.host, node) ||
       dom(window.Node.prototype, "contains", card.dialog, node));
     if (inCard(read(window.Range.prototype, "startContainer", range)) || inCard(read(window.Range.prototype, "endContainer", range)) ||
-        inCard(read(window.Selection.prototype, "focusNode", selection))) return;
-    if (!dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "startContainer", range)) || !dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "endContainer", range))) return;
+        inCard(read(window.Selection.prototype, "focusNode", selection))) return deselect();
+    if (!dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "startContainer", range)) || !dom(window.Node.prototype, "contains", body(), read(window.Range.prototype, "endContainer", range))) return deselect();
     const value = model();
     let start = value.boundary(read(window.Range.prototype, "startContainer", range), read(window.Range.prototype, "startOffset", range), false);
     let end = value.boundary(read(window.Range.prototype, "endContainer", range), read(window.Range.prototype, "endOffset", range), true);
@@ -436,7 +437,7 @@ export const BRIDGE_SOURCE = String.raw`(() => {
     start += selected.length - selected.trimStart().length;
     end -= selected.length - selected.trimEnd().length;
     const quote = value.text.slice(start, end);
-    if (!quote || quote.length > 2000) return;
+    if (!quote || quote.length > 2000) return deselect();
     post({ type: "recense:anchor", quote, prefix: value.text.slice(Math.max(0, start - 32), start), suffix: value.text.slice(end, end + 32) });
   }
   let lastAnchors;
@@ -1410,6 +1411,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       for (const path of event.data.paths) if (typeof path === "string") docs.add(path);
     }
     else if (event.data.type === "recense:highlight" && Array.isArray(event.data.anchors)) highlight(event.data.anchors);
+    else if (event.data.type === "recense:clear-selection") {
+      const selection = dom(window.Document.prototype, "getSelection", document);
+      if (selection) dom(window.Selection.prototype, "removeAllRanges", selection);
+    }
     else if (event.data.type === "recense:scroll" && typeof event.data.threadId === "string") {
       const range = ranges.get(event.data.threadId);
       if (range) {
