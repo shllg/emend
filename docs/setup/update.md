@@ -44,7 +44,7 @@ It does six things:
 5. It prints the version this machine runs and, when the machine is attached, the version of its
    hub and which one is behind.
 6. It ends with notes for the other parts: whether the links in `~/.agents/skills` point at the
-   new version, the Claude Code plugin commands, and the phone app. It changes none of them.
+   new version, the Claude Code plugin commands, and the phone app. It changes none of them itself.
 
 If something fails after the package manager starts, it prints how to restore the old version. The [Undo](#undo) section lists the
 same steps.
@@ -72,9 +72,12 @@ directory, including paths reached through symbolic links.
 With mise, `recense update` runs `mise upgrade --bump npm:@shllg/recense`. That keeps `latest` and
 the other options of the recense entry in mise's config. A `postinstall` line
 ([Let mise finish the update](#let-mise-finish-the-update)) runs inside it, so it also links the
-skills again and updates the Claude Code plugin.
+skills again and updates the Claude Code plugin, and the notes then show the links on the new
+version. `recense update` does not pass `CLAUDE_CONFIG_DIR` on, so inside it the line updates the
+plugin only in Claude Code's default config folder.
 
-The other steps still apply, and the notes name them. Update the hub first, link the skills again (step 4), update the
+The other steps still apply unless a mise `postinstall` line did them, and the notes name them.
+Update the hub first, link the skills again (step 4), update the
 plugin (step 5) and the phone app (step 6). It reports the hub only, not the machines attached to
 it: run it on each machine.
 
@@ -84,13 +87,15 @@ it: run it on each machine.
 Rules: never run recense update yourself; give it to me to run in my own terminal; run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the
 change and wait for my yes; never read secrets (tokens, .env files, credential stores) or recense's
-state folder; never open ~/.claude/settings.json whole; never open
-~/.config/mise/config.toml, which can hold secrets under [env]; if a dotfiles tool manages a file or link
+state folder; never open ~/.claude/settings.json whole;
+never open mise's config files and never run mise env, mise set or mise config get, since they can
+show secrets from [env]; if a dotfiles tool manages a file or link
 you would change (a symlink into a dotfiles repository, stow, chezmoi, home-manager or similar),
 change its source and tell me how to apply it; never run recense pair, attach, detach, config or
 devices yourself, give me the command instead;
-never run claude plugin commands yourself, give them to me for my own terminal; never pass --host or any flag this page does not
-name; never retry a command through another program (for example script) to get a terminal; never
+never run claude plugin commands or mise upgrade yourself, give them to me for my own terminal;
+never pass --host or any flag this page does not name; never retry a command through another
+program (for example script) to get a terminal; never
 list the devices on my tailnet; outside your sandbox run only recense service install (no new flags),
 recense service status, recense stop and recense skills install, and no other command; run no process listing
 yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep
@@ -131,6 +136,7 @@ npm install -g @shllg/recense@latest
 With mise:
 
 ```sh
+cd ~
 mise upgrade npm:@shllg/recense
 ```
 
@@ -141,19 +147,23 @@ recense --version
 ```
 
 You should see `recense ` and the new version number. Use the command that matches how you
-installed it.
+installed it. Run mise from your home folder, as the `cd ~` line does: a `postinstall` line (below)
+runs in the folder where mise runs, and a project's mise config there can give the service another
+Node.js.
 
 `mise upgrade` replaces only the package. The rest stays on the old version until you do steps 3
 to 5: the service until `recense service install` runs again, the links in `~/.agents/skills` until
 `recense skills install` runs again, and the Claude Code plugin. mise keeps the old version for 24
 hours, and `mise ls npm:@shllg/recense` marks it `pruned in 24h`. After that, a later mise command
-removes it unless a process still runs from it; `mise prune` removes it at once. A service or a
-skill link that still points there then breaks.
+removes it, or `mise prune` at once, as soon as no running process was started from it. A skill
+link that still points there then breaks, and a service still installed on it fails at its next
+start.
 
 ### Let mise finish the update
 
 A `postinstall` command in mise's config runs each time mise installs a recense version: with
-`mise upgrade`, with `mise install`, and inside `recense update`. This one does steps 3 to 5 for
+`mise upgrade` or `mise install`, also when they upgrade or install all your tools, and inside
+`recense update`. This one does steps 3 to 5 for
 the parts you set up. In `~/.config/mise/config.toml`, replace the recense line under `[tools]`
 with:
 
@@ -184,26 +194,27 @@ mise, with the new `recense` first on `PATH`. Each part runs only for what you s
   plugin (step 5). Restart Claude Code or run `/reload-plugins` afterwards.
 
 A failing `postinstall` fails mise's install, so a part that fails prints a
-`recense: ... failed` line and the install goes on; run that step by hand. Run `mise upgrade`
-from your home folder: in a project folder, the project's mise config can give the service
-another Node.js.
+`recense: ... failed` line and the install goes on; run that step by hand. Run every mise
+command that can install recense from your home folder: in a project folder, the project's mise
+config can give the service another Node.js.
 
 After `mise upgrade npm:@shllg/recense`, mise prints `Upgraded 1 tool` and the output of each
 part, such as `recense: service installed` and
 `Plugin "recense" updated from <old> to <new>`. A line saying that the server runs the old
 version can come first; the service install right after it fixes that. Check it:
 `recense service status` prints `recense: service running (<path>)` and no line about another
-version, and `recense skills install` prints `... already linked` for each skill.
+version, and `recense skills install --dry-run` prints `... already linked` for each skill you linked.
 
 ```text
 Rules: never run recense update yourself; give it to me to run in my own terminal; show me each change and wait for my yes; never read secrets (tokens, .env files, credential
-stores) or recense's state folder; never open ~/.config/mise/config.toml, which can hold secrets
-under [env]; never run claude plugin commands yourself.
-Run recense --version and show me the result. Then update the package. If mise manages it, ask me
-whether my recense entry in mise has the postinstall line from
-https://github.com/shllg/recense/blob/release/docs/setup/update.md. If it has, give me mise upgrade
-npm:@shllg/recense to run in my own terminal, since the line runs claude plugin commands; if not,
-run mise upgrade npm:@shllg/recense yourself and offer me that postinstall entry to add to
+stores) or recense's state folder; never open mise's config files and never run mise env, mise set
+or mise config get, since they can show secrets from [env]; never run mise upgrade or claude plugin
+commands yourself.
+Run recense --version and show me the result. Then update the package. If mise manages it, give me
+cd ~ && mise upgrade npm:@shllg/recense to run in my own terminal, since a postinstall line in my
+mise config would run inside it. If I want mise to finish each update, point me to the postinstall
+entry under "Let mise finish the update" in
+https://github.com/shllg/recense/blob/release/docs/setup/update.md to copy into
 ~/.config/mise/config.toml myself. Otherwise (npm or Homebrew's Node.js) run npm install -g
 @shllg/recense@latest. Run recense --version again and show me the new version.
 ```

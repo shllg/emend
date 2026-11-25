@@ -87,13 +87,14 @@ claude plugin update recense@recense
 `recense update` backs up the database, updates recense with mise, npm or pnpm, and restarts the
 service. It runs only in your own terminal. A local build only gets the commands.
 
-To update by hand, run `npm install -g @shllg/recense@latest`, or with mise
+To update by hand, run `npm install -g @shllg/recense@latest`, or with mise, from your home folder,
 `mise upgrade npm:@shllg/recense`. Either one replaces only the package. If you installed the
 service, run `recense service install` again; it keeps its options. Without the service, run
 `recense stop`; the next `recense` starts the new version. If you ran `recense skills install`
 before, run it again. Then restart Claude Code. After `brew upgrade node` or `mise upgrade node`,
 run `recense service install` again too.
-With mise, a `postinstall` line in its config can run these steps for you:
+With mise, a `postinstall` line in its config can reinstall the service, link the skills again and
+update the plugin after each upgrade:
 [update.md](https://github.com/shllg/recense/blob/release/docs/setup/update.md#let-mise-finish-the-update).
 
 [docs/setup/update.md](https://github.com/shllg/recense/blob/release/docs/setup/update.md) covers the

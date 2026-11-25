@@ -11,8 +11,9 @@ pages: [hub-tailscale.md](hub-tailscale.md) and [attach.md](attach.md). Both sta
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me
 the change and wait for my yes; never read secrets (tokens, .env files, credential stores) or
-recense's state folder; never open ~/.claude/settings.json whole; never open
-~/.config/mise/config.toml, which can hold secrets under [env]; if a dotfiles tool manages a file
+recense's state folder; never open ~/.claude/settings.json whole;
+never open mise's config files and never run mise env, mise set or mise config get, since they can
+show secrets from [env]; if a dotfiles tool manages a file
 or link you would change (a symlink into a dotfiles repository, stow, chezmoi, home-manager or
 similar), change its source and tell me how to apply it; never run recense pair, attach, detach,
 config or devices yourself, give me the command instead;
@@ -169,16 +170,17 @@ project's config: see the `-g` paragraph above.
 
 ```text
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
-stores) or recense's state folder; never open ~/.config/mise/config.toml, which can hold secrets
-under [env].
+stores) or recense's state folder; never open mise's config files and never run mise env, mise set
+or mise config get, since they can show secrets from [env].
 Install recense. If Node.js came from Homebrew or another npm install, run npm install -g
-@shllg/recense. If mise manages Node.js, run mise use -g
-'npm:@shllg/recense[allow_low_downloads=true]', always with -g. On an EACCES error from npm with a
+@shllg/recense. If mise manages Node.js, run mise ls npm:@shllg/recense first: if it lists no
+version, run mise use -g 'npm:@shllg/recense[allow_low_downloads=true]', always with -g; if it
+lists one, recense is installed already, so skip the install. On an EACCES error from npm with a
 system Node.js, never use sudo: tell me to switch to Homebrew's Node.js or mise. Then run recense
 --version and show me the result; with mise, run it again from my home folder. If recense is not
 found, tell me to open a new terminal. With mise, ask me whether I want each release on its first
-day; if I do, show me the [settings] lines for minimum_release_age_excludes from
-https://github.com/shllg/recense/blob/release/docs/setup/local.md to add to
+day; if I do, point me to the minimum_release_age_excludes lines in step 2 of
+https://github.com/shllg/recense/blob/release/docs/setup/local.md to copy into
 ~/.config/mise/config.toml myself.
 ```
 
