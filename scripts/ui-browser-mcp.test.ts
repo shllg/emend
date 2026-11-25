@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync,
 } from "node:fs";
@@ -88,9 +89,13 @@ test("the MCP child gets private folders and no parent-only variable", (t) => {
 
 test("only Chromium versions with URL filtering can start the MCP child", () => {
   assert.equal(chromiumMajor("Chromium 149.0.7520.0 Arch Linux\n"), 149);
+  assert.equal(chromiumMajor("Chromium 149.0.7520.0 snap"), 149);
   assert.equal(chromiumMajor("Google Chrome 150.0.1.2"), 150);
+  assert.equal(chromiumMajor("Google Chrome 150.0.1.2 beta"), 150);
+  assert.equal(chromiumMajor("Google Chrome for Testing 150.0.7700.0"), 150);
   assert.throws(() => chromiumMajor("Chromium 148.0.1.2"), /149.*found Chromium 148\.0\.1\.2/);
   assert.throws(() => chromiumMajor("garbage 150"), /Could not read the Chromium version/);
+  assert.throws(() => chromiumMajor("garbage 150.0.1.2"), /Could not read the Chromium version/);
 });
 
 test("the version probe and MCP share a seal that is cleaned up on exit and failure", async (t) => {
@@ -125,6 +130,15 @@ test("the version probe and MCP share a seal that is cleaned up on exit and fail
     process.env.TMPDIR = temp;
     version("Chromium 148.1.2.3");
     await assert.rejects(main(top), /found Chromium 148/);
+    assert(!existsSync(join(top, "launched")));
+    clean();
+    version("Chromium 150.0.1.2", 'kill -TERM "$PPID"\nexec sleep 15');
+    const module = new URL("./ui-browser-mcp.ts", import.meta.url).href;
+    const interrupted = spawnSync(process.execPath, [
+      "--input-type=module", "-e", "await (await import(process.argv[1])).main(process.argv[2])",
+      module, top,
+    ], { timeout: 20_000, encoding: "utf8" });
+    assert.equal(interrupted.status, 143, interrupted.stderr);
     assert(!existsSync(join(top, "launched")));
     clean();
     version("Google Chrome 149.1.2.3");

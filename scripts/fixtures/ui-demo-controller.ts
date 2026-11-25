@@ -9,6 +9,9 @@ import {
 import { startDemo } from "../ui-demo.ts";
 
 const [top, port] = process.argv.slice(2);
+// Use the demo's SIGINT cleanup even if the parent disappears during startup.
+process.once("disconnect", () => process.kill(process.pid, "SIGINT"));
+if (!process.connected) process.exit(0);
 const demo = await startDemo(top, async ({ sealed, sealedRoot, env, server }) => {
   const tmpDir = realpathSync(tmpdir());
   assert.equal(dirname(sealedRoot), tmpDir);

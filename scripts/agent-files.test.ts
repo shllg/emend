@@ -168,12 +168,17 @@ test("the orchestrator snapshots and checks each finisher pass with the committe
   const work = skill("e-work");
   const steps = [
     "Run `mktemp -d` once",
-    "git show <build commit>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts",
+    "git rev-parse --verify <build>^{commit}",
+    "git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts",
     "node <temp>/check-ui-scope.mts --snapshot <temp>/ignored.json",
     'Dispatch `recense-ui-finisher` (`model: "sonnet"`)',
-    "node <temp>/check-ui-scope.mts --since <build commit> --snapshot <temp>/ignored.json",
+    "mktemp --suffix=.mts <temp>/check-XXXXXXXX",
+    "git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <fresh>",
+    "node <fresh> --since <full-id> --snapshot <temp>/ignored.json --snapshot-sha256 <digest>",
     "Report every printed path as a blocker",
     "`<main>/bin/wt notify blocked`",
+    "Delete each printed untracked file and each `ignored new` file",
+    "run the check again with the same arguments. Continue only at exit 0",
     "Remove the temp folder, run `pnpm verify`",
   ];
   let index = -1;
@@ -184,8 +189,11 @@ test("the orchestrator snapshots and checks each finisher pass with the committe
   assert(!work.includes("node scripts/check-ui-scope.ts --since"));
   assert.match(work, /follow step 2 from a clean tree using the pass's starting commit/);
   const rounds = readFileSync(path.join(root, ".claude", "rules", "review-rounds.md"), "utf8");
-  for (const text of [skill("e-pr-finalize"), rounds])
-    assert.match(text, /checking each finisher pass as `\/e-work` step 2/);
+  for (const text of [skill("e-pr-finalize"), rounds]) {
+    const words = text.replace(/\s+/g, " ");
+    assert.match(words, /Commit code fixes first so each pass starts from a clean tree/);
+    assert.match(words, /checking each finisher pass as `\/e-work` step 2/);
+  }
 });
 
 test("the manager tags fixes and the finisher uses the checked stop and screenshot paths", () => {
@@ -193,7 +201,7 @@ test("the manager tags fixes and the finisher uses the checked stop and screensh
     readFileSync(path.join(directory, agent + ".md"), "utf8").replace(/\s+/g, " ");
   const manager = body("recense-review-manager");
   assert.match(manager, /all its paths are allowed by `scripts\/check-ui-scope.ts`/);
-  assert.match(manager, /did not come from `recense-security-reviewer`/);
+  assert.match(manager, /it is not a security finding as defined in "Judge", step 4/);
   assert.match(manager, /every other fix `code`/);
   assert.match(manager, /The orchestrator routes the fixes\. The manager dispatches no fixer/);
   const finisher = body("recense-ui-finisher");

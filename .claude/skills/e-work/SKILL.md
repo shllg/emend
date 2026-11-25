@@ -67,29 +67,33 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    When the diff from the base to the build commit touches `apps/web/src/`, `apps/web/public/` or
    `apps/web/index.html`, run the following from the worktree root.
 
-   - Run `mktemp -d` once. Write its printed path literally in place of `<temp>` in each later
-     command. Bash calls share no variables.
-   - Copy the checker from the committed build and take the ignored file snapshot before dispatch.
-     Use the external `.mts` copy for both checks. Resolve any error or blocker before dispatch.
+   - Run `mktemp -d` once and resolve the build commit once with
+     `git rev-parse --verify <build>^{commit}`. Write the printed path and full commit id literally
+     in place of `<temp>` and `<full-id>` in each later command. Bash calls share no variables.
+   - Copy the checker from that commit and take the ignored file snapshot before dispatch.
+     Keep its printed sha256 for `<digest>`. Resolve any error or blocker before dispatch.
 
      ```sh
-     git show <build commit>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts
+     git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts
      node <temp>/check-ui-scope.mts --snapshot <temp>/ignored.json
      ```
 
    - Dispatch `recense-ui-finisher` (`model: "sonnet"`) with the task file, the base and the build
      commit. Give it a clean tree and a built app.
-   - When it returns, run the saved checker with the worktree root as the working directory.
+   - When it returns, make a new file with `mktemp --suffix=.mts <temp>/check-XXXXXXXX`.
+     Use its printed path for `<fresh>`. Extract the checker again and run it from the worktree
+     root, passing the literal digest printed before dispatch.
 
      ```sh
-     node <temp>/check-ui-scope.mts --since <build commit> --snapshot <temp>/ignored.json
+     git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <fresh> &&
+       node <fresh> --since <full-id> --snapshot <temp>/ignored.json --snapshot-sha256 <digest>
      ```
 
-   - Report every printed path as a blocker. For an index flag or a changed or removed ignored
-     file, run `<main>/bin/wt notify blocked`, name the path and wait for the owner. Use the
-     snapshot to distinguish new ignored files from existing ones. Restore other tracked paths
-     to the build commit in both the index and the worktree. Delete each printed untracked or new
-     ignored file. Resolve any checker error before continuing.
+   - Report every printed path as a blocker. For `index flag`, `ignored changed` or
+     `ignored removed`, run `<main>/bin/wt notify blocked`, name the path and wait for the owner.
+     Restore other tracked paths to the full commit id in both the index and the worktree.
+     Delete each printed untracked file and each `ignored new` file. After restoring and deleting,
+     run the check again with the same arguments. Continue only at exit 0.
    - Remove the temp folder, run `pnpm verify` and commit the finish separately.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).

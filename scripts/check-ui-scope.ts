@@ -65,10 +65,10 @@ export function outsideScope(paths: Iterable<string>): string[] {
   return [...new Set(paths)].filter((path) => !allowed(path)).sort();
 }
 
-// Directory paths have a trailing slash. Never descend into generated output.
+const workspaceInstall = /^(?:(?:apps|packages)\/[^/]+\/)?node_modules\//;
+// Directory paths have a trailing slash.
 const ignoredSkips = [
-  /(?:^|\/)node_modules(?:\/|$)/,
-  /(?:^|\/)\.tsbuild\//,
+  /^(?:(?:apps|packages)\/[^/]+\/)?node_modules\/\.(?:vite|cache)\//,
   /^apps\/[^/]+\/dist\//,
   /^\.wt\/ui\//,
   /^\.wt\/ui-demo\.json(?:\.[^/]*)?$/,
@@ -80,13 +80,15 @@ async function ignoredFiles(cwd: string, roots: string[]): Promise<Map<string, s
   async function walk(path: string) {
     if (ignoredSkips.some((skip) => skip.test(path))) return;
     const file = join(cwd, path);
-    const stat = lstatSync(file);
+    const stat = lstatSync(file, { bigint: true });
     if (stat.isDirectory()) {
       if (ignoredSkips.some((skip) => skip.test(path + "/"))) return;
       for (const entry of readdirSync(file)) await walk(path + "/" + entry);
     } else if (stat.isSymbolicLink()) {
       const target = readlinkSync(file, { encoding: "buffer" });
       files.set(path, "link:" + createHash("sha256").update(target).digest("hex"));
+    } else if (stat.isFile() && workspaceInstall.test(path)) {
+      files.set(path, `meta:${stat.size}:${stat.mode}:${stat.ino}:${stat.mtimeNs}`);
     } else if (stat.isFile()) {
       const hash = createHash("sha256");
       const flags = constants.O_RDONLY | constants.O_NOFOLLOW;
@@ -101,13 +103,20 @@ async function ignoredFiles(cwd: string, roots: string[]): Promise<Map<string, s
   return files;
 }
 
-function readSnapshot(file: string): Map<string, string> {
-  const values = JSON.parse(readFileSync(file, "utf8"));
+function sha256(bytes: Buffer | string): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function readSnapshot(file: string, digest: string): Map<string, string> {
+  const bytes = readFileSync(file);
+  if (sha256(bytes) !== digest.toLowerCase()) throw new Error("Ignored snapshot sha256 differs");
+  const values = JSON.parse(bytes.toString("utf8"));
   if (!values || typeof values !== "object" || Array.isArray(values))
     throw new Error("Invalid ignored file snapshot");
   const files = new Map<string, string>();
+  const stamp = /^(?:(?:link:)?[0-9a-f]{64}|meta:\d+:\d+:\d+:-?\d+)$/;
   for (const [path, hash] of Object.entries(values)) {
-    if (typeof hash !== "string" || !/^(?:link:)?[0-9a-f]{64}$/.test(hash))
+    if (typeof hash !== "string" || !stamp.test(hash))
       throw new Error("Invalid digest in ignored file snapshot");
     files.set(path, hash);
   }
@@ -116,26 +125,42 @@ function readSnapshot(file: string): Map<string, string> {
 
 const splitPaths = (output: string) => output.split("\0").filter(Boolean);
 
+function usage(): number {
+  console.error("Usage: node scripts/check-ui-scope.ts --snapshot <file> | " +
+    "--since <full commit id> [--snapshot <file> --snapshot-sha256 <hex>]");
+  return 2;
+}
+
 async function main(args: string[]): Promise<number> {
+  const fullId = /^(?:[\da-f]{40}|[\da-f]{64})$/i;
   const snapshotOnly = args.length === 2 && args[0] === "--snapshot" && !!args[1];
-  const since = args[0] === "--since" && !!args[1] &&
-    (args.length === 2 || (args.length === 4 && args[2] === "--snapshot" && !!args[3]));
-  if (!snapshotOnly && !since) {
-    console.error("Usage: node scripts/check-ui-scope.ts [--since <commit>] [--snapshot <file>]");
-    return 2;
-  }
-  const options = { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] } as const;
-  const cwd = execFileSync("git", ["rev-parse", "--show-toplevel"], options).trimEnd();
-  const git = (args: string[]) =>
-    execFileSync("git", args, { ...options, cwd, maxBuffer: 64 * 1024 * 1024 });
+  const withSnapshot = args.length === 6 && args[2] === "--snapshot" && !!args[3] &&
+    args[4] === "--snapshot-sha256" && /^[\da-f]{64}$/i.test(args[5]);
+  const since = args[0] === "--since" && fullId.test(args[1]) &&
+    (args.length === 2 || withSnapshot);
+  if (!snapshotOnly && !since) return usage();
+  let cwd = process.cwd();
+  const git = (args: string[]) => execFileSync("git", [
+    "--no-replace-objects", "-c", "core.fsmonitor=false", ...args,
+  ], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+  cwd = git(["rev-parse", "--show-toplevel"]).trimEnd();
 
   let violations = false;
   function report(path: string, prefix = "") {
     console.log(prefix + (/[\r\n]/.test(path) ? JSON.stringify(path) : path));
     violations = true;
   }
+  const before = withSnapshot ? readSnapshot(args[3], args[5]) : undefined;
+  for (const entry of splitPaths(git(["ls-files", "-v", "-z"])))
+    if (/^[a-zS] /.test(entry)) report(entry.slice(2), "index flag: ");
+  if (snapshotOnly && violations) return 1;
   if (since) {
-    const base = git(["rev-parse", "--verify", "--end-of-options", `${args[1]}^{commit}`]).trim();
+    const base = args[1].toLowerCase();
+    try {
+      if (git(["rev-parse", "--verify", `${base}^{commit}`]).trim() !== base) return usage();
+    } catch {
+      return usage();
+    }
     const diff = ["diff", "--name-only", "--no-renames", "-z"];
     // The index can still differ even when the working copy matches the base again.
     const paths = git([...diff, base, "--"]) + git([...diff, "--cached", base, "--"]) +
@@ -148,17 +173,17 @@ async function main(args: string[]): Promise<number> {
       "-z"]);
     const current = await ignoredFiles(cwd, splitPaths(roots));
     if (snapshotOnly) {
-      writeFileSync(snapshot, JSON.stringify(Object.fromEntries(current)), {
-        flag: "wx", mode: 0o600,
-      });
-    } else {
-      const before = readSnapshot(snapshot);
-      for (const path of [...new Set([...before.keys(), ...current.keys()])].sort())
-        if (before.get(path) !== current.get(path)) report(path, "ignored: ");
+      const bytes = JSON.stringify(Object.fromEntries(current));
+      writeFileSync(snapshot, bytes, { flag: "wx", mode: 0o600 });
+      console.log("snapshot sha256: " + sha256(bytes));
+    } else if (before) {
+      for (const path of [...new Set([...before.keys(), ...current.keys()])].sort()) {
+        if (!before.has(path)) report(path, "ignored new: ");
+        else if (!current.has(path)) report(path, "ignored removed: ");
+        else if (before.get(path) !== current.get(path)) report(path, "ignored changed: ");
+      }
     }
   }
-  for (const entry of splitPaths(git(["ls-files", "-v", "-z"])))
-    if (/^[a-zS] /.test(entry)) report(entry.slice(2), "index flag: ");
   return violations ? 1 : 0;
 }
 

@@ -33,13 +33,14 @@ interface DemoState {
 const stateFile = (top: string) => join(top, ".wt", "ui-demo.json");
 const webDist = (top: string) => join(top, "apps", "web", "dist");
 
-function isAlive(pid: number): boolean {
+function isAlive(pid: number, group = false): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("Invalid UI demo pid");
   try {
-    process.kill(pid, 0);
+    process.kill(group ? -pid : pid, 0);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
     throw error;
   }
 }
@@ -48,11 +49,10 @@ function readState(top: string): DemoState {
   return JSON.parse(readFileSync(stateFile(top), "utf8"));
 }
 
-function saveState(top: string, state: DemoState): void {
-  const file = stateFile(top);
+function writeJson(file: string, value: object): void {
   const temp = `${file}.${randomUUID()}`;
   try {
-    writeFileSync(temp, JSON.stringify(state), { flag: "wx", mode: 0o600 });
+    writeFileSync(temp, JSON.stringify(value), { flag: "wx", mode: 0o600 });
     renameSync(temp, file);
   } finally {
     rmSync(temp, { force: true });
@@ -169,7 +169,7 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
       rmSync(incoming, { force: true, recursive: true });
       state.result = { request, error: error instanceof Error ? error.message : String(error) };
     }
-    saveState(top, state);
+    writeJson(stateFile(top), state);
   }
 
   let installing: Promise<void> | undefined;
@@ -198,7 +198,7 @@ export async function startDemo(top: string, round?: DemoRound, port = worktreeP
     }
     poll = setInterval(pollRebuild, 200).unref();
     process.once("exit", forgetState);
-    saveState(top, state);
+    writeJson(stateFile(top), state);
     return { root, origin, reviewId, stop };
   } catch (error) {
     await stop();
@@ -227,11 +227,14 @@ export async function stop(top: string, port?: number): Promise<void> {
   throw new Error("Timed out waiting for the UI demo to exit and remove its state file");
 }
 
-export function buildWeb(top: string, signal: AbortSignal, timeout = 5 * 60_000): Promise<void> {
+export function buildWeb(
+  top: string, signal: AbortSignal, timeout = 5 * 60_000, staging?: string,
+): Promise<void> {
   return new Promise((done, reject) => {
-    // The checkout build inherits the parent environment. Its helpers die with the build group.
-    const child = spawn("pnpm", ["--dir", "apps/web", "build"], {
-      cwd: top, env: process.env, stdio: "inherit", detached: true,
+    // EOF before publication means the requester died. Only start pnpm after recording the group.
+    // Descriptor 3 preserves the checkout build's original stdin.
+    const child = spawn("sh", ["-c", "read -r ready && exec pnpm --dir apps/web build <&3 3<&-"], {
+      cwd: top, env: process.env, stdio: ["pipe", "inherit", "inherit", 0], detached: true,
     });
     const killBuild = () => {
       if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
@@ -256,26 +259,41 @@ export function buildWeb(top: string, signal: AbortSignal, timeout = 5 * 60_000)
       else if (code !== 0) reject(new Error(`Web build exited with ${cause ?? code}`));
       else done();
     });
+    const gate = child.stdin!;
+    gate.once("error", reject);
+    try {
+      if (staging && child.pid)
+        writeJson(join(staging, "owner"), { pid: process.pid, group: child.pid });
+      gate.end("ready\n");
+    } catch (error) {
+      gate.destroy();
+      reject(error);
+    }
   });
 }
 
-function lockOwner(staging: string): number | undefined {
-  let text: string;
+function lockOwner(staging: string) {
+  let record;
   try {
-    text = readFileSync(join(staging, "owner"), "utf8").trim();
+    record = JSON.parse(readFileSync(join(staging, "owner"), "utf8"));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT") return;
     throw error;
   }
-  const pid = Number(text);
-  if (/^\d+$/.test(text) && Number.isSafeInteger(pid) && pid > 0 && pid <= 0x7fffffff) return pid;
+  const valid = (id: number) => Number.isSafeInteger(id) && id > 0 && id <= 0x7fffffff;
+  // Older demos recorded just the requester's pid.
+  const pid = typeof record === "number" ? record : record?.pid;
+  return {
+    pid: valid(pid) ? pid : undefined,
+    group: valid(record?.group) ? record.group : undefined,
+  };
 }
 
 function takeRebuildLock(staging: string) {
   const candidate = `${staging}.${randomUUID()}`;
   mkdirSync(candidate, { mode: 0o700 });
   try {
-    writeFileSync(join(candidate, "owner"), String(process.pid), { mode: 0o600 });
+    writeJson(join(candidate, "owner"), { pid: process.pid });
     for (let attempt = 0; ; attempt++) {
       try {
         renameSync(candidate, staging);
@@ -285,7 +303,14 @@ function takeRebuildLock(staging: string) {
         if (code !== "ENOTEMPTY" && code !== "EEXIST") throw error;
         const info = lstatSync(staging, { throwIfNoEntry: false, bigint: true });
         const owner = lockOwner(staging);
-        if (owner && isAlive(owner)) throw new Error(`Another rebuild is running (pid ${owner})`);
+        if (owner?.pid && isAlive(owner.pid))
+          throw new Error(`Another rebuild is running (pid ${owner.pid})`);
+        // The requester could have published its group just before it died.
+        const group = owner?.group ?? lockOwner(staging)?.group;
+        if (group && isAlive(group, true)) {
+          const name = `A previous rebuild's web build (process group ${group})`;
+          throw new Error(`${name} is still running`);
+        }
         if (attempt) throw new Error("Could not acquire the rebuild lock after retrying");
         if (!info || lstatSync(staging, { throwIfNoEntry: false, bigint: true })?.ino !== info.ino)
           continue;
@@ -311,7 +336,7 @@ function takeRebuildLock(staging: string) {
 
 export async function rebuild(
   top: string,
-  build: (top: string, signal: AbortSignal) => void | Promise<void> = buildWeb,
+  build?: (top: string, signal: AbortSignal) => void | Promise<void>,
   port = worktreePort(top),
 ): Promise<string> {
   const { state } = runningDemo(top, port);
@@ -329,7 +354,8 @@ export async function rebuild(
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
   for (const signal of signals) process.on(signal, interrupt);
   try {
-    await build(top, controller.signal);
+    if (build) await build(top, controller.signal);
+    else await buildWeb(top, controller.signal, undefined, staging);
     copyWeb(webDist(top), join(staging, "web"));
     const current = runningDemo(top, port).state;
     if (current.root !== state.root || current.pid !== state.pid)

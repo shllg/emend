@@ -206,8 +206,8 @@ put it in `private` as `{file, line, claim}`, never in `followUps` or `preferenc
 Do not raise a finding again when an earlier element of `.wt/review-findings.json` shows it fixed
 or rejected with a confirmed reason. A new regression must have new evidence. Keep a finding's
 id when a later round checks it. Tag a fix `ui` only when all its paths are allowed by
-`scripts/check-ui-scope.ts` and it did not come from `recense-security-reviewer`. Tag every other
-fix `code`. The orchestrator routes the fixes. The manager dispatches no fixer.
+`scripts/check-ui-scope.ts` and it is not a security finding as defined in "Judge", step 4.
+Tag every other fix `code`. The orchestrator routes the fixes. The manager dispatches no fixer.
 
 ## Dispute mode
 

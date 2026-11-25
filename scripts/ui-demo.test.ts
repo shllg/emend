@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fork, spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, fork, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import {
@@ -59,20 +59,26 @@ test("stop handles absent and stale state and refuses a live pid without ownersh
   assert.deepEqual(calls, [0]);
   probe.mock.mockImplementation((_pid: number, signal?: string | number) => {
     assert.equal(signal, 0);
-    return true;
+    throw Object.assign(new Error("Denied"), { code: "EPERM" });
   });
   writeFileSync(file, JSON.stringify({ pid: 12345, port, origin: "wrong" }));
   await assert.rejects(stop(top, port), /worktree's port/);
   assert(existsSync(file));
 });
 
-test("the checkout web build times out and kills the child", async (t) => {
+test("the checkout build records its group before running and kills it on timeout", async (t) => {
   const top = mkdtempSync(join(tmpdir(), "recense-web-build-test-"));
   t.after(() => rmSync(top, { recursive: true, force: true }));
-  writeFileSync(join(top, "pnpm"), "#!/bin/sh\nexec sleep 60\n", { mode: 0o700 });
+  const pnpm = join(top, "pnpm");
   const path = process.env.PATH;
   try {
     process.env.PATH = `${top}:/usr/bin:/bin`;
+    writeFileSync(pnpm, '#!/bin/sh\ncp owner started && echo "$$" > pid\n', { mode: 0o700 });
+    await buildWeb(top, new AbortController().signal, 10_000, top);
+    assert.deepEqual(JSON.parse(readFileSync(join(top, "started"), "utf8")), {
+      pid: process.pid, group: Number(readFileSync(join(top, "pid"), "utf8")),
+    });
+    writeFileSync(pnpm, "#!/bin/sh\nexec sleep 60\n");
     await assert.rejects(buildWeb(top, new AbortController().signal, 100), /timed out/);
   } finally {
     if (path === undefined) delete process.env.PATH;
@@ -84,6 +90,7 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
   const tmpDir = realpathSync(tmpdir());
   const top = mkdtempSync(join(tmpDir, "recense-demo-test-"));
   let lastPhase = "setup";
+  let controller: ChildProcess | undefined;
   function phase(name: string) {
     lastPhase = name;
     t.diagnostic(name);
@@ -92,6 +99,8 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
   const watchdog = setTimeout(() => {
     const resources = JSON.stringify(process.getActiveResourcesInfo());
     writeSync(2, `UI demo stalled after ${lastPhase}. Active resources: ${resources}\n`);
+    if (controller && controller.exitCode === null && controller.signalCode === null)
+      controller.kill("SIGINT");
     process.exit(1);
   }, 150_000).unref();
   try {
@@ -135,15 +144,21 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
       await listener.close();
     }
 
-    const child = fork(join(import.meta.dirname, "fixtures", "ui-demo-controller.ts"), [
-      top, String(port),
-    ], { execArgv: [] });
-    const exited = once(child, "exit");
-    try {
-      const [demo] = await Promise.race([
+    function forkController() {
+      const child = fork(join(import.meta.dirname, "fixtures", "ui-demo-controller.ts"), [
+        top, String(port),
+      ], { execArgv: [] });
+      controller = child;
+      const exited = once(child, "exit");
+      const ready = Promise.race([
         once(child, "message"),
         exited.then(([code]) => { throw new Error(`Demo exited before publishing: ${code}`); }),
       ]);
+      return { child, ready, exited };
+    }
+    let run = forkController();
+    try {
+      const [demo] = await run.ready;
       phase("round published");
       const indexHash = async () => {
         const response = await fetch(demo.origin, {
@@ -179,6 +194,7 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
       const oldBuild = state().build;
       const staging = join(demo.root, "rebuild");
       const owner = join(staging, "owner");
+      const readOwner = () => JSON.parse(readFileSync(owner, "utf8"));
       mkdirSync(staging, { mode: 0o700 });
       writeFileSync(owner, String(process.pid));
       const unexpected = () => assert.fail("live lock allowed another build");
@@ -190,7 +206,7 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
         if (invalid !== undefined) writeFileSync(owner, invalid);
         writeFileSync(join(staging, "incomplete"), "stale");
         await assert.rejects(rebuild(top, () => {
-          assert.equal(readFileSync(owner, "utf8"), String(process.pid));
+          assert.deepEqual(readOwner(), { pid: process.pid });
           assert(!existsSync(join(staging, "incomplete")));
           throw new Error("injected build failure");
         }, port), /injected build failure/);
@@ -199,9 +215,22 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
       }
       const dead = spawnSync(process.execPath, ["-e", ""]);
       assert.equal(dead.status, 0);
-      writeFileSync(owner, String(dead.pid));
+      const sleeper = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+      const slept = once(sleeper, "exit");
+      try {
+        assert(sleeper.pid);
+        const record = { pid: dead.pid, group: sleeper.pid };
+        writeFileSync(owner, JSON.stringify(record));
+        await assert.rejects(rebuild(top, unexpected, port), {
+          message: `A previous rebuild's web build (process group ${sleeper.pid}) is still running`,
+        });
+        assert.deepEqual(readOwner(), record);
+      } finally {
+        sleeper.kill("SIGKILL");
+        await slept;
+      }
       const origin = await rebuild(top, async () => {
-        assert.equal(readFileSync(owner, "utf8"), String(process.pid));
+        assert.deepEqual(readOwner(), { pid: process.pid });
         writeWeb(web, "second");
         assert.equal(await indexHash(), oldHash, "checkout builds cannot change the served copy");
       }, port);
@@ -232,7 +261,7 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
         try {
           const [message] = await Promise.race([once(writer, "message"), ended]);
           assert.equal(message, "building");
-          assert.equal(readFileSync(owner, "utf8"), String(writer.pid));
+          assert.deepEqual(readOwner(), { pid: writer.pid });
           writer.kill(signal);
           assert.deepEqual(await ended, [status, null]);
           assert(!existsSync(staging));
@@ -242,11 +271,19 @@ test("the demo refuses unsafe ports, rebuilds and stops", { timeout: 120_000 }, 
         }
       }
       await stop(top, port);
-      assert.deepEqual(await exited, [130, null]);
+      assert.deepEqual(await run.exited, [130, null]);
       assert(!existsSync(demo.root));
       assert(!existsSync(stateFile));
       phase("stopped");
+      run = forkController();
+      const [next] = await run.ready;
+      run.child.disconnect();
+      assert.deepEqual(await run.exited, [130, null]);
+      assert(!existsSync(next.root));
+      assert(!existsSync(stateFile));
+      phase("disconnected");
     } finally {
+      const { child, exited } = run;
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
       await exited;
     }

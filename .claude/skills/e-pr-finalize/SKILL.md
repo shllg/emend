@@ -302,8 +302,8 @@ commits for a check round), the task file `.wt/issue.md` (or task text), `.wt/bu
 `.wt/review-findings.json`. The bundle files follow "Bundle growth" in
 `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Do not hand it your
 summary. Send its `ui` fixes to `recense-ui-finisher` (`model: "sonnet"`) and its `code` fixes to
-Codex, checking each finisher pass as `/e-work` step 2 says. Read `.wt/review-log.md` first to
-pick the round:
+Codex, checking each finisher pass as `/e-work` step 2 says. Commit code fixes first so each pass
+starts from a clean tree. Read `.wt/review-log.md` first to pick the round:
 
 1. No `final` or `final-skipped` line: run the `final` round over the whole change,
    `origin/main...HEAD`, or skip it as the rule says.
