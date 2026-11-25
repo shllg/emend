@@ -23,8 +23,14 @@ export function misePackageFixtures(installFolder: string) {
     bun: { folder: direct, links: [] },
     aube: { folder: aube, links: [[aube, direct]] },
     pnpm10: { folder: pnpm10, links: [[pnpm10, join(installFolder, "5", pkg)]] },
-    pnpm11: { folder: pnpm11, links: [[pnpm11, join(v11, pkg)]] },
-    aube_cli: { folder: join(aubeCli, pkg), links: [[aubeCli, join(installFolder, "global-aube", "0".repeat(64))]] },
+    pnpm11: {
+      folder: pnpm11,
+      links: [
+        [pnpm11, join(v11, pkg)],
+        [v11, join(installFolder, "v11", "f".repeat(64))],
+      ],
+    },
+    aube_cli: { folder: join(aubeCli, pkg), links: [[aubeCli, join(installFolder, "global-aube", "e".repeat(64))]] },
   } satisfies Record<string, { folder: string; links: FixtureLink[] }>;
 }
 

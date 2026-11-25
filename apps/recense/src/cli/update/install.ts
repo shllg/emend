@@ -8,7 +8,7 @@ export const updatePackage = "@shllg/recense";
 export const updateDoc = "https://github.com/shllg/recense/blob/release/docs/setup/update.md";
 
 export type Install =
-  | { kind: "mise" }
+  | { kind: "mise"; entry?: string }
   | { kind: "pnpm" }
   | { kind: "npm"; prefix: string }
   | { kind: "local"; where: "mise-link" | "checkout" | "marked"; root?: string }
@@ -24,34 +24,49 @@ function endsWith(segments: string[], tail: string[]): boolean {
   );
 }
 
-async function listedNames(folder: string): Promise<string[]> {
+async function listedNames(folder: string): Promise<string[] | undefined> {
   const names: string[] = [];
   try {
     for await (const { name } of await opendir(folder)) {
-      if (names.length === listLimit) return [];
+      if (names.length === listLimit) return undefined;
       names.push(name);
     }
-  } catch {
-    return [];
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === "ENOENT" || code === "ENOTDIR" ? [] : undefined;
   }
   return names.sort();
 }
 
 /**
  * npm puts node_modules under lib, while bun and embedded aube put it at the install root.
- * pnpm uses a numeric folder or v<digits>/<hash>, and aube CLI uses global-aube/<id>.
+ * pnpm uses a numeric folder or v<digits>/<id>, and aube CLI uses global-aube/<id>.
+ * List stable folder symlinks before per-install folders. Return undefined if a listing
+ * exceeds 64 names or cannot be checked. Missing folders and non-directories contribute nothing.
  */
-export async function misePackageFolders(installFolder: string): Promise<string[]> {
+export async function misePackageFolders(installFolder: string): Promise<string[] | undefined> {
   const roots = [join(installFolder, "lib"), installFolder];
   const names = await listedNames(installFolder);
+  if (names === undefined) return undefined;
   for (const name of names) {
     if (/^\d+$/.test(name)) roots.push(join(installFolder, name));
   }
   for (const name of [...names.filter((name) => /^v\d+$/.test(name)), "global-aube"]) {
     const parent = join(installFolder, name);
-    for (const child of await listedNames(parent)) {
-      if (!child.startsWith(".") && child !== "node_modules") roots.push(join(parent, child));
+    const children = await listedNames(parent);
+    if (children === undefined) return undefined;
+    const otherRoots: string[] = [];
+    for (const child of children) {
+      if (child.startsWith(".") || child === "node_modules") continue;
+      const path = join(parent, child);
+      try {
+        if ((await lstat(path)).isSymbolicLink()) roots.push(path);
+        else otherRoots.push(path);
+      } catch {
+        return undefined;
+      }
     }
+    roots.push(...otherRoots);
   }
   const folders: string[] = [];
   for (const root of roots) {
@@ -74,8 +89,10 @@ async function realMiseFolder(candidate: string): Promise<string | undefined> {
 }
 
 export async function locateMisePackage(installFolder: string): Promise<string | undefined> {
+  const folders = await misePackageFolders(installFolder);
+  if (folders === undefined) return undefined;
   let first: { path: string; real: string } | undefined;
-  for (const path of await misePackageFolders(installFolder)) {
+  for (const path of folders) {
     const real = await realMiseFolder(path);
     if (real === undefined) continue;
     if (first && first.real !== real) return undefined;
@@ -130,8 +147,11 @@ export async function detectInstall(
     if (!version || version.startsWith(".") || ["lib", "node_modules"].includes(version)) return { kind: "unknown" };
     if (!endsWith(segments, packageTail)) return { kind: "unknown" };
     const installFolder = sep + segments.slice(0, installs + 3).join(sep);
-    for (const candidate of await misePackageFolders(installFolder)) {
-      if ((await realMiseFolder(candidate)) === folder) return { kind: "mise" };
+    const candidates = await misePackageFolders(installFolder);
+    if (candidates === undefined) return { kind: "unknown" };
+    for (const candidate of candidates) {
+      if ((await realMiseFolder(candidate)) === folder)
+        return { kind: "mise", entry: join(candidate, "dist", "recense.mjs") };
     }
     return { kind: "unknown" };
   }

@@ -16,6 +16,7 @@ import {
   type MiseLayout,
   makeDatabase,
   makeFake,
+  misePackageFixtures,
   recenseScript,
 } from "../update/test-support.ts";
 
@@ -491,6 +492,29 @@ test.each(["pnpm", "mise"] as const)(
   },
 );
 
+test.each(["aube", "pnpm10", "pnpm11", "aube_cli"] as const)(
+  "mise refuses a %s install linked into the original cwd repository before executing it",
+  async (layout) => {
+    await make("mise", layout);
+    const repo = join(fake.root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    fake.options.cwd = repo;
+    const located = join(fake.root, "located");
+    const next = misePackageFixtures(located)[layout];
+    const newPackage = join(repo, "node_modules/@shllg/recense");
+    const newLinks = next.links.map(([target, link]) => {
+      if (layout === "aube_cli") return [repo, link];
+      return [target === next.folder ? newPackage : target, link];
+    });
+    await fake.set({ located, newPackage, newLinks });
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain("repository");
+    expect(err()).toContain("to go back");
+    expect(await readFile(join(fake.root, "new-log"), "utf8")).toBe("");
+  },
+);
+
 test.each(["npm", "pnpm", "mise"] as const)(
   "a marked local build under %s prints commands without cd and runs nothing",
   async (layout) => {
@@ -554,7 +578,34 @@ test.each(["npm", "aube", "bun", "pnpm10", "pnpm11", "aube_cli"] as const)(
   },
 );
 
-test("mise with aube preserves the global tool request and its options", async () => {
+test.each([
+  ["pnpm11", "v11", "f".repeat(64), "1f54c6-1a213f5c7ca-5a1f77446ee418a1"],
+  ["aube_cli", "global-aube", "e".repeat(64), "1a2b-18c3d4e5f60"],
+] as const)("mise rollback starts the old %s entry through its stable link", async (layout, parent, hash, id) => {
+  await make("mise", layout);
+  await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(1);
+  const install = join(fake.root, "mise/installs/npm-shllg-recense/0.1.0");
+  const entry = join(install, parent, hash, "node_modules/@shllg/recense/dist/recense.mjs");
+  expect(err()).toContain("to go back");
+  expect(err()).toContain(`${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`);
+  expect(err()).not.toContain(id);
+});
+
+test.each([
+  ["equal=sign", "could not use the old entry path"],
+  ["line\nbreak", "Service paths must not contain control characters"],
+] as const)("mise checks the rollback entry before running the installer (%#)", async (alias, message) => {
+  await make("mise", "aube_cli");
+  const parent = join(fake.root, "mise/installs/npm-shllg-recense/0.1.0/global-aube");
+  await rename(join(parent, "e".repeat(64)), join(parent, alias));
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain(message);
+  expect(await fake.calls()).toEqual([]);
+  expect(out()).toBe("");
+});
+
+test("recense leaves the global mise config alone and runs no mise use with aube", async () => {
   await make("mise", "aube");
   const config = join(fake.home, ".config/mise/config.toml");
   const contents = '[tools]\n"npm:@shllg/recense" = { version = "latest", postinstall = "echo installed" }\n';
@@ -900,7 +951,7 @@ test.each([
   expect(await pending).toBe(code);
 });
 
-test.each(["node", "npm", "systemctl"])(
+test.each(["node", "npm", "pnpm", "bun", "aube", "systemctl"])(
   "update removes an entry with a repository %s link from child and printed PATH",
   async (name) => {
     await make("mise");

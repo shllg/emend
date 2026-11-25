@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
@@ -70,6 +70,17 @@ describe("confirmed install detection", () => {
   test.each(Object.entries(layouts))("the local-build marker overrides %s", async (_name, layout) => {
     const f = await fixture(layout, { name: "@shllg/recense", recenseLocalBuild: "abc123" });
     expect(await detectInstall(f.entry)).toEqual({ kind: "local", where: "marked" });
+  });
+  test.each([
+    ["pnpm11", join("v11", "f".repeat(64))],
+    ["aube_cli", join("global-aube", "e".repeat(64))],
+    ["aube", ""],
+  ] as const)("keeps the stable entry path for mise with %s", async (layout, parent) => {
+    const f = await fixture(mise[layout].folder);
+    expect(await detectInstall(f.entry)).toEqual({
+      kind: "mise",
+      entry: join(await realpath(f.root), miseInstall, parent, "node_modules/@shllg/recense/dist/recense.mjs"),
+    });
   });
   test.each([
     layouts.pnpm10,
@@ -156,7 +167,7 @@ describe("locating the package in a mise install", () => {
   test("returns the first path to a package even when it is a symlink", async () => {
     const f = await fixture(layouts.miseAubeCli);
     const install = join(f.root, miseInstall);
-    const alias = join(install, "global-aube", "0".repeat(64), "node_modules/@shllg/recense");
+    const alias = join(install, "global-aube", "e".repeat(64), "node_modules/@shllg/recense");
     expect(await locateMisePackage(install)).toBe(alias);
   });
   test("finds no package in an empty install folder", async () => {
@@ -172,10 +183,31 @@ describe("locating the package in a mise install", () => {
     const f = await fixture(layouts.misePnpm11);
     const install = join(f.root, miseInstall);
     const v11 = join(install, "v11");
-    for (let i = 1; i < 64; i++) await writeFile(join(v11, `.ignored-${i}`), "");
+    for (let i = 2; i < 64; i++) await writeFile(join(v11, `.ignored-${i}`), "");
     expect(await locateMisePackage(install)).toBeDefined();
     await writeFile(join(v11, ".ignored-64"), "");
     expect(await locateMisePackage(install)).toBeUndefined();
+  });
+  test("refuses the npm layout when a v11 listing exceeds 64 entries", async () => {
+    const f = await fixture(layouts.mise);
+    const install = join(f.root, miseInstall);
+    const v11 = join(install, "v11");
+    await mkdir(v11);
+    for (let i = 0; i < 65; i++) await writeFile(join(v11, `entry-${i}`), "");
+    expect(await locateMisePackage(install)).toBeUndefined();
+    expect(await detectInstall(f.entry)).toEqual({ kind: "unknown" });
+  });
+  test.skipIf(process.getuid?.() === 0)("refuses the npm layout when global-aube cannot be listed", async () => {
+    const f = await fixture(layouts.mise);
+    const install = join(f.root, miseInstall);
+    const globalAube = join(install, "global-aube");
+    await mkdir(globalAube, { mode: 0o700 });
+    await chmod(globalAube, 0o000);
+    try {
+      expect(await locateMisePackage(install)).toBeUndefined();
+    } finally {
+      await chmod(globalAube, 0o700);
+    }
   });
   test("lists package folders in layout and name order", async () => {
     const install = await mkdtemp(join(process.env.RECENSE_HOME as string, "layouts-"));
@@ -183,6 +215,7 @@ describe("locating the package in a mise install", () => {
     const ignored = ["other", "v11/.cache", "v11/node_modules", "global-aube/.cache", "global-aube/node_modules"];
     const folder = (root: string) => join(install, root, "node_modules/@shllg/recense");
     for (const root of [...roots, ...ignored].reverse()) await mkdir(folder(root), { recursive: true });
+    await writeFile(join(install, "v13"), "");
     expect(await misePackageFolders(install)).toEqual(roots.map(folder));
   });
 });
