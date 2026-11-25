@@ -101,6 +101,7 @@ export const FrameToParent = span
 export type DocNavigation = Extract<typeof FrameToParent._output, { type: "recense:navigate" }>;
 export const ParentToFrame = empty
   .extend({ type: literal("recense:highlight"), anchors: span.extend({ threadId }).array() })
+  .or(empty.extend({ type: literal("recense:clear-selection") }))
   .or(empty.extend({ type: literal("recense:repo"), url: RepoUrl }))
   .or(HtmlDocChanges.safeExtend({ type: literal("recense:changed") }))
   .or(diagramResult.extend(diagramAddress))

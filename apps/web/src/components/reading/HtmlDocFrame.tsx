@@ -108,6 +108,7 @@ export function HtmlDocFrame({
   ) as ReturnType<typeof listDrafts>;
   const frame = useRef<HTMLIFrameElement>(null);
   const root = useRef<HTMLDivElement>(null);
+  const selectionPrompt = useRef<HTMLDivElement>(null);
   const loads = useRef(0);
   const gone = useRef(false);
   const [away, setAway] = useState(false);
@@ -117,6 +118,7 @@ export function HtmlDocFrame({
   const repoSent = useRef(false);
   const [ready, setReady] = useState(0);
   const [selectionTarget, setSelectionTarget] = useState<HtmlSpanTarget | null>(null);
+  const hasSelectionTarget = selectionTarget !== null;
   const [formTarget, setFormTarget] = useState<HtmlSpanTarget | null>(null);
   const composing = formTarget !== null;
   const [show, setShow] = useState<HtmlNavigation>();
@@ -190,6 +192,16 @@ export function HtmlDocFrame({
   const post = useCallback((message: ParentToFrame) => {
     if (readyNow.current && !gone.current) frame.current?.contentWindow?.postMessage(message, "*");
   }, []);
+  useEffect(() => {
+    if (readOnly || !hasSelectionTarget) return;
+    const onPointerUp = (event: PointerEvent) => {
+      if (event.target instanceof Node && selectionPrompt.current?.contains(event.target)) return;
+      setSelectionTarget(null);
+      post({ type: "recense:clear-selection" });
+    };
+    document.addEventListener("pointerup", onPointerUp, true);
+    return () => document.removeEventListener("pointerup", onPointerUp, true);
+  }, [readOnly, hasSelectionTarget, post]);
   const markAway = useCallback(() => {
     gone.current = true;
     readyNow.current = false;
@@ -458,7 +470,7 @@ export function HtmlDocFrame({
         )}
       </Sheet>
       {!readOnly && selectionTarget && !composerOpen && !(composing && commentsOpen) && (
-        <div className="em-html-selection">
+        <div ref={selectionPrompt} className="em-html-selection">
           <Button
             variant="primary"
             size="sm"

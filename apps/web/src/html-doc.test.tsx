@@ -737,6 +737,8 @@ test("closed strict message schemas enforce every contract limit", () => {
       .success,
   ).toBe(false);
   expect(ParentToFrame.safeParse({ type: "recense:scroll", threadId: id }).success).toBe(true);
+  expect(ParentToFrame.safeParse({ type: "recense:clear-selection" }).success).toBe(true);
+  expect(ParentToFrame.safeParse({ type: "recense:clear-selection", extra: true }).success).toBe(false);
   for (const fragment of ["", "x".repeat(1024)])
     expect(FrameToParent.safeParse({ type: "recense:navigate", path: "other.html", fragment }).success).toBe(true);
 });
@@ -898,6 +900,35 @@ describe("pressing Comment on selection", () => {
     fireEvent.mouseUp(prompt);
     fireEvent.click(prompt);
   }
+
+  test("only a completed press outside the prompt clears the frame selection", () => {
+    const { message, post } = mount();
+    message({ type: "recense:ready" });
+    message({ type: "recense:anchor", ...anchor });
+    post.mockClear();
+    const prompt = screen.getByRole("button", { name: "Comment on selection" });
+    const touch = { pointerType: "touch" };
+    fireEvent.pointerDown(document.body, touch);
+    advance(120);
+    fireEvent.pointerCancel(document.body, touch);
+    expect(prompt.isConnected).toBe(true);
+    expect(post).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(document.body, mouse);
+    advance(120);
+    expect(prompt.isConnected).toBe(true);
+    fireEvent.pointerUp(document.body, mouse);
+    expect(screen.queryByRole("button", { name: "Comment on selection" })).toBeNull();
+    fireEvent.mouseUp(document.body);
+    fireEvent.click(document.body);
+    expect(post).toHaveBeenCalledExactlyOnceWith({ type: "recense:clear-selection" }, "*");
+
+    post.mockClear();
+    message({ type: "recense:anchor", ...anchor });
+    openSelection();
+    expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
+    expect(post).not.toHaveBeenCalled();
+  });
 
   test("Cancel retires the selection prompt until the frame proposes a new anchor", () => {
     const { message } = mount();

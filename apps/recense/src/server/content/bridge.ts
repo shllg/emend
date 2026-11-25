@@ -1411,6 +1411,10 @@ export const BRIDGE_SOURCE = String.raw`(() => {
       for (const path of event.data.paths) if (typeof path === "string") docs.add(path);
     }
     else if (event.data.type === "recense:highlight" && Array.isArray(event.data.anchors)) highlight(event.data.anchors);
+    else if (event.data.type === "recense:clear-selection") {
+      const selection = dom(window.Document.prototype, "getSelection", document);
+      if (selection) dom(window.Selection.prototype, "removeAllRanges", selection);
+    }
     else if (event.data.type === "recense:scroll" && typeof event.data.threadId === "string") {
       const range = ranges.get(event.data.threadId);
       if (range) {

@@ -1281,6 +1281,9 @@ Other frame messages carry ready notifications, proposed quotes, quote highlight
 scroll requests; saving a comment requires the reviewer's explicit action.
 When its selection can no longer take a comment, the frame sends the strict message
 `{ type: "recense:deselect" }` with no other fields, and the parent hides the Comment on selection button.
+When the reviewer presses or taps the app outside both the doc frame and the Comment on selection button,
+the parent hides the button and sends the strict message `{ type: "recense:clear-selection" }` with no
+other fields, and the bridge then removes the frame's selection.
 
 After each `recense:ready`, the parent sends `recense:layout` first, before highlights, doc paths or
 position restore. The message schema accepts exactly two strict shapes, with no extra fields:

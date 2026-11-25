@@ -786,6 +786,39 @@ test.each(["mouse", "touch"])("bridge reports a collapsed %s selection once capt
   }
 });
 
+test("only the parent can clear the selection and the bridge reports deselect after it settles", async () => {
+  vi.useFakeTimers();
+  const b = bridge("<p>Seeds grow</p>");
+  Object.assign(b.window, { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout });
+  try {
+    const doc = b.window.document;
+    const range = doc.createRange();
+    range.selectNodeContents(doc.body);
+    expect(b.select(range)).toMatchObject({ type: "recense:anchor", quote: "Seeds grow" });
+    vi.advanceTimersByTime(200);
+    b.post.mockClear();
+    const selection = doc.getSelection();
+    Object.defineProperty(doc, "getSelection", { value: null });
+    Object.defineProperty(selection, "removeAllRanges", { value: null });
+    const clear = { type: "recense:clear-selection" };
+    b.message(clear, b.window);
+    vi.advanceTimersByTime(200);
+    expect(selection.getRangeAt(0)).toBe(range);
+    expect(b.post).not.toHaveBeenCalled();
+
+    b.message(clear);
+    expect(selection.rangeCount).toBe(0);
+    vi.advanceTimersByTime(199);
+    expect(b.post).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(b.post).toHaveBeenCalledExactlyOnceWith({ type: "recense:deselect" }, "*");
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    await b.window.happyDOM.close();
+  }
+});
+
 test("glossary card events are ignored and a selection in the card retires the document quote", async () => {
   const b = bridge("<p>Seeds grow.</p><h2>Glossary</h2><dl><dt>Seeds</dt><dd>Grains.</dd></dl>");
   try {
