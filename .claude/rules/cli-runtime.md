@@ -11,7 +11,7 @@ A repo under review may try to run its own code through recense: under mise, its
 point `recense`, `node` or `git` at code it controls, and agents run recense with full rights. These
 checks catch a copy inside the repo.
 
-- `publish`, `look`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
+- `prepare`, `publish`, `look`, `wait`, `feedback`, `reply`, `mcp`, `stop`, `service`, `update` and `skills` refuse
   a recense whose Node.js or entry resolves inside a repository that holds the working directory
   (`apps/recense/src/cli.ts`, `runtime-repository.ts`). The refusal comes before `main.ts` loads.
   `status --line` runs the same check but stays silent: a refusal or a failed check prints nothing

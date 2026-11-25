@@ -67,10 +67,12 @@ The CLI runs in repos under review: treat them as hostile.
   references it, at the preflight and on the opened file. Listing errors name only the caller's
   argument or a fixed reason; skip warnings and the nothing-to-publish error escape listed paths
   and give fixed reasons.
-- stdout is a contract: `recense publish --manifest` prints one JSON line; `recense publish <path>...`
+- stdout is a contract: `recense prepare` prints one JSON line with the manifest path and diff and doc counts.
+  `recense publish --manifest` prints one JSON line; `recense publish <path>...`
   prints the review URL alone, escaped, or that JSON line with `--json`; `recense wait` and
   `recense feedback` print one JSON object with `kind` `go`, `approve`, `closed` or `pending` and
-  exit 0. Any error prints one line on stderr, nothing on stdout, and exits 1. `recense status --line`
+  exit 0. Errors print one line on stderr and nothing on stdout. Prepare usage errors exit 2,
+  other errors exit 1. `recense status --line`
   is the exception: it prints its one line or nothing, never writes stderr, and exits 0 on every
   error.
 - Tokens come from the state directory (`agent.token`, `admin.token`, `hub.token`). Never print a

@@ -599,6 +599,19 @@ test.each(["plugin/skills/recense-review/SKILL.md", "plugin/skills/recense-revie
   },
 );
 
+test("the review skill prepares the manifest in its private folder and uses git to find doc references", () => {
+  const skill = read("plugin/skills/recense-review/SKILL.md");
+  const prepare = skill.indexOf('recense prepare --base <merge-base> --head <commit|worktree> --dir "<review-folder>"');
+  expect(prepare).toBeGreaterThan(0);
+  expect(skill.slice(0, prepare)).toContain("git merge-base");
+  expect(skill.slice(0, prepare)).toContain("mktemp -d");
+  expect(skill.slice(prepare)).toContain('recense publish --manifest "<review-folder>/review.json"');
+  const docs = skill.split("## Collect the docs the change rests on\n")[1]?.split("\n## ")[0] ?? "";
+  expect(docs).toContain("git log --no-color");
+  expect(docs).toContain("xargs -0 grep");
+  expect(docs).not.toMatch(/--name-status|git cat-file|git ls-files --others/);
+});
+
 test("review guidance lists the opening fields in display order", () => {
   const text = read("plugin/skills/recense-review/SKILL.md");
   const writing = text.split("## Write for the reviewer\n")[1]?.split("\n## ")[0] ?? "";

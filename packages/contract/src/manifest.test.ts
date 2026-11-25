@@ -30,6 +30,36 @@ const manifest = {
 };
 
 describe("publish manifest", () => {
+  test("accepts prepared facts on diffs and ignores newer facts", () => {
+    const prepared = { status: "renamed", oldPath: "old.md", added: 3, removed: 2, doc: "included" };
+    const file = { path: "plan.md", role: "diff", prepared };
+    expect(
+      PublishManifest.parse({
+        ...manifest,
+        files: [{ ...file, prepared: { ...prepared, futureFact: 1 } }],
+      }).files,
+    ).toEqual([file]);
+    expect(PublishManifest.safeParse({ ...manifest, files: [{ ...file, role: "doc" }] }).success).toBe(false);
+    expect(PublishManifest.safeParse({ ...manifest, files: [{ ...file, path: "plan.txt" }] }).success).toBe(false);
+  });
+
+  test.each([
+    {},
+    { status: "unknown" },
+    { status: "renamed", oldPath: "../old.md" },
+    { status: "added", added: -1 },
+    { status: "added", removed: 1.5 },
+    { status: "added", added: LIMITS.diffSideBytes + 1 },
+    { status: "added", removed: LIMITS.diffSideBytes + 1 },
+    { status: "added", flag: "text" },
+    { status: "added", lockfile: false },
+    { status: "added", doc: "changed" },
+  ])("refuses invalid prepared facts %j", (prepared) => {
+    expect(
+      PublishManifest.safeParse({ ...manifest, files: [{ path: "plan.md", role: "diff", prepared }] }).success,
+    ).toBe(false);
+  });
+
   test("preserves old writeups and optional opening fields", () => {
     expect(WriteupInput.parse(manifest.writeup)).toEqual(manifest.writeup);
     expect(PublishManifest.parse(manifest)).toEqual(manifest);

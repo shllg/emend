@@ -2030,10 +2030,18 @@ manifest with `role: "doc"`; otherwise validation issues `["main"]` with the mes
 `main is not a doc of this revision`. `"writeup"` opens Writeup even if its Markdown is empty.
 `base` and `head` appear together or neither appears. Commits are fully resolved lowercase hex
 object ids (40 characters for SHA-1 or 64 for SHA-256); `head` also accepts `"worktree"`.
-Docs-only reviews can omit both. Manifest files are `{ path, role: "diff" | "doc", topic?, source?, title?, view?: DocView, notes?: AgentNote[] }`;
+Docs-only reviews can omit both. Manifest files are `{ path, role: "diff" | "doc", topic?, source?, title?, view?: DocView, notes?: AgentNote[], prepared? }`;
 `source` is a non-empty local filename from which the CLI reads a doc, separate from its published
 path. It may be absolute or relative, has at most `pathChars` characters, must be well-formed UTF-16,
 and cannot contain NUL, C0 controls or DEL.
+
+`recense prepare --base <commit> --head <commit|worktree> --dir <folder>` creates `review.json` in an existing
+private folder outside the worktree, with a title, the range, empty topics and writeup, and one diff per changed path.
+Only a diff accepts `prepared: { status: FileStatus, oldPath?: FilePath, added?, removed?, flag?: FileFlag, lockfile?: true, doc? }`.
+Renames carry the old path. Line counts are nonnegative integers up to `diffSideBytes` and are omitted for flagged
+files or a count timeout. Only Markdown and HTML paths carry `doc`, one of `included`, `deleted`, `differs-from-head`,
+`missing`, `too-large` or `refused`. An included doc follows its diff as a separate file entry.
+Publish ignores `prepared` and omits it from the request.
 
 `media?: { path: FilePath, source? }[]` lists images that the writeup embeds, at most
 `mediaPerRevision` (50). A `path` ends in png, jpg, jpeg, gif, webp or avif (case insensitive;

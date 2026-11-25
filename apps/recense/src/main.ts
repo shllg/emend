@@ -41,6 +41,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   recense attach <link>            Attach this machine to a hub
   recense detach                   Detach this machine
   recense devices [--revoke <id>]  List or revoke devices
+  recense prepare --base <commit> --head <commit|worktree> --dir <folder>
   recense publish <path>... [--title T] [--key K | --new] [--review ID] [--main PATH] [--source] [--json] [--project NAME]
   recense publish --manifest <file> [--review <id>] [--key <name>] [--project NAME]
   recense look <file.html>... [--theme <name> | --no-theme]  Give HTML files recense's look
@@ -78,6 +79,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
   if (
     [
       "wait",
+      "prepare",
       "feedback",
       "reply",
       "ls",
@@ -114,6 +116,11 @@ export async function run(argv: string[], io: Io): Promise<number> {
         update: () => import("./cli/commands/update.ts").then((m) => m.updateCommand),
         skills: () => import("./cli/commands/skills.ts").then((m) => m.skillsCommand),
       };
+      if (argv[0] === "prepare") {
+        const { prepareCommand } = await import("./cli/commands/prepare.ts");
+        await prepareCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io, process.cwd());
+        return 0;
+      }
       if (argv[0] === "config") {
         const { configCommand } = await import("./cli/commands/config.ts");
         await configCommand(defaultStateDir(io.env), defaultConfigDir(io.env), argv.slice(1), io, process.cwd());
