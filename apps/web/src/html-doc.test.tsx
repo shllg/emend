@@ -879,19 +879,8 @@ test("only the current frame can retire its selection prompt", () => {
   expect(screen.queryByText("Comment on selection")).toBeNull();
 });
 
-test("Cancel retires the selection prompt until the frame proposes a new anchor", () => {
-  const { message } = mount();
-  message({ type: "recense:anchor", ...anchor });
-  fireEvent.click(screen.getByText("Comment on selection"));
-  expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(screen.queryByText("Comment on selection")).toBeNull();
-  message({ type: "recense:anchor", ...anchor, quote: "roots" });
-  expect(screen.getByText("Comment on selection")).toBeTruthy();
-});
-
 describe("pressing Comment on selection", () => {
-  const touch = { pointerType: "touch", pointerId: 1 };
+  const mouse = { pointerType: "mouse", button: 0 };
   const advance = (ms: number) => act(() => void vi.advanceTimersByTime(ms));
 
   beforeEach(() => {
@@ -901,21 +890,25 @@ describe("pressing Comment on selection", () => {
     vi.useRealTimers();
   });
 
-  function pressSelection(message: ReturnType<typeof mount>["message"]) {
+  function openSelection() {
     const prompt = screen.getByRole("button", { name: "Comment on selection" });
-    fireEvent.pointerDown(prompt, touch);
-    message({ type: "recense:deselect" });
+    fireEvent.pointerDown(prompt, mouse);
     advance(120);
-    return prompt;
-  }
-
-  function openSelection(message: ReturnType<typeof mount>["message"]) {
-    const prompt = pressSelection(message);
-    expect(prompt.hasPointerCapture(touch.pointerId)).toBe(true);
-    fireEvent.pointerUp(prompt, touch);
+    fireEvent.pointerUp(prompt, mouse);
     fireEvent.mouseUp(prompt);
     fireEvent.click(prompt);
   }
+
+  test("Cancel retires the selection prompt until the frame proposes a new anchor", () => {
+    const { message } = mount();
+    message({ type: "recense:anchor", ...anchor });
+    openSelection();
+    expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Comment on selection")).toBeNull();
+    message({ type: "recense:anchor", ...anchor, quote: "roots" });
+    expect(screen.getByText("Comment on selection")).toBeTruthy();
+  });
 
   test.each(["Escape", "Close", "outside press"])(
     "closing Comments with %s preserves the form and allows a new quote",
@@ -935,7 +928,7 @@ describe("pressing Comment on selection", () => {
         expect(screen.queryByRole("dialog", { name: "Comments" })).toBeNull();
       };
       message({ type: "recense:anchor", ...anchor });
-      openSelection(message);
+      openSelection();
       fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep this draft" } });
       closePanel();
       const next = { type: "recense:anchor", ...anchor, quote: "roots" };
@@ -948,39 +941,19 @@ describe("pressing Comment on selection", () => {
       expect(screen.getByText(anchor.quote, { selector: "mark" })).toBeTruthy();
       closePanel();
       message(next);
-      openSelection(message);
+      openSelection();
       expect(screen.getByText(next.quote, { selector: "mark" })).toBeTruthy();
       expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Comment" }).value).toBe("");
       expect(localStorage.getItem(draftKey(id, thread.target))).toBe("Keep this draft");
     },
   );
 
-  test.each(["pointerup", "pointercancel", "lostpointercapture"])(
-    "%s without a click retires the prompt after one frame deselection",
-    (release) => {
-      const { message } = mount();
-      message({ type: "recense:anchor", ...anchor });
-      const prompt = pressSelection(message);
-      if (release === "lostpointercapture") fireEvent.lostPointerCapture(prompt, touch);
-      else if (release === "pointercancel") fireEvent.pointerCancel(document, { ...touch, pointerId: 2 });
-      else fireEvent.pointerUp(document, touch);
-      advance(599);
-      expect(prompt.isConnected).toBe(true);
-      advance(1);
-      expect(screen.queryByText("Comment on selection")).toBeNull();
-    },
-  );
-
-  test("a newer frame selection supersedes the pending deselection and opens with its own quote", () => {
+  test("a frame deselection during a press immediately hides the button", () => {
     const { message } = mount();
     message({ type: "recense:anchor", ...anchor });
-    const prompt = pressSelection(message);
-    fireEvent.pointerUp(prompt, touch);
-    advance(599);
-    message({ type: "recense:anchor", ...anchor, quote: "roots" });
-    advance(1);
-    openSelection(message);
-    expect(screen.getByText("roots", { selector: "mark" })).toBeTruthy();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Comment on selection" }), mouse);
+    message({ type: "recense:deselect" });
+    expect(screen.queryByText("Comment on selection")).toBeNull();
   });
 });
 test("ready and changed threads post only placed anchors for this doc; Show in doc scrolls", () => {

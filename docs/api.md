@@ -1280,8 +1280,7 @@ navigating to another doc under the current doc's key still returns 404 and trig
 Other frame messages carry ready notifications, proposed quotes, quote highlights and thread
 scroll requests; saving a comment requires the reviewer's explicit action.
 When its selection can no longer take a comment, the frame sends the strict message
-`{ type: "recense:deselect" }` with no other fields. The parent hides the Comment on selection
-button, deferring dismissal until 600 ms after a press on the button ends so the click can open the form.
+`{ type: "recense:deselect" }` with no other fields, and the parent hides the Comment on selection button.
 
 After each `recense:ready`, the parent sends `recense:layout` first, before highlights, doc paths or
 position restore. The message schema accepts exactly two strict shapes, with no extra fields:

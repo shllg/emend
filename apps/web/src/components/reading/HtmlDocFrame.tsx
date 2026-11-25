@@ -119,9 +119,6 @@ export function HtmlDocFrame({
   const [selectionTarget, setSelectionTarget] = useState<HtmlSpanTarget | null>(null);
   const [formTarget, setFormTarget] = useState<HtmlSpanTarget | null>(null);
   const composing = formTarget !== null;
-  const guardUntil = useRef(0);
-  const pendingDeselect = useRef(false);
-  const deselectTimer = useRef<number | undefined>(undefined);
   const [show, setShow] = useState<HtmlNavigation>();
   const [gallery, setGallery] = useState<{ items: LightboxSubject[]; index: number } | null>(null);
   const [diagramJob, setDiagramJob] = useState<DiagramJob | null>(null);
@@ -202,27 +199,6 @@ export function HtmlDocFrame({
     setReady(0);
     setSelectionTarget(null);
   }, []);
-  const endPress = useCallback(() => {
-    if (guardUntil.current !== Number.POSITIVE_INFINITY) return;
-    guardUntil.current = Date.now() + 600;
-    window.clearTimeout(deselectTimer.current);
-    deselectTimer.current = window.setTimeout(() => {
-      deselectTimer.current = undefined;
-      if (pendingDeselect.current) {
-        pendingDeselect.current = false;
-        setSelectionTarget(null);
-      }
-    }, 600);
-  }, []);
-  useEffect(() => {
-    document.addEventListener("pointerup", endPress, true);
-    document.addEventListener("pointercancel", endPress, true);
-    return () => {
-      window.clearTimeout(deselectTimer.current);
-      document.removeEventListener("pointerup", endPress, true);
-      document.removeEventListener("pointercancel", endPress, true);
-    };
-  }, [endPress]);
   useEffect(() => {
     const receive = (event: MessageEvent) => {
       if (gone.current || !frame.current?.contentWindow || event.source !== frame.current.contentWindow) return;
@@ -270,12 +246,9 @@ export function HtmlDocFrame({
           index: kept.indexOf(clicked),
         });
       } else if (parsed.data.type === "recense:navigate") onNavigate?.(parsed.data);
-      else if (parsed.data.type === "recense:deselect") {
-        pendingDeselect.current = Date.now() < guardUntil.current;
-        if (!pendingDeselect.current) setSelectionTarget(null);
-      } else if (!readOnly && !composerOpen && !(composing && commentsOpen)) {
+      else if (parsed.data.type === "recense:deselect") setSelectionTarget(null);
+      else if (!readOnly && !composerOpen && !(composing && commentsOpen)) {
         const { quote, prefix, suffix } = parsed.data;
-        pendingDeselect.current = false;
         setSelectionTarget({ kind: "html-span", path, quote, prefix, suffix });
       }
     };
@@ -490,20 +463,7 @@ export function HtmlDocFrame({
             variant="primary"
             size="sm"
             icon={TextSelect}
-            // A tap can collapse the frame selection before the button receives its click.
-            onPointerDown={(event) => {
-              window.clearTimeout(deselectTimer.current);
-              pendingDeselect.current = false;
-              guardUntil.current = Number.POSITIVE_INFINITY;
-              try {
-                event.currentTarget.setPointerCapture(event.pointerId);
-              } catch {
-                // Document release listeners still handle a press when capture is unavailable.
-              }
-            }}
-            onLostPointerCapture={endPress}
             onClick={() => {
-              pendingDeselect.current = false;
               claimDraft(draftKey(reviewId, selectionTarget), "reading");
               setFormTarget(selectionTarget);
               setSelectionTarget(null);
