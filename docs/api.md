@@ -2041,7 +2041,8 @@ Only a diff accepts `prepared: { status: FileStatus, oldPath?: FilePath, added?,
 Renames carry the old path. Line counts are nonnegative integers up to `diffSideBytes` and are omitted for flagged
 files, a count failure or an exhausted count budget. Only Markdown and HTML paths carry `doc`.
 An `included` doc follows its diff as a separate file entry. A `deleted` doc has no new side.
-`differs-from-head` means the disk copy is missing, is not a regular file, or differs from the reviewed commit.
+`differs-from-head` means the disk copy is missing, is not a regular file, or differs from the head commit;
+with a worktree head, the copy changed while prepare ran.
 Only `refused` may carry `docRefusal`, a one-line reason of at most 1000 characters.
 Publish ignores `prepared` and omits it from the request.
 

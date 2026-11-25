@@ -118,10 +118,12 @@ and added and removed line counts when available. A flag marks binary or oversiz
 
 For Markdown and HTML, `doc: "included"` means the doc entry follows the diff.
 `deleted` means the change removed it. `differs-from-head` means the disk copy is missing,
-is not a regular file, or differs from the reviewed commit. For `refused`, read the reason in `docRefusal`.
+is not a regular file, or differs from the head commit; with a worktree head, the copy changed
+while prepare ran. For `refused`, read the reason in `docRefusal`.
 Cite a left-out doc in prose.
 Read the docs to judge their substance. Keep design docs and decision records and skip generated indexes.
 If a doc disappears or exceeds its size limit before publish, remove its doc entry and cite it in prose.
+If publish refuses with `too many files in the review`, `the docs pass the revision size limit` or `publish request exceeds its size limit`, remove doc entries, those you added by hand first, until it publishes, and cite each removed doc in prose.
 
 Inspect record names and adapt the folder and patterns; a dated slug may itself be the identifier:
 
@@ -146,17 +148,23 @@ git ls-files -z --others --exclude-standard | xargs -0 grep -nHE 'ADR|RFC|PRD|[R
 
 Resolve references to supported, readable files; cite unavailable or unsupported docs in prose.
 Prepare checked each changed doc it lists as `included`, `deleted`, `differs-from-head` or `refused`.
-A `not checked: …` refusal means prepare skipped that doc's check. You can check it by hand as
-described below for that head and give it a `doc` entry if it passes.
-For an unchanged cited doc with a commit head, use the same check from the repository root.
-If a cited path contains a single quote, a backslash, `$`, a backquote or a control character, cite it in prose without running the check.
+A `not checked: …` refusal means prepare skipped that doc's check. Such a doc, and an unchanged
+cited doc, gets a `doc` entry only after the hand check below passes.
+
+Never put a path into a command when it contains a single quote, a backslash, `$`, a backquote or a control character: cite that doc in prose without running a check.
+Run the check from the repository root. With a commit head:
 
 ```sh
 git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'
 ```
 
-Exit 0 means the doc exists at `head` and the disk copy is identical. Give it a `doc` entry.
-On any other exit, cite it in prose only. With a worktree head, check that the doc is a readable regular file before giving it a `doc` entry.
+With a worktree head:
+
+```sh
+test -f './<path>' && test ! -L './<path>' && test -r './<path>'
+```
+
+Exit 0 means the doc may get a `doc` entry. On any other exit, cite it in prose only.
 Set each doc entry's `topic` to the topic whose prose leans on it.
 
 Name the doc and its supporting heading in the topic's `why` or `body`.

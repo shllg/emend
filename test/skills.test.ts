@@ -609,11 +609,19 @@ test("the review skill prepares the manifest in its private folder and uses git 
   const docs = skill.split("## Collect the docs the change rests on\n")[1]?.split("\n## ")[0] ?? "";
   expect(docs).toContain("git log --no-color");
   expect(docs).toContain("xargs -0 grep");
-  expect(docs).toContain("For an unchanged cited doc with a commit head");
-  expect(docs).toContain(
-    "If a cited path contains a single quote, a backslash, `$`, a backquote or a control character, cite it in prose without running the check.",
-  );
-  expect(docs).toContain("git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'");
+  const guard =
+    "Never put a path into a command when it contains a single quote, a backslash, `$`, a backquote or a control character: cite that doc in prose without running a check.";
+  const commitCheck = "git cat-file -e '<head>:<path>' && git show '<head>:<path>' | cmp -s - './<path>'";
+  const worktreeCheck = "test -f './<path>' && test ! -L './<path>' && test -r './<path>'";
+  expect(docs).toContain(guard);
+  expect(docs).toContain(commitCheck);
+  expect(docs).toContain(worktreeCheck);
+  const guardIndex = docs.indexOf(guard);
+  expect(guardIndex).toBeGreaterThan(-1);
+  expect(guardIndex).toBeLessThan(docs.indexOf(commitCheck));
+  expect(guardIndex).toBeLessThan(docs.indexOf(worktreeCheck));
+  expect(docs).toContain("A `not checked: …` refusal means prepare skipped that doc's check.");
+  expect(docs).toContain("publish request exceeds its size limit");
   expect(docs).toContain("`docRefusal`");
   expect(docs).not.toMatch(/--name-status|git ls-files --others/);
 });
