@@ -1,9 +1,11 @@
 import { DiffHunksRenderer } from "@pierre/diffs";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, onTestFinished, test, vi } from "vitest";
+import { ReadOnlyReview } from "../../lib/read-only-review.ts";
 import { DiffView } from "./FileDiff.tsx";
 import { parsePair } from "./parse.worker.ts";
 import { syntaxTheme } from "./theme.ts";
+import { TOUCH_HOLD_MS } from "./touch-lines.ts";
 
 afterEach(() => {
   cleanup();
@@ -96,6 +98,42 @@ test.each(["split", "unified"] as const)("real %s gutter selects on tap and canc
   fireEvent.pointerDown(cell, tap);
   fireEvent.pointerUp(cell, tap);
   expect(select).toHaveBeenCalledExactlyOnceWith({ start: 2, end: 2, side: "additions" });
+});
+
+test.each([
+  { mode: "writable", readOnly: false },
+  { mode: "read-only", readOnly: true },
+])("holding a real gutter line number in a $mode review", async ({ readOnly }) => {
+  const parsed = parsePair({ oldFile: null, newFile: { name: "sample.txt", contents: "first\nsecond\n" } });
+  const view = render(
+    <ReadOnlyReview value={readOnly}>
+      <DiffView fileDiff={parsed} diffStyle="unified" selected={null} annotations={[]} onSelect={() => {}} />
+    </ReadOnlyReview>,
+  );
+  const shadow = view.container.querySelector("diffs-container")?.shadowRoot;
+  const selector = readOnly
+    ? '[data-column-number="2"]'
+    : 'pre[data-interactive-line-numbers] [data-column-number="2"]';
+  await waitFor(() => expect(shadow?.querySelector(selector)).toBeTruthy());
+  const cell = shadow?.querySelector(selector) as HTMLElement;
+
+  function touch(type: string, ...points: [number, number][]) {
+    const event = new Event(type, { bubbles: true, composed: true, cancelable: true });
+    Object.defineProperty(event, "touches", { value: points.map(([clientX, clientY]) => ({ clientX, clientY })) });
+    cell.dispatchEvent(event);
+    return event;
+  }
+
+  vi.useFakeTimers();
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  touch("touchstart", [20, 30]);
+  vi.advanceTimersByTime(TOUCH_HOLD_MS + 1);
+  expect(cell.hasAttribute("data-touch-hold")).toBe(!readOnly);
+  expect(touch("touchmove", [20, 100]).defaultPrevented).toBe(!readOnly);
+  touch("touchend");
+  expect(cell.hasAttribute("data-touch-hold")).toBe(false);
 });
 
 test.each([
