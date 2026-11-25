@@ -5,8 +5,10 @@ principles: the direction every change moves in. Sections 2 to 10 hold the rules
 value, a token, a behaviour or a state that must exist. Breaking a rule, or making a principle's
 check worse, is a defect; anything beyond the principles and the rules is taste. Check at desktop
 1600×1000 and phone 390×844, in Light and Dark (`localStorage["recense.theme"]` = `light` or
-`dark`, then reload). Values live in `apps/web/src/styles/`; where this guide and the code differ,
-the code wins and the guide gets fixed. `.claude/rules/content-isolation.md` comes first.
+`dark`, then reload). Values live in `apps/web/src/styles/`; where a rule and the code differ, the
+code wins and the rule gets fixed. The principles are targets: where the code still falls short of
+one, an issue moves the code and its rule toward it. `.claude/rules/content-isolation.md` comes
+first.
 
 ## 1. North star and UX principles
 
