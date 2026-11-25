@@ -217,10 +217,11 @@ Use these constraints when writing the manifest:
   Leave it out to use the deepest folder the changed files share.
 - Leave out `writeup.review`. The reviewer gives the verdict.
 - `writeup.checked` is a list of 1 to 12 items `{ "kind": "ran" | "read" | "reasoned", "text": "<Markdown>" }`,
-  each text nonblank. A Markdown string still publishes, without labels. An older recense refuses
-  the list: the CLI prints `writeup.checked (Invalid input: expected string)`, or
-  `recense: invalid_request` when the server is older than the CLI. Then write `checked` as
-  Markdown and publish again.
+  each text nonblank. A Markdown string still publishes, without labels. An older CLI refuses the
+  list with `writeup.checked (Invalid input: expected string)`: write `checked` as Markdown and
+  publish again. An older server answers `recense: invalid_request`, which other refusals print
+  too: publish once more with `checked` as Markdown. If that fails the same way, the list was not
+  the cause: put the list back and fix the other refusal.
 - `writeup.notChecked` is Markdown and never blank.
 - `title` is at most 200 characters; `summary` is at most 2000.
 - `links` is optional: at most 8 entries of `url`, `label` and `kind`. `url` is an `https:` URL

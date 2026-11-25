@@ -763,6 +763,9 @@
   }
   .em-proof-kind {
     float: inline-start;
+    /* Positioned reading blocks would otherwise paint over the float. */
+    position: relative;
+    z-index: 1;
     margin-inline-end: var(--space-2);
     /* Half the difference between the prose line and the pill's padded, bordered line. */
     margin-top: calc((var(--reader-prose-size, var(--type-prose-size)) * var(--lh-prose) - 1lh - 4px) / 2);

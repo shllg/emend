@@ -111,6 +111,8 @@ test("each proof contains its floated kind so later lines can use the full measu
   const label = /\.em-proof-kind\s*\{([^}]+)\}/.exec(css)?.[1];
   expect(proof).toMatch(/display:\s*flow-root;/);
   expect(label).toMatch(/float:\s*inline-start;/);
+  expect(label).toMatch(/position:\s*relative;/);
+  expect(label).toMatch(/z-index:\s*1;/);
   expect(label).toMatch(/margin-inline-end:\s*var\(--space-2\);/);
 });
 

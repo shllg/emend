@@ -517,7 +517,7 @@ export function BlockReader({
       {!readOnly && (error || selectionTarget) && (
         <div
           ref={selectionPrompt}
-          className="sticky bottom-0 space-y-3 rounded-lg border border-line-2 bg-raised p-3 shadow-2"
+          className="sticky bottom-0 z-1 space-y-3 rounded-lg border border-line-2 bg-raised p-3 shadow-2"
           // A non-selectable bar keeps a tap here from collapsing the text selection on iOS.
           style={{
             userSelect: "none",
