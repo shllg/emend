@@ -1,4 +1,4 @@
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, opendir, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, sep } from "node:path";
 
 import { readRegular } from "../publish/read.ts";
@@ -8,19 +8,99 @@ export const updatePackage = "@shllg/recense";
 export const updateDoc = "https://github.com/shllg/recense/blob/release/docs/setup/update.md";
 
 export type Install =
-  | { kind: "mise" }
+  | { kind: "mise"; entry?: string }
   | { kind: "pnpm" }
   | { kind: "npm"; prefix: string }
   | { kind: "local"; where: "mise-link" | "checkout" | "marked"; root?: string }
   | { kind: "unknown" };
 
 const packageTail = ["node_modules", "@shllg", "recense", "dist", "recense.mjs"];
+const listLimit = 64;
 
 function endsWith(segments: string[], tail: string[]): boolean {
   return (
     segments.length >= tail.length &&
     tail.every((part, index) => segments[segments.length - tail.length + index] === part)
   );
+}
+
+function isMissingPath(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+async function listedNames(folder: string): Promise<string[] | undefined> {
+  const names: string[] = [];
+  try {
+    for await (const { name } of await opendir(folder)) {
+      if (names.length === listLimit) return undefined;
+      names.push(name);
+    }
+  } catch (error) {
+    return isMissingPath(error) ? [] : undefined;
+  }
+  return names.sort();
+}
+
+/**
+ * npm puts node_modules under lib, while bun and embedded aube put it at the install root.
+ * pnpm uses a numeric folder or v<digits>/<id>, and aube CLI uses global-aube/<id>.
+ * List stable folder symlinks before per-install folders. Skip missing paths and non-directories.
+ * Return undefined if a listing exceeds 64 names or a listing or candidate cannot be checked.
+ */
+export async function misePackageFolders(installFolder: string): Promise<string[] | undefined> {
+  const roots = [join(installFolder, "lib"), installFolder];
+  const names = await listedNames(installFolder);
+  if (names === undefined) return undefined;
+  for (const name of names) {
+    if (/^\d+$/.test(name)) roots.push(join(installFolder, name));
+  }
+  for (const name of [...names.filter((name) => /^v\d+$/.test(name)), "global-aube"]) {
+    const parent = join(installFolder, name);
+    const children = await listedNames(parent);
+    if (children === undefined) return undefined;
+    const otherRoots: string[] = [];
+    for (const child of children) {
+      if (child.startsWith(".") || child === "node_modules") continue;
+      const path = join(parent, child);
+      try {
+        if ((await lstat(path)).isSymbolicLink()) roots.push(path);
+        else otherRoots.push(path);
+      } catch (error) {
+        if (!isMissingPath(error)) return undefined;
+      }
+    }
+    roots.push(...otherRoots);
+  }
+  const folders: string[] = [];
+  for (const root of roots) {
+    const candidate = join(root, "node_modules", updatePackage);
+    try {
+      if ((await stat(candidate)).isDirectory()) folders.push(candidate);
+    } catch (error) {
+      if (!isMissingPath(error)) return undefined;
+    }
+  }
+  return folders;
+}
+
+/** Keep the first linked path if every remaining candidate resolves to the same package. */
+export async function locateMisePackage(installFolder: string): Promise<string | undefined> {
+  const folders = await misePackageFolders(installFolder);
+  if (folders === undefined) return undefined;
+  let first: { path: string; real: string } | undefined;
+  for (const path of folders) {
+    let real: string;
+    try {
+      real = await realpath(path);
+    } catch (error) {
+      if (isMissingPath(error)) continue;
+      return undefined;
+    }
+    if (first && first.real !== real) return undefined;
+    first ??= { path, real };
+  }
+  return first?.path;
 }
 
 /** Walk up from the entry's folder and return the first folder that holds a `.git` entry. */
@@ -66,14 +146,19 @@ export async function detectInstall(
   );
   if (installs !== -1) {
     const version = segments[installs + 2];
-    const rest = segments.slice(installs + 3);
-    if (
-      version &&
-      !["lib", "node_modules"].includes(version) &&
-      ((rest.length === packageTail.length && endsWith(rest, packageTail)) ||
-        (rest.length === packageTail.length + 1 && endsWith(rest, ["lib", ...packageTail])))
-    )
-      return { kind: "mise" };
+    if (!version || version.startsWith(".") || ["lib", "node_modules"].includes(version)) return { kind: "unknown" };
+    if (!endsWith(segments, packageTail)) return { kind: "unknown" };
+    const installFolder = sep + segments.slice(0, installs + 3).join(sep);
+    const candidates = await misePackageFolders(installFolder);
+    if (candidates === undefined) return { kind: "unknown" };
+    for (const candidate of candidates) {
+      try {
+        if ((await realpath(candidate)) === folder)
+          return { kind: "mise", entry: join(candidate, "dist", "recense.mjs") };
+      } catch (error) {
+        if (!isMissingPath(error)) return { kind: "unknown" };
+      }
+    }
     return { kind: "unknown" };
   }
   if (modules === 0) {

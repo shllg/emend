@@ -13,8 +13,10 @@ import {
   type Fake,
   installService,
   type Layout,
+  type MiseLayout,
   makeDatabase,
   makeFake,
+  misePackageFixtures,
   recenseScript,
 } from "../update/test-support.ts";
 
@@ -34,8 +36,8 @@ vi.mock("../executable.ts", async (original) => {
 });
 
 let fake: Fake;
-async function make(layout: Layout) {
-  fake = await makeFake(process.env.RECENSE_HOME as string, layout);
+async function make(layout: Layout, miseLayout?: MiseLayout) {
+  fake = await makeFake(process.env.RECENSE_HOME as string, layout, undefined, miseLayout);
   fixtureRoot = fake.root;
   return fake;
 }
@@ -490,6 +492,32 @@ test.each(["pnpm", "mise"] as const)(
   },
 );
 
+test.each(["aube", "pnpm10", "pnpm11", "aube_cli"] as const)(
+  "mise refuses a %s install linked through the original cwd repository before executing it",
+  async (layout) => {
+    await make("mise", layout);
+    const repo = join(fake.root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+    fake.options.cwd = repo;
+    const located = join(fake.root, "located");
+    const next = misePackageFixtures(located)[layout];
+    const hop = join(repo, "hop");
+    const newLinks = next.links.flatMap(([target, link], index) => {
+      if (index > 0) return [[target, link]];
+      return [
+        [target, hop],
+        [hop, link],
+      ];
+    });
+    await fake.set({ located, newPackage: next.folder, newLinks });
+    expect(await update(), err()).toBe(1);
+    expect(err()).toContain("repository");
+    expect(err()).toContain("to go back");
+    expect(await readFile(join(fake.root, "new-log"), "utf8")).toBe("");
+  },
+);
+
 test.each(["npm", "pnpm", "mise"] as const)(
   "a marked local build under %s prints commands without cd and runs nothing",
   async (layout) => {
@@ -537,6 +565,81 @@ test("mise reinstalls from the moving NEW entry with the same node and state fol
     recenseHome: fake.state,
   });
   expect(call?.entry).not.toBe(fake.entry);
+});
+
+test.each(["npm", "aube", "bun", "pnpm10", "pnpm11", "aube_cli"] as const)(
+  "mise upgrades and locates recense with the %s layout",
+  async (layout) => {
+    await make("mise", layout);
+    expect(await update(), err()).toBe(0);
+    expect((await fake.calls()).map(({ tool, argv }) => ({ tool, argv }))).toEqual([
+      { tool: "mise", argv: ["upgrade", "--bump", "npm:@shllg/recense"] },
+      { tool: "mise", argv: ["where", "npm:@shllg/recense"] },
+    ]);
+    expect(out()).toContain("recense: recense is now 0.2.0\n");
+    expect(out()).toContain("recense: this machine runs recense 0.2.0\n");
+  },
+);
+
+test.each([
+  ["pnpm11", "v11", "f".repeat(64), "1f54c6-1a213f5c7ca-5a1f77446ee418a1"],
+  ["aube_cli", "global-aube", "e".repeat(64), "1a2b-18c3d4e5f60"],
+] as const)("mise rollback starts the old %s entry through its stable link", async (layout, parent, hash, id) => {
+  await make("mise", layout);
+  await fake.set({ updateFails: true });
+  expect(await update(), err()).toBe(1);
+  const install = join(fake.root, "mise/installs/npm-shllg-recense/0.1.0");
+  const entry = join(install, parent, hash, "node_modules/@shllg/recense/dist/recense.mjs");
+  expect(err()).toContain("to go back");
+  expect(err()).toContain(`${quoteShellArgument(process.execPath)} ${quoteShellArgument(entry)}\n`);
+  expect(err()).not.toContain(id);
+});
+
+test.each([
+  ["equal=sign", "could not use the old entry path"],
+  ["line\nbreak", "Service paths must not contain control characters"],
+] as const)("mise checks the rollback entry before running the installer (%#)", async (alias, message) => {
+  await make("mise", "aube_cli");
+  const parent = join(fake.root, "mise/installs/npm-shllg-recense/0.1.0/global-aube");
+  await rename(join(parent, "e".repeat(64)), join(parent, alias));
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain(message);
+  expect(await fake.calls()).toEqual([]);
+  expect(out()).toBe("");
+});
+
+test("mise refuses a rollback entry linked through the working directory's repository before backup", async () => {
+  await make("mise", "bun");
+  await makeDatabase(join(fake.state, "recense.db"));
+  const install = join(fake.root, "mise/installs/npm-shllg-recense/0.1.0");
+  const repo = join(fake.root, "repo");
+  await mkdir(join(repo, ".git"), { recursive: true });
+  await writeFile(join(repo, ".git/HEAD"), "ref: refs/heads/main\n");
+  const lib = join(repo, "x");
+  const link = join(lib, "node_modules/@shllg/recense");
+  await mkdir(dirname(link), { recursive: true });
+  await symlink(fake.oldPackage, link);
+  await symlink(lib, join(install, "lib"));
+  fake.options.cwd = repo;
+
+  expect(await update(), err()).toBe(1);
+  expect(err()).toContain("repository");
+  expect(await fake.calls()).toEqual([]);
+  expect(out()).toBe("");
+  expect(await readdir(fake.state)).not.toContain("backups");
+});
+
+test("recense leaves the global mise config alone and runs no mise use with aube", async () => {
+  await make("mise", "aube");
+  const config = join(fake.home, ".config/mise/config.toml");
+  const contents = '[tools]\n"npm:@shllg/recense" = { version = "latest", postinstall = "echo installed" }\n';
+  await mkdir(dirname(config), { recursive: true });
+  await writeFile(config, contents);
+  // On mise 2026.11.6, upgrade --bump keeps latest and its options (checked by hand), so recense leaves the TOML alone.
+  expect(await update(), err()).toBe(0);
+  expect(await readFile(config)).toEqual(Buffer.from(contents));
+  const miseCalls = (await fake.calls()).filter((call) => call.tool === "mise");
+  expect(miseCalls.map((call) => (call.argv as string[])[0])).not.toContain("use");
 });
 
 test.each(["changed", "noop", "failed"])("backup retention after %s with a backward clock", async (outcome) => {
@@ -872,7 +975,7 @@ test.each([
   expect(await pending).toBe(code);
 });
 
-test.each(["node", "npm", "systemctl"])(
+test.each(["node", "npm", "pnpm", "bun", "aube", "systemctl"])(
   "update removes an entry with a repository %s link from child and printed PATH",
   async (name) => {
     await make("mise");

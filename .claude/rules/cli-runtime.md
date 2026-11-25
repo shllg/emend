@@ -56,14 +56,19 @@ checks catch a copy inside the repo.
   resolving to the account's home. It finds mise, npm or pnpm through `findExecutable` and runs
   from home. Its allowlisted environment drops Node options and incoming npm options; path-valued
   variables pass only when checked outside the working directory's repositories, hop by hop.
-  Its PATH also drops entries whose node, npm or systemctl leads into a repository or cannot be checked.
+  Its PATH also drops entries whose node, npm, pnpm, bun, aube or systemctl leads into a
+  repository or cannot be checked. For mise it reads its own install folder and `mise where`'s:
+  names there, in `v<digits>` and `global-aube`, and the real path of each top-level
+  `node_modules/@shllg/recense`. A listing over 64 names, or an error other than a missing path,
+  refuses. Detection needs one to be the running package; the lookup needs exactly one.
   Every child gets `npm_config_ignore_scripts=true`; npm and pnpm get `--ignore-scripts`, and
   pnpm list gets `--config.ignore-pnpmfile=true`, pnpm add `--ignore-pnpmfile`. Children run in
   their own process group; SIGINT, SIGTERM, SIGHUP and SIGQUIT forward to the group, followed by
   SIGKILL on termination. Backups sync the file before rename and the directories afterward.
   Go-back lists stop at the first failure: restore the old package and start it first; restore
   the database only when the old entry's ls reports NewerDatabaseError, warning of lost changes
-  and revived revocations. Prose is shell comments; the database copy moves over the old inode.
+  and revived revocations. Mise go-back starts the matched path, hop-checked.
+  Prose is shell comments; the database copy moves over the old inode.
   Every program uses `/usr/bin/env -i` with checked PATH, HOME, path and session-bus pins; restore
   proxies pass by shell reference, never printed values. Linux stops via a checked absolute systemctl;
   macOS polls launchctl and proceeds only on status 113. Bare stop waits for process exit or discovery

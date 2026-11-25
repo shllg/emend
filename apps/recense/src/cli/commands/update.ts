@@ -1,10 +1,10 @@
-import { realpath, stat, unlink } from "node:fs/promises";
+import { realpath, unlink } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import type { Io } from "../../main.ts";
 import { VERSION } from "../../version.ts";
 import { escapeReference, quoteShellArgument } from "../escape.ts";
-import { filterExecutablePath, findExecutable } from "../executable.ts";
+import { filterExecutablePath, findExecutable, pathThroughRepository } from "../executable.ts";
 import { CliError, CliSignalExit, CliUsageError } from "../http.ts";
 import type { CliRuntime } from "../runtime.ts";
 import { cliRuntime } from "../runtime.ts";
@@ -21,6 +21,7 @@ import {
   detectInstall,
   type Install,
   locateArgs,
+  locateMisePackage,
   type Method,
   methodTool,
   updateArgs,
@@ -84,6 +85,12 @@ async function firstLine(text: string): Promise<string> {
   return text.split(/\r?\n/, 1)[0] ?? "";
 }
 
+function checkedOldEntry(entry: string): string {
+  validatePaths(entry);
+  if (entry.includes("=")) throw new CliError("could not use the old entry path");
+  return entry;
+}
+
 export async function updateCommand(stateDirectory: string, args: string[], io: Io) {
   if (args.length) throw new CliUsageError("Usage: recense update.");
   const options = io.update ?? {};
@@ -128,7 +135,7 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       const helper = await findExecutable(tool, io.env.PATH ?? "", { cwd, home });
       validatePaths(helper.file, runtime.node);
       if ([helper.file, runtime.node].some((path) => path.includes("="))) throw new Error("ambiguous env command");
-      helper.path = await filterExecutablePath(["node", "npm", "systemctl"], helper.path, roots);
+      helper.path = await filterExecutablePath(["node", "npm", "pnpm", "bun", "aube", "systemctl"], helper.path, roots);
       const env = await childEnvironment(io.env, { path: helper.path, home, stateDir }, roots);
       return { helper, env };
     } catch (error) {
@@ -139,16 +146,20 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
   };
   let prepared: Awaited<ReturnType<typeof prepareHelper>> | undefined;
   let install: Install;
-  let oldEntry: string;
+  let rollbackEntry: string;
   try {
-    oldEntry = await realpath(runtime.entry);
-    validatePaths(oldEntry);
-    if (oldEntry.includes("=")) throw new CliError("could not use the old entry path");
+    const oldEntry = checkedOldEntry(await realpath(runtime.entry));
     install = await detectInstall(oldEntry, async (folder) => {
       prepared = await prepareHelper("pnpm");
       await pnpmPackages(prepared.helper.file, home, prepared.env, folder);
       return true;
     });
+    rollbackEntry = oldEntry;
+    if (install.kind === "mise" && install.entry !== undefined) {
+      rollbackEntry = checkedOldEntry(install.entry);
+      if (await pathThroughRepository(install.entry, roots).catch(() => true))
+        throw new CliError("the old entry's path failed the repository check for the working directory");
+    }
   } catch (error) {
     throw unknown(error instanceof CliError ? error.message : "");
   }
@@ -184,7 +195,7 @@ export async function updateCommand(stateDirectory: string, args: string[], io: 
       backupPath,
       backupTime,
       oldVersion: VERSION,
-      oldEntry,
+      oldEntry: rollbackEntry,
       node: runtime.node,
       helper: helper.file,
       install,
@@ -332,19 +343,9 @@ async function locate(
   const line = await firstLine(result.stdout);
   if (!succeeded(result) || !line) throw new CliError(`${methodTool[method]} did not say where it installed recense.`);
   validatePaths(line);
-  for (const candidate of [
-    join(line, "lib", "node_modules", updatePackage),
-    join(line, "node_modules", updatePackage),
-  ]) {
-    if (
-      await stat(candidate).then(
-        (info) => info.isDirectory(),
-        () => false,
-      )
-    )
-      return candidate;
-  }
-  throw new CliError("mise did not install recense where expected.");
+  const folder = await locateMisePackage(line);
+  if (folder === undefined) throw new CliError("mise did not install recense where expected.");
+  return folder;
 }
 
 async function restartService(
