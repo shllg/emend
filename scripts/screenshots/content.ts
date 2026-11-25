@@ -70,29 +70,23 @@ export function applyFixture(fixturesDir: string, fixture: string, repo: string)
 // ---- Main review: writeups -------------------------------------------------------------------
 
 export function mainWriteup(revision: 1 | 2) {
-  const pinEnds = revision === 1 ? "unpin it" : "unpin, approve or retire it";
   return {
     area: "inbox › pins",
-    tldr: `Pin a review in your inbox (#${MAIN_ISSUE}). It stays at the top of the Open group until you ${pinEnds}.`,
-    whyItMatters: "The reviews you return to stay in reach as the inbox grows.",
+    tldr: `Pin a review (#${MAIN_ISSUE}) and it stays at the top of the Open group.`,
+    whyItMatters: "The reviews you return to stay in reach.",
     overview: [
       "- **Goal:** After this, you can keep a review in sight when newer reviews arrive.",
       "- **Change:** A nullable `pinned_at` column stores the pin. Two reviewer-only routes set or clear it. " +
         "The inbox sorts pins first inside Open.",
     ].join("\n"),
     needsYou: [
-      { kind: "decide", text: "Keep the limit at ten pins per owner, or make it a setting?", topic: "api" },
-      {
-        kind: "accept",
-        text: "Keep `pinned_at` nullable with no backfill. Changing the column later takes a new migration.",
-        topic: "migration",
-      },
+      { kind: "decide", text: "Keep ten pins per owner, or make it a setting?", topic: "api" },
+      { kind: "accept", text: "`pinned_at` stays nullable, with no backfill.", topic: "migration" },
     ],
     ...(revision === 2 && {
       newInRevision: [
-        { text: "Retire and approve now clear the pin in the same update that closes the review.", topic: "api" },
-        { text: "The sort rule now spells out that Needs you stays above pinned reviews.", topic: "inbox" },
-        { text: "Checked adds a test for retire and one for approve.", section: "checked" },
+        { text: "Retire and approve now clear the pin.", topic: "api" },
+        { text: "Checked adds retire and approve tests.", section: "checked" },
       ],
     }),
     whereToLook: [

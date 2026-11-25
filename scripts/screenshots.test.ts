@@ -331,13 +331,30 @@ test("the output folder may not overlap real state, also through a symlink", (t)
   assert.throws(() => canonicalPath("relative"), { message: "Paths must be absolute" });
 });
 
-test("the screenshot run stores Split under the app's own layout keys", () => {
+test("the screenshot runner's selectors and stored values match the app's source", () => {
   const store = readFileSync(new URL("../apps/web/src/lib/layout-store.ts", import.meta.url), "utf8");
+  const sendBar = readFileSync(new URL("../apps/web/src/components/send/SendBar.tsx", import.meta.url), "utf8");
+  const reader = readFileSync(new URL("../apps/web/src/components/reading/BlockReader.tsx", import.meta.url), "utf8");
   const runner = readFileSync(new URL("./screenshots.ts", import.meta.url), "utf8");
+
   assert.match(store, /const layoutKey\s*=\s*"recense\.layout\.v1"/);
   assert.match(store, /const tabsDefaultKey\s*=\s*"recense\.layout\.tabs-default"/);
+  assert.match(store, /paneChoice\s*=\s*z\.enum\(\["split",\s*"tabs"\]\)/);
+  assert.match(store, /pane:\s*z\s*\.object\(\{\s*desktop:\s*paneChoice\b/);
   assert(runner.includes("recense.layout.v1"));
   assert(runner.includes("recense.layout.tabs-default"));
+  assert(runner.includes("desktop: \"split\""));
+
+  assert(sendBar.includes("aria-label=\"Send and approve\""));
+  assert(sendBar.includes("{unsentCount} to send"));
+  assert.match(sendBar, /<Button\b(?:[^<>{}]|\{[^{}]*\})*?\stype="submit"(?:[^<>{}]|\{[^{}]*\})*>\s*Send\s*<\/Button>/);
+  assert(runner.includes("section[aria-label=\"Send and approve\"]"));
+  assert(runner.includes("3 to send"));
+  assert(runner.includes("button[type=\"submit\"]"));
+  assert(runner.includes("=== 'Send'"));
+
+  assert.match(reader, /<dl\s+className="(?:[^"]*\s)?em-needs-you(?:\s[^"]*)?"/);
+  assert(runner.includes("dl.em-needs-you"));
 });
 
 test("the main screenshot writeup fills the review cards and links to declared topics", () => {

@@ -434,6 +434,17 @@ async function main(): Promise<void> {
     "the agent note",
     0,
   );
+  // The README shot must show every opening card.
+  const overflow = await desktop.eval<number>(`(() => {
+    const pane = document.querySelector("[data-reading-scroll]");
+    if (!pane) throw new Error("The writeup pane is missing from the review shot");
+    const list = pane.querySelector("dl.em-needs-you");
+    if (!list) throw new Error("The Needs you list is missing from the writeup pane");
+    return Math.max(0, list.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom);
+  })()`);
+  if (overflow > 0) {
+    throw new Error(`The Needs you card ends ${Math.ceil(overflow)} px below the writeup pane in the review shot`);
+  }
   shots["review-desktop.png"] = await desktop.screenshot();
 
   await phone.goto(reviewUrl("?rev=2&tab=comments"));
