@@ -63,7 +63,14 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    `AGENTS.md` names for the paths you touch. Stay inside the issue's scope: a gap or a new idea goes
    into the PR body as a follow-up, never into the change.
 2. Codex writes the code through `codex-agent`, as `AGENTS.md` says. If Codex cannot run, a Sonnet
-   sub-agent writes, and your report says so and why.
+   sub-agent writes, and your report says so and why. Commit the checked build as in step 3.
+   When the diff from the base to the build commit touches `apps/web/src/`, `apps/web/public/` or
+   `apps/web/index.html`, dispatch `recense-ui-finisher` (`model: "sonnet"`) with the task file,
+   the base and the build commit. Give it a clean tree and a built app.
+   When it returns, run `node scripts/check-ui-scope.ts --since <build commit>`. Restore every
+   printed tracked path to that commit, delete each printed untracked file and report each as a
+   blocker. An error checking scope must be resolved before proceeding. Run `pnpm verify` and
+   commit the finish separately.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
    Before each review round, with the change committed and `pnpm verify` green at that commit,
@@ -72,8 +79,9 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    (`origin/main...HEAD` for a full round, the fix commits for a check round), the task file
    `.wt/issue.md` (or the description), `.wt/bundle-diff.json`, `.wt/bundle-reason.md` when it
    exists, and, for a check round, `.wt/review-findings.json`. See "Bundle growth" in
-   `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Fixes go to
-   Codex. Review in rounds as
+   `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Dispatch findings
+   tagged `ui` to `recense-ui-finisher` (`model: "sonnet"`) and `code` to Codex. Check each
+   finisher pass against its starting commit with the scope check in step 2. Review in rounds as
    `.claude/rules/review-rounds.md` says: commit first, round 1 over the whole change, then at most
    two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each manager JSON
    to `.wt/review-findings.json` as the rule says.

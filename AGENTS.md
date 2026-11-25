@@ -132,6 +132,10 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   says so. After every build, `git status --short -- .claude .codex .github scripts bin` must be
   empty, also in every linked worktree when the build ran in the main checkout; anything else is a
   blocker.
+- **UI finisher** (`recense-ui-finisher`, Sonnet): takes the visible part after the Codex build
+  when `apps/web/src/`, `apps/web/public/` or `apps/web/index.html` changed. It edits only its
+  allowlist and checks the result in its sealed headless browser. It never commits.
+  `scripts/check-ui-scope.ts` guards its scope.
 - **Codex unavailable** (sandbox, MCP, timeout, any error): a Sonnet sub-agent writes instead.
   Report that the fallback ran and why.
 - **Before "done":** `recense-review-manager` (Opus) runs every review. It picks the reviewers:
@@ -156,6 +160,7 @@ Codex reads only this file. Open the matching rule file before you edit these pa
 | You touch | Read first |
 |---|---|
 | `packages/core/src/render/`, `apps/web/src/`, `apps/web/public/`, the content path, headers | `.claude/rules/content-isolation.md` |
+| `apps/web/src/` | `docs/ui.md`, `docs/react.md` |
 | Links between docs, Contents, doc titles, reading positions, frame messages | `.claude/rules/doc-navigation.md` |
 | `apps/recense/src/server/`, `packages/contract/`, `docs/api.md` | `.claude/rules/api-and-auth.md` |
 | `apps/recense/src/db/`, `apps/recense/drizzle/`, `apps/recense/drizzle.config.ts` | `.claude/rules/db.md` |

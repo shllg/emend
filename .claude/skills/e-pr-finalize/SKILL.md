@@ -301,7 +301,8 @@ commits for a check round), the task file `.wt/issue.md` (or task text), `.wt/bu
 `.wt/bundle-reason.md` when it exists, and, for `final-check` and `owner-check`,
 `.wt/review-findings.json`. The bundle files follow "Bundle growth" in
 `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Do not hand it your
-summary. Fixes go to Codex. Read `.wt/review-log.md` first to pick the round:
+summary. Send `ui` fixes to `recense-ui-finisher` (`model: "sonnet"`) and the rest to Codex. Read
+`.wt/review-log.md` first to pick the round:
 
 1. No `final` or `final-skipped` line: run the `final` round over the whole change,
    `origin/main...HEAD`, or skip it as the rule says.

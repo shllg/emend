@@ -206,7 +206,7 @@ put it in `private` as `{file, line, claim}`, never in `followUps` or `preferenc
 Do not raise a finding again when an earlier element of `.wt/review-findings.json` shows it fixed
 or rejected with a confirmed reason. A new regression must have new evidence. Keep a finding's
 id when a later round checks it. Tag each finding to fix with area `ui` for `apps/web/src`, or
-`code` for everything else. Until a UI finisher exists, both go to Codex.
+`code` for everything else. Send `ui` to `recense-ui-finisher` and `code` to Codex.
 
 ## Dispute mode
 
