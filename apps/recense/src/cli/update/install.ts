@@ -66,8 +66,8 @@ export async function misePackageFolders(installFolder: string): Promise<string[
       try {
         if ((await lstat(path)).isSymbolicLink()) roots.push(path);
         else otherRoots.push(path);
-      } catch {
-        return undefined;
+      } catch (error) {
+        if (!isMissingPath(error)) return undefined;
       }
     }
     roots.push(...otherRoots);
@@ -152,8 +152,12 @@ export async function detectInstall(
     const candidates = await misePackageFolders(installFolder);
     if (candidates === undefined) return { kind: "unknown" };
     for (const candidate of candidates) {
-      if ((await realpath(candidate).catch(() => undefined)) === folder)
-        return { kind: "mise", entry: join(candidate, "dist", "recense.mjs") };
+      try {
+        if ((await realpath(candidate)) === folder)
+          return { kind: "mise", entry: join(candidate, "dist", "recense.mjs") };
+      } catch (error) {
+        if (!isMissingPath(error)) return { kind: "unknown" };
+      }
     }
     return { kind: "unknown" };
   }
