@@ -10,13 +10,17 @@ import { LightboxDiagram } from "./MermaidBlock.tsx";
 import type { LightboxSubject } from "./screenshots.ts";
 import { useLightboxView } from "./use-lightbox-view.ts";
 
+type ImageNoun = "screenshot" | "image";
+
 export function Lightbox<T extends LightboxSubject>({
   gallery,
+  imageNoun = "screenshot",
   onClose,
   canComment,
   onComment,
 }: {
   gallery: { items: T[]; index: number };
+  imageNoun?: ImageNoun;
   onClose: () => void;
   canComment?: (item: T) => boolean;
   onComment?: (item: T) => void;
@@ -67,9 +71,10 @@ export function Lightbox<T extends LightboxSubject>({
             imageView={imageView}
             index={index}
             count={gallery.items.length}
+            imageNoun={imageNoun}
             galleryNoun={
               gallery.items.every((item) => item.kind === "image")
-                ? "screenshot"
+                ? imageNoun
                 : gallery.items.every((item) => item.kind === "diagram")
                   ? "diagram"
                   : undefined
@@ -97,6 +102,7 @@ function LightboxImage({
   imageView,
   index,
   count,
+  imageNoun,
   galleryNoun,
   closeButton,
   onStep,
@@ -106,7 +112,8 @@ function LightboxImage({
   imageView: ReturnType<typeof useLightboxView>;
   index: number;
   count: number;
-  galleryNoun?: "screenshot" | "diagram";
+  imageNoun: ImageNoun;
+  galleryNoun?: ImageNoun | "diagram";
   closeButton: RefObject<HTMLButtonElement | null>;
   onStep: (delta: number) => void;
   onComment?: () => void;
@@ -121,7 +128,7 @@ function LightboxImage({
     (natural: Size | null) => (natural ? setImage(natural) : setFailed(true)),
     [setImage, setFailed],
   );
-  const noun = item.kind === "image" ? "screenshot" : "diagram";
+  const noun = item.kind === "image" ? imageNoun : "diagram";
   // Keep unavailable controls focusable so reaching a limit or loading an image preserves arrow navigation.
   return (
     <>
@@ -178,7 +185,7 @@ function LightboxImage({
             role="status"
             className="pointer-events-none absolute inset-0 grid place-items-center p-6 text-center text-fg-2"
           >
-            {item.kind === "image" ? "The screenshot could not load." : "The diagram could not be drawn."}
+            {item.kind === "image" ? `The ${imageNoun} could not load.` : "The diagram could not be drawn."}
           </p>
         ) : item.kind === "image" ? (
           <img
@@ -257,8 +264,8 @@ function LightboxImage({
         <Primitive.Title className="sr-only">Diagram</Primitive.Title>
       )}
       <Primitive.Description className="sr-only">
-        {item.kind === "image" ? "Screenshot" : "Diagram"} {index + 1} of {count}. Left and Right arrows move between{" "}
-        {galleryNoun ? `${galleryNoun}s` : "screenshots and diagrams"}; when zoomed in, the arrow keys move the{" "}
+        {noun.charAt(0).toUpperCase() + noun.slice(1)} {index + 1} of {count}. Left and Right arrows move between{" "}
+        {galleryNoun ? `${galleryNoun}s` : `${imageNoun}s and diagrams`}; when zoomed in, the arrow keys move the{" "}
         {item.kind === "image" ? "image" : "diagram"}. Escape closes.
       </Primitive.Description>
     </>

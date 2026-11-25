@@ -124,9 +124,11 @@ token only at the recorded origin, never sends a token that has no valid marker,
 marker last. A token recense receives but does not keep is revoked at once; when the hub does not
 confirm it, the error says to revoke the machine in the hub's devices.
 
-Attach copies existing local reviews whole, including revisions, files, threads, comments,
-Sends and open deliveries, while retaining review ids. Repeating attach skips reviews already
-on the hub. Local copies become read-only links to the hub. Detach makes new reviews local;
+Attach copies existing local reviews, including revisions, files, threads, comments,
+Sends and open deliveries, while retaining review ids. A hub without the `diff-images` feature
+receives reviews without their diff pictures and shows the affected files as text diffs or file
+summaries. Repeating attach skips reviews already on the hub, so they never gain the omitted pictures.
+Local copies become read-only links to the hub. Detach makes new reviews local;
 reviews already on the hub stay there. There is no two-way synchronization in the MVP.
 A copy whose outcome is unknown keeps the review read-only here and says "Run recense attach
 again"; the next attach finishes it. Only one attach runs at a time per state directory.

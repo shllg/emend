@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { run } from "../../main.ts";
 import * as roots from "../publish/root.ts";
-import { discover } from "../server-client.ts";
+import { discoverCapabilities } from "../server-client.ts";
 import { publishCommand } from "./publish.ts";
 
 vi.mock("node:fs/promises", async (original) => ({
   ...(await original<typeof import("node:fs/promises")>()),
 }));
 vi.mock("../server-client.ts", () => ({
-  discover: vi.fn(async () => {
+  discoverCapabilities: vi.fn(async () => {
     throw new Error("server discovery reached");
   }),
 }));
@@ -45,7 +45,7 @@ test("an unchanged listed diff or invalid source starts no server, even without 
   };
   try {
     await mkdir(join(root, ".git"), { recursive: true });
-    vi.mocked(discover).mockClear();
+    vi.mocked(discoverCapabilities).mockClear();
     await writeFile(
       manifest,
       JSON.stringify({
@@ -62,13 +62,13 @@ test("an unchanged listed diff or invalid source starts no server, even without 
     await expect(
       publishCommand(state, join(dir, "config", "recense"), ["--manifest", manifest, "--key", "plan"], io, root),
     ).rejects.toThrow();
-    expect(discover).not.toHaveBeenCalled();
+    expect(discoverCapabilities).not.toHaveBeenCalled();
     await writeFile(join(root, "plan.md"), "# Valid");
     await writeFile(manifest, JSON.stringify({ ...common, files: [{ path: "plan.md", role: "doc" }] }));
     await expect(
       publishCommand(state, join(dir, "config", "recense"), ["--manifest", manifest, "--key", "plan"], io, root),
     ).rejects.toThrow("server discovery reached");
-    expect(discover).toHaveBeenCalledOnce();
+    expect(discoverCapabilities).toHaveBeenCalledOnce();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -82,7 +82,7 @@ test.each([".git/config", "alias/config"])("manifest read %s cannot expose Git m
     await mkdir(join(root, ".git"), { recursive: true });
     await writeFile(join(root, ".git/config"), "synthetic metadata");
     await symlink(".git", join(root, "alias"));
-    vi.mocked(discover).mockClear();
+    vi.mocked(discoverCapabilities).mockClear();
     await expect(
       publishCommand(
         state,
@@ -96,7 +96,7 @@ test.each([".git/config", "alias/config"])("manifest read %s cannot expose Git m
         root,
       ),
     ).rejects.toThrow("refusing to read inside the git folder:");
-    expect(discover).not.toHaveBeenCalled();
+    expect(discoverCapabilities).not.toHaveBeenCalled();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -168,7 +168,7 @@ test.skipIf(!process.getuid).each<{
           return info;
         }) as typeof fs.lstat);
       }
-      vi.mocked(discover).mockClear();
+      vi.mocked(discoverCapabilities).mockClear();
       const stdout = vi.fn();
       const stderr = vi.fn();
       expect(
@@ -186,7 +186,7 @@ test.skipIf(!process.getuid).each<{
             : "recense: pass --review or --key\n",
         ],
       ]);
-      expect(discover).not.toHaveBeenCalled();
+      expect(discoverCapabilities).not.toHaveBeenCalled();
     } finally {
       vi.restoreAllMocks();
       await rm(dir, { recursive: true, force: true });

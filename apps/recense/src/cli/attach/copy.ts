@@ -1,4 +1,4 @@
-import { ImportResult } from "@recense/contract";
+import { DIFF_IMAGES_FEATURE, ImportResult, REVIEW_BIN_FEATURE } from "@recense/contract";
 import { and, asc, eq } from "drizzle-orm";
 import { reviews } from "../../db/schema.ts";
 import type { Io } from "../../main.ts";
@@ -39,12 +39,12 @@ export async function copyReviews(
   state: Awaited<ReturnType<typeof initializeServerState>>,
   target: HttpTarget,
   io: Io,
-  hubHasBin: boolean,
+  features: readonly string[],
   signal?: AbortSignal,
 ) {
   return signal
-    ? copy(stateDir, state, target, io, hubHasBin, signal)
-    : withAttachSignals((signal) => copy(stateDir, state, target, io, hubHasBin, signal));
+    ? copy(stateDir, state, target, io, features, signal)
+    : withAttachSignals((signal) => copy(stateDir, state, target, io, features, signal));
 }
 
 async function copy(
@@ -52,10 +52,12 @@ async function copy(
   state: Awaited<ReturnType<typeof initializeServerState>>,
   target: HttpTarget,
   io: Io,
-  hubHasBin: boolean,
+  features: readonly string[],
   signal: AbortSignal,
 ) {
   const { db, ownerId, instance, blobs } = state;
+  const hubHasBin = features.includes(REVIEW_BIN_FEATURE);
+  const hubHasImages = features.includes(DIFF_IMAGES_FEATURE);
   const candidates = await db.read((q) =>
     q
       .select({ id: reviews.id })
@@ -75,7 +77,7 @@ async function copy(
     let snapshotted = false;
     try {
       const result = await db.transaction(
-        (q) => snapshot(q, ownerId, instance.id, id, movedToUrl, Date.now(), hubHasBin),
+        (q) => snapshot(q, ownerId, instance.id, id, movedToUrl, Date.now(), hubHasBin, hubHasImages),
         {
           offThread: true,
         },
@@ -96,6 +98,7 @@ async function copy(
         const hashes = new Set(
           [
             ...result.bundle.files.flatMap((f) => [f.oldBlob, f.newBlob, f.renderedBlob]),
+            ...(result.bundle.diffImages ?? []).map((row) => row.blob),
             ...result.bundle.writeups.flatMap((w) => [w.sourceBlob, w.renderedBlob]),
           ].filter((hash): hash is string => hash !== null),
         );

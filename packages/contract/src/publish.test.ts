@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { expect, test } from "vitest";
-import { LIMITS, OTHER_TOPIC, PublishRequest } from "./index.ts";
+import { FileView, LIMITS, OTHER_TOPIC, PublishRequest } from "./index.ts";
 
 const request = {
   reviewKey: "a".repeat(64),
@@ -21,6 +22,79 @@ const doc = {
   newBlob: "b".repeat(64),
   flag: null,
 };
+
+test("diff image sides follow the file status and each side's extension", () => {
+  const old = { blob: "b".repeat(64) };
+  const next = { flag: "oversized" };
+  const file = {
+    path: "icons/a.PNG",
+    oldPath: "icons/old.jpg",
+    role: "diff",
+    status: "renamed",
+    oldBlob: null,
+    newBlob: null,
+    flag: "binary",
+    image: { old, new: next },
+  };
+  const parse = (patch: object) => PublishRequest.safeParse({ ...request, files: [{ ...file, ...patch }] });
+  expect(parse({}).data?.files[0]?.image).toEqual(file.image);
+  expect(parse({ status: "added", image: { old: null, new: next } }).success).toBe(true);
+  expect(parse({ status: "deleted", image: { old, new: null } }).success).toBe(true);
+  for (const patch of [
+    { role: "asset", oldPath: null, newBlob: old.blob, flag: null },
+    { status: undefined },
+    { status: "added" },
+    { status: "deleted" },
+    { image: { old: null, new: next } },
+    { image: { old, new: null } },
+    { oldPath: "icons.png/file" },
+    { path: "a.woff2" },
+    { image: { old: { ...old, ...next }, new: next } },
+    { image: { old: {}, new: next } },
+  ])
+    expect(parse(patch).success, JSON.stringify(patch)).toBe(false);
+});
+
+test.each(["old", "new"] as const)("the %s picture and text share one blob", (side) => {
+  const blob = "c".repeat(64);
+  const file = {
+    path: "icon.svg",
+    role: "diff",
+    oldPath: null,
+    status: "modified",
+    oldBlob: blob,
+    newBlob: blob,
+    flag: null,
+  };
+  const parse = (value: object) =>
+    PublishRequest.safeParse({
+      ...request,
+      files: [{ ...file, image: { old: { blob }, new: { blob }, [side]: value } }],
+    });
+  expect(parse({ blob }).success).toBe(true);
+  expect(parse({ blob: "d".repeat(64) }).success).toBe(false);
+  expect(parse({ flag: "oversized" }).success).toBe(false);
+});
+
+test("file views optionally describe images on diff files", () => {
+  const file = {
+    id: randomUUID(),
+    path: "a.png",
+    oldPath: null,
+    role: "diff",
+    status: "added",
+    topic: null,
+    order: 0,
+    mediaType: "text/plain",
+    flag: "binary",
+    hasOld: false,
+    hasNew: false,
+  };
+  const image = { old: null, new: { mediaType: "image/png", flag: null } };
+  expect(FileView.parse(file)).toEqual(file);
+  expect(FileView.parse({ ...file, image }).image).toEqual(image);
+  expect(FileView.safeParse({ ...file, role: "doc", image }).success).toBe(false);
+});
 test.each([undefined, "writeup", "plan.html"])("publish request retains main %s", (main) => {
   expect(PublishRequest.parse({ ...request, files: [doc], main }).main).toBe(main);
 });

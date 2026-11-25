@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  diffImageBlobs,
   docViewOf,
   type ImportBundle,
   importPublishInput,
@@ -63,6 +64,7 @@ export async function prepareImport(
   const hashes = new Set(
     [
       ...bundle.files.flatMap((f) => [f.oldBlob, f.newBlob, f.renderedBlob]),
+      ...(bundle.diffImages ?? []).map((row) => row.blob),
       ...bundle.writeups.flatMap((w) => [w.sourceBlob, w.renderedBlob]),
     ].filter((hash): hash is string => hash !== null),
   );
@@ -192,7 +194,9 @@ export async function prepareImport(
       const input = parsed.data;
       if (deviations !== undefined) input.writeup.deviations = deviations;
       const sources = new Set(
-        input.files.flatMap((f) => [f.oldBlob, f.newBlob]).filter((s): s is string => s !== null),
+        input.files
+          .flatMap((f) => [f.oldBlob, f.newBlob, ...diffImageBlobs(f.image)])
+          .filter((s): s is string => s !== null),
       );
       if (
         [...sources].reduce((total, hash) => total + (sizes.get(hash) ?? 0), sizes.get(writeup.sourceBlob) ?? 0) >
@@ -200,6 +204,8 @@ export async function prepareImport(
       )
         throw new ApiError("too_large");
       for (const file of input.files) {
+        for (const hash of diffImageBlobs(file.image))
+          if ((sizes.get(hash) ?? 0) > LIMITS.assetBytes) throw new ApiError("too_large");
         const type = fileMediaType(file);
         const limit =
           file.role === "diff"

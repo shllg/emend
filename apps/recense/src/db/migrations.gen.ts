@@ -362,5 +362,17 @@ export const MIGRATIONS: readonly { tag: string; when: number; hash: string; sta
     "statements": [
       "UPDATE `files` SET `look` = 'recense' WHERE `look` = 'emend';"
     ]
+  },
+  {
+    "tag": "0030_diff_images",
+    "when": 1795605366194,
+    "hash": "20d49457d9f5d4244905c746a6b13032a04945115100f168fc623e42f6a01e24",
+    "statements": [
+      "CREATE TABLE `diff_images` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`owner_id` text NOT NULL,\n\t`file_id` text NOT NULL,\n\t`side` text NOT NULL,\n\t`blob` text,\n\t`flag` text,\n\tFOREIGN KEY (`owner_id`) REFERENCES `owners`(`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`owner_id`,`file_id`) REFERENCES `files`(`owner_id`,`id`) ON UPDATE no action ON DELETE no action,\n\tFOREIGN KEY (`owner_id`,`blob`) REFERENCES `blobs`(`owner_id`,`sha256`) ON UPDATE no action ON DELETE no action,\n\tCONSTRAINT \"diff_images_side_check\" CHECK(\"diff_images\".\"side\" in ('old', 'new')),\n\tCONSTRAINT \"diff_images_flag_check\" CHECK(\"diff_images\".\"flag\" in ('oversized')),\n\tCONSTRAINT \"diff_images_payload_check\" CHECK((\"diff_images\".\"blob\" is null) <> (\"diff_images\".\"flag\" is null))\n);",
+      "CREATE INDEX `diff_images_owner_idx` ON `diff_images` (`owner_id`);",
+      "CREATE INDEX `diff_images_owner_blob_idx` ON `diff_images` (`owner_id`,`blob`);",
+      "CREATE UNIQUE INDEX `diff_images_owner_id_unique` ON `diff_images` (`owner_id`,`id`);",
+      "CREATE UNIQUE INDEX `diff_images_owner_file_side_unique` ON `diff_images` (`owner_id`,`file_id`,`side`);"
+    ]
   }
 ];

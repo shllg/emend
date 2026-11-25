@@ -50,7 +50,7 @@ test.each(["folder", "token"])(
 
 test("a thrown discovery error never selects direct mode", async () => {
   const f = await commandFixture();
-  vi.spyOn(discovery, "discover").mockRejectedValueOnce(new Error("synthetic discovery failure"));
+  vi.spyOn(discovery, "discoverCapabilities").mockRejectedValueOnce(new Error("synthetic discovery failure"));
   await expect(resolveTarget(f.dir)).rejects.toThrow("synthetic discovery failure");
   expect(await readdir(f.dir)).not.toContain("recense.db");
 });
@@ -94,7 +94,12 @@ test("target resolution preserves both values from an earlier attachment pair", 
   await writeFile(join(f.dir, "attach.json"), JSON.stringify({ ...hub, hubUrl: "https://other.example.test" }));
   writeSecretFile(join(f.dir, "hub.token"), `em_${"y".repeat(43)}`);
   const target = await resolveTarget(f.dir, pair);
-  expect(target).toEqual({ via: "hub", url: hub.hubUrl, token: `em_${"b".repeat(43)}` });
+  expect(target).toMatchObject({
+    via: "hub",
+    url: hub.hubUrl,
+    token: `em_${"b".repeat(43)}`,
+    features: expect.any(Array),
+  });
   expect(f.fetcher).toHaveBeenCalledExactlyOnceWith(`${hub.hubUrl}/api/v1/capabilities`, expect.anything());
 });
 

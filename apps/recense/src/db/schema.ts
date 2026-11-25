@@ -329,6 +329,28 @@ export const files = sqliteTable(
   ],
 );
 
+export const diffImages = sqliteTable(
+  "diff_images",
+  {
+    id: id(),
+    ownerId: ownerId(),
+    fileId: text("file_id").notNull(),
+    side: text("side", { enum: ["old", "new"] }).notNull(),
+    blob: text("blob"),
+    flag: text("flag", { enum: ["oversized"] }),
+  },
+  (t) => [
+    ...owned("diff_images", t),
+    unique("diff_images_owner_file_side_unique").on(t.ownerId, t.fileId, t.side),
+    index("diff_images_owner_blob_idx").on(t.ownerId, t.blob),
+    foreignKey({ columns: [t.ownerId, t.fileId], foreignColumns: [files.ownerId, files.id] }),
+    foreignKey({ columns: [t.ownerId, t.blob], foreignColumns: [blobs.ownerId, blobs.sha256] }),
+    enumCheck("diff_images_side_check", t.side, ["old", "new"]),
+    enumCheck("diff_images_flag_check", t.flag, ["oversized"]),
+    check("diff_images_payload_check", sql`(${t.blob} is null) <> (${t.flag} is null)`),
+  ],
+);
+
 export const agentNotes = sqliteTable(
   "agent_notes",
   {

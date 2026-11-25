@@ -33,6 +33,7 @@ import { Button } from "../ui/Button.tsx";
 import { AgentNoteCard } from "./AgentNoteCard.tsx";
 import { annotationExpansions } from "./annotation-expansion.ts";
 import { CommentLinesContext, createCommentLines } from "./comment-lines.ts";
+import { type DiffImageMode, DiffImages } from "./DiffImages.tsx";
 import { FileHeader } from "./FileHeader.tsx";
 import { fileSideQuery, useFileTexts } from "./file-texts.ts";
 import { GutterComment } from "./GutterComment.tsx";
@@ -58,6 +59,7 @@ export type DiffPostRender = NonNullable<FileDiffOptions<ReactElement, undefined
 type Annotation = DiffLineAnnotation<ReactElement> & { startLine?: number };
 type BodyState = { diff?: ParsedDiff; blocked: boolean; loading?: boolean };
 type SlotState = { names: Set<string>; rendered: boolean; failed: boolean };
+const noSlots = new Set<string>();
 // Highlighting costs about 0.09 ms per line, so a 5000-line file takes about half a second on either path.
 export const TOKENIZE_MAX_LINES = 5000;
 const poolOptions = { workerFactory: () => new DiffWorker(), poolSize: 2 };
@@ -279,8 +281,11 @@ export function FileDiff({
   const loads = diffLoads(useQueryClient());
   const [height, setHeight] = useState(200);
   const [expanded, setExpanded] = useState(false);
+  const [imageMode, setImageMode] = useState<DiffImageMode>({ comparison: "Side by side", format: "Pictures" });
+  const pictures = !!file.image && imageMode.format === "Pictures";
+  const hasTextDiff = !file.flag && !pictures;
   const [slotState, setSlots] = useState<SlotState>({ names: new Set(), rendered: false, failed: false });
-  const slots = slotState.names;
+  const slots = pictures ? noSlots : slotState.names;
   const [bodyState, setBodyState] = useState<BodyState>({ blocked: false });
   const onBodyState = useCallback((next: BodyState) => {
     setBodyState((previous) =>
@@ -345,14 +350,14 @@ export function FileDiff({
   const foreground =
     !collapsed &&
     !topicCollapsed &&
-    !file.flag &&
+    hasTextDiff &&
     (!lockfile || expanded) &&
     (!viewportKnown || (mounted && (bodyState.loading ?? true)));
   useLayoutEffect(() => (foreground ? loads.hold() : undefined), [foreground, loads]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Navigation retries after the fallback or annotation DOM commits.
-  useEffect(() => onContentRendered(), [onContentRendered, slotState, bodyState, mounted, expanded]);
+  useEffect(() => onContentRendered(), [onContentRendered, slotState, bodyState, mounted, expanded, pictures]);
   const slotPending = (side: "old" | "new", end: number) => {
-    if (file.flag || (lockfile && !expanded) || bodyState.blocked || slotState.rendered) return false;
+    if (!hasTextDiff || (lockfile && !expanded) || bodyState.blocked || slotState.rendered) return false;
     const diff = bodyState.diff;
     // The parser uses complete contents; per-region expansion exposes annotations.
     // Identical files (no hunks) and out-of-range lines have permanent fallbacks.
@@ -371,7 +376,7 @@ export function FileDiff({
         (mounted &&
           !collapsed &&
           !topicCollapsed &&
-          !file.flag &&
+          hasTextDiff &&
           (!lockfile || expanded) &&
           ((bodyState.loading ?? true) ||
             (!!bodyState.diff &&
@@ -383,7 +388,7 @@ export function FileDiff({
       }
       aria-label={`File ${file.path}`}
       className="em-diff-file"
-      style={{ minHeight: collapsed || topicCollapsed || mounted || file.flag ? undefined : height }}
+      style={{ minHeight: collapsed || topicCollapsed || mounted || !hasTextDiff ? undefined : height }}
     >
       <FileHeader
         ref={header}
@@ -451,30 +456,32 @@ export function FileDiff({
           />
         </div>
       )}
-      {(collapsed || topicCollapsed) && !file.flag && !lockfile && !context.counts.has(file.id) && (
+      {(collapsed || topicCollapsed) && hasTextDiff && !lockfile && !context.counts.has(file.id) && (
         <FileCounts file={file} parser={context.parser} onParsed={context.onParsed} />
       )}
       {!collapsed && !topicCollapsed && (
         <div className="em-diff-body">
-          {file.flag ? (
-            <p className="em-diff-summary">
-              {file.flag === "binary" ? "Not shown: binary file" : "Not shown: larger than 1 MiB"}
-            </p>
-          ) : lockfile && !expanded ? (
-            <Summary text="Collapsed: lockfile" onExpand={() => setExpanded(true)} />
-          ) : mounted ? (
-            <FileBody
-              {...context}
-              file={file}
-              expanded={expanded}
-              slots={slots}
-              onSlots={onSlots}
-              onBodyState={onBodyState}
-              onExpand={() => setExpanded(true)}
-            />
-          ) : (
-            <p className="em-diff-summary">Loads near viewport</p>
-          )}
+          {file.image && <DiffImages file={file} near={mounted} mode={imageMode} onModeChange={setImageMode} />}
+          {!pictures &&
+            (file.flag ? (
+              <p className="em-diff-summary">
+                {file.flag === "binary" ? "Not shown: binary file" : "Not shown: larger than 1 MiB"}
+              </p>
+            ) : lockfile && !expanded ? (
+              <Summary text="Collapsed: lockfile" onExpand={() => setExpanded(true)} />
+            ) : mounted ? (
+              <FileBody
+                {...context}
+                file={file}
+                expanded={expanded}
+                slots={slots}
+                onSlots={onSlots}
+                onBodyState={onBodyState}
+                onExpand={() => setExpanded(true)}
+              />
+            ) : (
+              <p className="em-diff-summary">Loads near viewport</p>
+            ))}
         </div>
       )}
     </section>

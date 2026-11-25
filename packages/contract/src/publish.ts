@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentNotes, validateAgentNotes } from "./agent-note.ts";
+import { DiffImage, diffImageType } from "./diff-image.ts";
 import { DocTitle, DocView, docViewOf, isRenderedHtmlDoc, isRenderedMarkdownDoc, validateDocView } from "./doc.ts";
 import { LIMITS } from "./limits.ts";
 import { IssueRefs, PublishLinks, RepoUrl } from "./links.ts";
@@ -32,6 +33,7 @@ export const PublishFile = z
     parent: FilePath.optional(),
     assets: z.array(FilePath).max(LIMITS.filesPerRevision).optional(),
     notes: AgentNotes.optional(),
+    image: DiffImage.optional(),
   })
   .superRefine(validateDocView)
   .refine((file) => file.role === "doc" || file.title === undefined, {
@@ -106,6 +108,20 @@ export const PublishRequest = z
     const htmlAssets = new Set(request.files.filter(isRenderedHtmlDoc).flatMap((file) => file.assets ?? []));
     let mediaCount = 0;
     for (const file of request.files) {
+      if (file.image) {
+        if (file.role !== "diff") issue("only diff files have image sides");
+        if (!file.status) issue("image sides require a file status");
+        if ((file.image.old === null) !== (file.status === "added")) issue("only an added image has no old side");
+        if ((file.image.new === null) !== (file.status === "deleted")) issue("only a deleted image has no new side");
+        if (file.image.old && !diffImageType(file.oldPath ?? file.path)) issue("unsupported old image extension");
+        if (file.image.new && !diffImageType(file.path)) issue("unsupported new image extension");
+        for (const side of ["old", "new"] as const) {
+          const image = file.image[side];
+          const text = side === "old" ? file.oldBlob : file.newBlob;
+          if (text && image && (!("blob" in image) || image.blob !== text))
+            issue(`the ${side} image must use the same blob as its text`);
+        }
+      }
       if (file.topic && !topics.has(file.topic)) issue("file topic is not declared");
       const markdown = isRenderedMarkdownDoc(file);
       if (isRenderedHtmlDoc(file) || markdown) {

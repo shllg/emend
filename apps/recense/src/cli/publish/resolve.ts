@@ -22,6 +22,7 @@ import { CliError } from "../http.ts";
 import { collectAssets, docAssetSizeError, docImageWarning, type WalkedSecretPaths } from "./assets.ts";
 import { collectChanges } from "./collect.ts";
 import { codeRoot } from "./context.ts";
+import { createImageResolver, type ImageBlob } from "./image.ts";
 import { docsKey, normalizeRemote, projectKey, reviewKey } from "./key.ts";
 import {
   checkPublishedFolders,
@@ -210,12 +211,10 @@ async function resolveWithWorker(
   const rechecks = new Map<string, BlobSource["read"][]>();
   let totalBytes = Buffer.byteLength(JSON.stringify(manifest.writeup));
   if (totalBytes > LIMITS.revisionBytes) throw new CliError("the docs pass the revision size limit");
-  const add = (bytes: Buffer, read: BlobSource["read"]) => {
-    const hash = sha256(bytes);
+  const addBlob = (hash: string, size: number, read: BlobSource["read"]) => {
     if (!blobs.has(hash)) {
-      if (totalBytes + bytes.length > LIMITS.revisionBytes) return null;
-      totalBytes += bytes.length;
-      const size = bytes.length;
+      if (totalBytes + size > LIMITS.revisionBytes) return null;
+      totalBytes += size;
       if (options.docFolders) {
         // Shortcut deduplication retains every source's checks, including shared doc assets.
         const checks: BlobSource["read"][] = [];
@@ -232,6 +231,22 @@ async function resolveWithWorker(
     } else rechecks.get(hash)?.push(read);
     return hash;
   };
+  const add = (bytes: Buffer, read: BlobSource["read"]) => addBlob(sha256(bytes), bytes.length, read);
+  const registered = new WeakSet<ImageBlob>();
+  const images = createImageResolver(root, git, gitDirs, (sources) => {
+    // Reserve the whole pair before registering either upload or any shared-blob rechecks.
+    const missing = new Map(sources.filter(({ hash }) => !blobs.has(hash)).map(({ hash, size }) => [hash, size]));
+    let size = totalBytes;
+    for (const bytes of missing.values()) size += bytes;
+    if (size > LIMITS.revisionBytes) return;
+    return () => {
+      for (const source of sources) {
+        if (registered.has(source)) continue;
+        addBlob(source.hash, source.size, source.read);
+        registered.add(source);
+      }
+    };
+  });
   const addRequired = (bytes: Buffer, read: BlobSource["read"]) => {
     const hash = add(bytes, read);
     if (!hash) throw new CliError("the docs pass the revision size limit");
@@ -266,8 +281,6 @@ async function resolveWithWorker(
     if (file.role === "diff") {
       const change = changes.find((c) => c.path === file.path);
       if (!change || !manifest.base || !manifest.head) throw new CliError("diff files require base and head");
-      const before = new Set(blobs.keys());
-      const beforeBytes = totalBytes;
       const resolved: PublishFile = {
         path: change.path,
         oldPath: change.oldPath,
@@ -279,6 +292,12 @@ async function resolveWithWorker(
         oldBlob: null,
         newBlob: null,
       };
+      if (await images.resolveFile(resolved, change, manifest.head)) {
+        files.push(resolved);
+        continue;
+      }
+      const before = new Set(blobs.keys());
+      const beforeBytes = totalBytes;
       for (const side of ["old", "new"] as const) {
         const head = manifest.head;
         const read = async () => {
@@ -524,6 +543,8 @@ async function resolveWithWorker(
     if (size > LIMITS.htmlDocWithAssetsBytes)
       throw new CliError(docAssetSizeError(isRenderedHtmlDoc(doc) ? "html" : "markdown"));
   }
+  // Diff pictures use only the budget left after text sides, docs, assets and writeup media.
+  images.reservePictures();
   const keyFor = (id: string) => {
     const name = typeof options.key === "function" ? options.key(id) : options.key;
     return name || !code || !branch ? docsKey(id, name ?? options.review ?? "") : reviewKey(id, root, branch);

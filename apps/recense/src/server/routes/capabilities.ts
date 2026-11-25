@@ -1,6 +1,7 @@
 import {
   AGENT_REVIEW_KEY_FEATURE,
   Capabilities,
+  DIFF_IMAGES_FEATURE,
   LEGACY_SERVER_CHALLENGE_HEADER,
   LEGACY_SERVER_PROOF_HEADER,
   REVIEW_BIN_FEATURE,
@@ -42,6 +43,7 @@ export function capabilitiesRoutes(app: Hono<AppEnv>, key: string, canStop = fal
           REVIEW_PINS_FEATURE,
           REVIEW_PIN_ORDER_FEATURE,
           AGENT_REVIEW_KEY_FEATURE,
+          DIFF_IMAGES_FEATURE,
           ...(canStop ? ["server-stop"] : []),
         ],
       }),

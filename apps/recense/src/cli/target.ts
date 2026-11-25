@@ -7,7 +7,7 @@ import { readTokenFile } from "../state/token-file.ts";
 import { clientHeaders } from "./client-headers.ts";
 import { CliError, hubFailure, hubFailureReason } from "./http.ts";
 import { readRegular } from "./publish/read.ts";
-import { discover } from "./server-client.ts";
+import { discoverCapabilities } from "./server-client.ts";
 
 export type HttpTarget = { url: string; token: string; via: "local" | "hub" };
 export type Target = HttpTarget | { via: "direct" };
@@ -189,13 +189,15 @@ export function attachedTarget({ attachment, token }: AttachmentPair): HttpTarge
   return { url: attachment.hubUrl, token, via: "hub" };
 }
 
-export async function resolveTarget(stateDir: string, pair?: AttachmentPair | null): Promise<Target> {
+export async function resolveTarget(stateDir: string, pair?: AttachmentPair | null) {
   if (pair === undefined) pair = await readAttachmentPair(stateDir);
   if (!pair) {
-    const server = await discover(stateDir, 5000);
-    return server ? localTarget(stateDir, server.url) : { via: "direct" };
+    const server = await discoverCapabilities(stateDir, 5000);
+    return server
+      ? { ...(await localTarget(stateDir, server.url)), features: server.capabilities.features }
+      : { via: "direct" as const };
   }
   const target = attachedTarget(pair);
-  await hubCapabilities(target.url, undefined, stateDir);
-  return target;
+  const { features } = await hubCapabilities(target.url, undefined, stateDir);
+  return { ...target, features };
 }

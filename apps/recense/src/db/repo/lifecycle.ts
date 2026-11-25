@@ -16,6 +16,7 @@ import {
   changedBlocks,
   comments,
   deliveries,
+  diffImages,
   docAssets,
   files,
   instances,
@@ -215,6 +216,8 @@ export function deleteReview(ownerId: string, db: Db, reviewId: string, now: num
       .from(files)
       .where(and(eq(files.ownerId, ownerId), inArray(files.revisionId, revisionIds))))
       note(file.o, file.n, file.r);
+    const imageFilter = and(eq(diffImages.ownerId, ownerId), inArray(diffImages.fileId, fileIds));
+    for (const image of await q.select({ blob: diffImages.blob }).from(diffImages).where(imageFilter)) note(image.blob);
     for (const writeup of await q
       .select({ s: writeups.sourceBlob, r: writeups.renderedBlob })
       .from(writeups)
@@ -239,6 +242,7 @@ export function deleteReview(ownerId: string, db: Db, reviewId: string, now: num
     await q.delete(agentWaiters).where(and(eq(agentWaiters.ownerId, ownerId), eq(agentWaiters.reviewId, reviewId)));
     await q.delete(docAssets).where(and(eq(docAssets.ownerId, ownerId), inArray(docAssets.revisionId, revisionIds)));
     await q.delete(agentNotes).where(and(eq(agentNotes.ownerId, ownerId), inArray(agentNotes.fileId, fileIds)));
+    await q.delete(diffImages).where(imageFilter);
     await q.delete(files).where(and(eq(files.ownerId, ownerId), inArray(files.revisionId, revisionIds)));
     await q.delete(topics).where(and(eq(topics.ownerId, ownerId), inArray(topics.revisionId, revisionIds)));
     await q.delete(writeups).where(and(eq(writeups.ownerId, ownerId), inArray(writeups.revisionId, revisionIds)));

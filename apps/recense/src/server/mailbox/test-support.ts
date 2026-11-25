@@ -103,6 +103,7 @@ export async function mailboxFixture() {
     body?: unknown,
     who: keyof typeof credentials = "reviewer",
     signal?: AbortSignal,
+    headers?: Record<string, string>,
   ) {
     const credential = credentials[who];
     const url = `${origin}/api/v1${path}`;
@@ -112,6 +113,7 @@ export async function mailboxFixture() {
         Host: "127.0.0.1:3636",
         Origin: origin,
         "Content-Type": "application/json",
+        ...headers,
         ...(who === "reviewer" || who === "foreign"
           ? { Cookie: `recense_session=${credential}` }
           : { Authorization: `Bearer ${credential}` }),

@@ -78,7 +78,13 @@ function gitExecutable() {
   executable ??= findExecutable("git");
   return executable;
 }
-async function execute(cwd: string, args: string[], listing = false, signal?: AbortSignal): Promise<Buffer> {
+async function execute(
+  cwd: string,
+  args: string[],
+  listing = false,
+  signal?: AbortSignal,
+  maxBuffer: number = LIMITS.publishJsonBytes,
+): Promise<Buffer> {
   const binary = await gitExecutable();
   return new Promise((resolve, reject) =>
     execFile(
@@ -89,7 +95,7 @@ async function execute(cwd: string, args: string[], listing = false, signal?: Ab
         encoding: "buffer",
         timeout: 10000,
         signal,
-        maxBuffer: listing ? 64 * 1024 * 1024 : LIMITS.publishJsonBytes,
+        maxBuffer: listing ? 64 * 1024 * 1024 : maxBuffer,
         env: {
           PATH: binary.path,
           HOME: process.env.HOME,
@@ -148,7 +154,13 @@ export function createGitSession({ signal }: { signal?: AbortSignal } = {}): Git
     const args = [`--attr-source=${emptyTree}`, ...fences, call[0], ...call.slice(1)];
     if (call[0] === "diff-tree")
       args.push("--no-abbrev", "--no-ext-diff", "--no-textconv", "--ignore-submodules=dirty", "--");
-    const result = await execute(cwd, args, call[0] === "ls-tree" || call[0] === "ls-files", signal);
+    const result = await execute(
+      cwd,
+      args,
+      call[0] === "ls-tree" || call[0] === "ls-files",
+      signal,
+      call[0] === "cat-file" && call[1] === "blob" ? LIMITS.assetBytes : LIMITS.publishJsonBytes,
+    );
     if (call[0] === "rev-parse" && call[1] === "--show-toplevel") {
       // Discovery may start in a subdirectory; subsequent calls use its worktree root.
       const root = result.toString().replace(/\r?\n$/, "");

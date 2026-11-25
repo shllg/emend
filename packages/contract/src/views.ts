@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentNoteView } from "./agent-note.ts";
+import { DiffImageView } from "./diff-image.ts";
 import { DocHeadings, DocTitle, HtmlLookValue, SourceContent } from "./doc.ts";
 import { InboxListGroup } from "./groups.ts";
 import { LIMITS } from "./limits.ts";
@@ -259,7 +260,9 @@ export const FileView = z
     viewed: z.enum(["viewed", "stale"]).optional(),
     viewedOn: z.int().positive().optional(),
     notes: z.array(AgentNoteView).max(LIMITS.agentNotesPerFile).optional(),
+    image: DiffImageView.optional(),
   })
+  .refine((file) => !file.image || file.role === "diff", "only diff files have image sides")
   .refine(
     (file) => file.view === undefined || (file.role === "doc" && file.mediaType === "text/plain"),
     "only source doc rows have a view",

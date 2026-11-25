@@ -297,6 +297,8 @@ States. A part that can be in one of these states shows it:
   comes from `::before`, never text, so block ids stay.
 - A Before and After image pair offers Before, After and Side by side; a third image with alt
   text "Diff" adds a Diff mode.
+- A changed image in the diff offers Before, After and Side by side. An added image shows After, and a deleted image shows Before.
+  Each picture opens in the lightbox. A side over 25 MiB shows a Not shown line. An SVG offers Pictures and Text.
 - Hover cards (`.em-term-card`, 20 rem, `--bg-raised`, `--shadow-3`, `--z-tooltip`): a glossary
   term or an issue or PR number opens one on hover, focus or tap, a term also on Enter or Space.
   A number without a recorded title stays a plain link.
