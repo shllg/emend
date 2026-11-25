@@ -586,13 +586,18 @@ test("the plugin and copied package skills exclude the linked theme skill", asyn
 });
 
 test.each(["plugin/skills/recense-review/SKILL.md", "plugin/skills/recense-review/references/manifest.md"])(
-  "%s teaches sparse notes with verified ranges and cited refs",
+  "%s teaches sparse notes with quoted lines and cited refs",
   (path) => {
     const text = read(path);
     expect(text).toMatch(/single.digit/);
     expect(text).toContain("15 words or fewer");
-    expect(text).toContain("@@");
+    expect(text).toContain("Give every note a `quote`");
+    expect(text).toContain("Omit `@@` hunk headers, line numbers and the patch's `+`, `-` or space prefix.");
+    expect(text).toContain("Leave out `start` and `end`");
+    expect(text).toContain("matches nowhere or more than once, publish refuses it");
     expect(text).toContain("file and note index");
+    expect(text).not.toContain("Take every range from");
+    expect(text).not.toContain("Take `start` and `end` from");
     expect(text).toContain("restarting per topic");
     expect(text).toContain('<span class="ref">ref A</span>');
     expect(text).toContain("never Markdown or HTML");
