@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { AgentReviewList, LIMITS, PublishResponse } from "@recense/contract";
+import { AgentReviewList, LEASE_SECONDS, LIMITS, PublishResponse } from "@recense/contract";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { Db } from "../../db/client.ts";
@@ -20,6 +20,7 @@ import {
 } from "../../db/schema.ts";
 import { createToken, hashSecret } from "../auth/tokens.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import { pacing } from "../pacing.ts";
 import { observePacing } from "../pacing-test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
@@ -391,6 +392,10 @@ test("a malformed or repeated key is a 400", async () => {
     await error(await f.request(`/agent/reviews${query}`, "GET", undefined, "agent"), 400, "invalid_request");
 });
 
+test.each(["?diff=", "?diff=1", "?diff=0&diff=0"])("an invalid diff option %s is a 400", async (query) => {
+  await error(await f.request(`/agent/reviews${query}`, "GET", undefined, "agent"), 400, "invalid_request");
+});
+
 test("key and head filters must both match", async () => {
   const own = await publishAs("agent", "d", shaA);
   await publishAs("agent", "e", shaB);
@@ -466,7 +471,41 @@ test("a delivery that holds an approval of an older revision still counts as a w
   expect((await items())[0]?.answerWaiting).toBe(false);
 });
 
-test("a revision of more than 1000 diff rows yields between chunks of at most 500 rows", async () => {
+test("an unconfirmed older approval stops waiting when its lease expires", async () => {
+  await approve(f.reviewId, 1);
+  expect(await f.take()).toMatchObject({ kind: "approve" });
+  await f.revision(2);
+  f.advance(LEASE_SECONDS * 1000);
+  expect((await items())[0]?.answerWaiting).toBe(true);
+  f.advance(1);
+  expect((await items())[0]?.answerWaiting).toBe(false);
+});
+
+test("the list yields between revision file queries and skips both queries with diff=0", async () => {
+  await seedFiles(f.revisionId, [{ role: "diff", path: "old", status: "deleted", oldBlob: oldHash }]);
+  await approve(f.reviewId, 1);
+  await seedFiles(await f.revision(2), [{ role: "diff", path: "new", status: "added", newBlob: newHash }]);
+  const log = observePacing(f.deps);
+  const digestWork = () =>
+    log.events.flatMap((event) => {
+      if (event.kind === "statement" && /\bfiles\b/i.test(event.sql)) return ["files"];
+      if (event.kind === "yield" && event.phase === "agent-review-diff") return ["yield"];
+      return [];
+    });
+  try {
+    expect(await items()).toMatchObject([{ newest: { diff: { files: 1 } }, approved: { diff: { files: 1 } } }]);
+    expect(digestWork()).toEqual(["files", "yield", "files"]);
+    log.events.length = 0;
+    const response = await f.request("/agent/reviews?diff=0", "GET", undefined, "agent");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ items: [{ newest: { diff: null }, approved: { diff: null } }] });
+    expect(digestWork()).toEqual([]);
+  } finally {
+    log.restore();
+  }
+});
+
+test.each([false, true])("a large revision yields during digest work and stops on abort (abort %s)", async (abort) => {
   const total = 1200;
   for (let start = 0; start < total; start += 200) {
     await f.db.query((q) =>
@@ -484,16 +523,29 @@ test("a revision of more than 1000 diff rows yields between chunks of at most 50
       ),
     );
   }
-  const log = observePacing(f.deps);
+  const previousProbe = pacing.probe;
+  const controller = new AbortController();
+  let yields = 0;
+  pacing.probe = (phase) => {
+    if (phase !== "agent-review-diff") return;
+    yields++;
+    if (abort) controller.abort();
+  };
   try {
-    const [item] = await items();
-    const lines = Array.from({ length: total }, (_, i) => `file-${String(i).padStart(4, "0")}.bin\tnew\tbinary\n`);
-    expect(item?.newest?.diff).toEqual({ files: total, digest: digest(lines.join("")) });
-    // Each added row makes one line, so the row loop and the hash loop yield at 500 and 1000 each.
-    const phases = log.events.filter((event) => event.kind === "yield" && event.phase === "agent-review-diff");
-    expect(phases).toHaveLength(4);
+    const response = await f.request("/agent/reviews", "GET", undefined, "agent", controller.signal);
+    expect(response.status).toBe(200);
+    const [item] = AgentReviewList.parse(await response.json()).items;
+    if (abort) {
+      expect(item?.newest?.diff).toBeNull();
+      expect(yields).toBe(1);
+    } else {
+      const lines = Array.from({ length: total }, (_, i) => `file-${String(i).padStart(4, "0")}.bin\tnew\tbinary\n`);
+      expect(item?.newest?.diff).toEqual({ files: total, digest: digest(lines.join("")) });
+      // Each pass yields twice, once at 500 rows or lines and again at 1000.
+      expect(yields).toBe(4);
+    }
   } finally {
-    log.restore();
+    pacing.probe = previousProbe;
   }
 });
 

@@ -81,7 +81,7 @@ test("status --line requests the publish key with the agent token and prints the
   const f = await lineFixture();
   const key = reviewKey(f.instanceId, await realpath(f.repo), branch);
   const respond = vi.fn(async (url: string | URL, init?: RequestInit) => {
-    expect(String(url)).toBe(`http://127.0.0.1:3636/api/v1/agent/reviews?key=${key}`);
+    expect(String(url)).toBe(`http://127.0.0.1:3636/api/v1/agent/reviews?key=${key}&diff=0`);
     expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
     expect(init?.method).toBe("GET");
     return Response.json({ items: [item] });
@@ -221,7 +221,7 @@ test("status --line checks the hub before sending the hub token to the hub only"
   expect(f.stderr).toEqual([]);
   expect(f.fetcher.mock.calls.map(([url]) => String(url))).toEqual([
     "https://hub.example/api/v1/capabilities",
-    `https://hub.example/api/v1/agent/reviews?key=${key}`,
+    `https://hub.example/api/v1/agent/reviews?key=${key}&diff=0`,
   ]);
   const headers = f.fetcher.mock.calls.map(([, init]) => new Headers(init?.headers).get("Authorization"));
   expect(headers).toEqual([null, `Bearer ${hubToken}`]);

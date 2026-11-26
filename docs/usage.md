@@ -244,7 +244,7 @@ and a digest of their old and new sides. A review of docs or a plan alone has ze
 `turn` is `agent` after a Send on the newest revision that has not been set aside, `reviewer`
 otherwise, or `null` for an approved or retired review or one without a revision.
 `answerWaiting` is true while a Send still awaits delivery confirmation and has not been set aside.
-An approval of an older revision counts only if a delivery already holds it.
+An approval of an older revision counts only while a delivery holds it with a live lease.
 An older server or hub that omits `diff` or `answerWaiting` gives you `null` for that field.
 
 To check which commit an approval covers, run `recense ls --json --head <sha>` with the full commit

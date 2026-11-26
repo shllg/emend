@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { type AgentReviewDiff, AgentReviewList, type AgentReviewQuery, LIMITS } from "@recense/contract";
+import { type AgentReviewDiff, AgentReviewList, type AgentReviewQuery, diffImageType, LIMITS } from "@recense/contract";
 import { and, asc, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { Principal } from "../../server/auth/principal.ts";
@@ -7,7 +7,8 @@ import { yieldToLoop } from "../../server/pacing.ts";
 import type { Db } from "../client.ts";
 import { deliveries, diffImages, files, reviews, revisions, sends } from "../schema.ts";
 
-type DiffRow = Pick<typeof files.$inferSelect, "path" | "oldPath" | "status" | "oldBlob" | "newBlob" | "flag"> & {
+type DiffRow = Pick<typeof files.$inferSelect, "oldPath" | "status" | "oldBlob" | "newBlob" | "flag"> & {
+  path: string | null;
   oldImageBlob: string | null;
   newImageBlob: string | null;
   oldImageFlag: typeof diffImages.$inferSelect.flag;
@@ -16,27 +17,55 @@ type DiffRow = Pick<typeof files.$inferSelect, "path" | "oldPath" | "status" | "
 
 const LINE_END = Buffer.from("\n");
 
-export async function revisionDiff(rows: readonly DiffRow[]): Promise<AgentReviewDiff> {
+function sideValue(row: DiffRow, side: "old" | "new", sidePath: string) {
+  const old = side === "old";
+  const inStatus = row.status !== (old ? "added" : "deleted");
+  const text = old ? row.oldBlob : row.newBlob;
+  const image = old ? row.oldImageBlob : row.newImageBlob;
+  const imageFlag = old ? row.oldImageFlag : row.newImageFlag;
+  if (!inStatus) return text !== null || image !== null || imageFlag !== null ? "unexpected" : null;
+  if (imageFlag !== null) return imageFlag;
+  if (image === null) return text ?? row.flag;
+  if (text !== null && text !== image) return "unexpected";
+  if (text === null && diffImageType(sidePath) === "image/svg+xml") return row.flag ?? "unexpected";
+  return image;
+}
+
+export async function revisionDiff(rows: readonly DiffRow[], signal?: AbortSignal): Promise<AgentReviewDiff | null> {
+  if (signal?.aborted) return null;
   const lines: Buffer[] = [];
   let processed = 0;
   for (const row of rows) {
-    const old = row.oldImageBlob ?? row.oldImageFlag ?? row.oldBlob ?? (row.status !== "added" ? row.flag : null);
-    const next = row.newImageBlob ?? row.newImageFlag ?? row.newBlob ?? (row.status !== "deleted" ? row.flag : null);
-    // Keeping each side at its own path makes a rename equivalent to a deletion and an addition.
-    if (old !== null) lines.push(Buffer.concat([Buffer.from(`${row.oldPath ?? row.path}\told\t${old}`), LINE_END]));
-    if (next !== null) lines.push(Buffer.concat([Buffer.from(`${row.path}\tnew\t${next}`), LINE_END]));
-    if (++processed % 500 === 0) await yieldToLoop("agent-review-diff");
+    // The left join produces a single null path for a revision without diff files.
+    if (row.path === null) continue;
+    for (const side of ["old", "new"] as const) {
+      const sidePath = side === "old" ? (row.oldPath ?? row.path) : row.path;
+      const value = sideValue(row, side, sidePath);
+      if (value !== null) lines.push(Buffer.concat([Buffer.from(`${sidePath}\t${side}\t${value}`), LINE_END]));
+    }
+    if (++processed % 500 === 0) {
+      await yieldToLoop("agent-review-diff");
+      if (signal?.aborted) return null;
+    }
   }
   const hash = createHash("sha256");
   let hashed = 0;
   for (const line of lines.sort(Buffer.compare)) {
     hash.update(line);
-    if (++hashed % 500 === 0) await yieldToLoop("agent-review-diff");
+    if (++hashed % 500 === 0) {
+      await yieldToLoop("agent-review-diff");
+      if (signal?.aborted) return null;
+    }
   }
-  return { files: rows.length, digest: hash.digest("hex") };
+  return { files: processed, digest: hash.digest("hex") };
 }
 
-async function readRevisionDiff(db: Db, ownerId: string, revisionId: string): Promise<AgentReviewDiff | null> {
+async function readRevisionDiff(
+  db: Db,
+  ownerId: string,
+  revisionId: string,
+  signal?: AbortSignal,
+): Promise<AgentReviewDiff | null> {
   const oldImage = alias(diffImages, "old_image");
   const newImage = alias(diffImages, "new_image");
   const rows = await db.read((q) =>
@@ -69,8 +98,7 @@ async function readRevisionDiff(db: Db, ownerId: string, revisionId: string): Pr
       .where(and(eq(revisions.ownerId, ownerId), eq(revisions.id, revisionId)))
       .all(),
   );
-  // A missing revision has no rows. A revision without diff files has one null file from the join.
-  return rows.length ? revisionDiff(rows.filter((row): row is DiffRow => row.path !== null)) : null;
+  return rows.length ? revisionDiff(rows, signal) : null;
 }
 
 /**
@@ -78,14 +106,15 @@ async function readRevisionDiff(db: Db, ownerId: string, revisionId: string): Pr
  * an instance sees an empty list. The optional exact head (newest or approved) and key filters
  * apply before the row limit. Each listed revision carries its number, head and code diff summary.
  * A Send on the newest open revision passes the turn to the agent unless set aside. An answer
- * waits until set aside or confirmed, except for an unclaimed approval take will set aside as
- * stale. The list reads no comment, writeup or doc content and writes nothing.
+ * waits until set aside or confirmed. An older approval counts only during a live delivery lease.
+ * The list reads no comment, writeup or doc content and writes nothing.
  */
 export async function listAgentReviews(
   db: Db,
   principal: Principal,
   baseUrl: string,
   query: AgentReviewQuery = {},
+  { now = Date.now(), signal }: { now?: number; signal?: AbortSignal } = {},
 ): Promise<AgentReviewList> {
   if (principal.instanceId === null) return { items: [] };
   const instanceId = principal.instanceId;
@@ -103,7 +132,7 @@ export async function listAgentReviews(
         newestSeq: newest.seq,
         newestHead: newest.head,
         newestSent: sql<boolean>`exists (select 1 from ${sends} s where s.owner_id = ${reviews.ownerId} and s.review_id = ${reviews.id} and s.revision_id = ${newest.id} and s.set_aside_at is null)`,
-        answerWaiting: sql<number>`exists (select 1 from ${sends} s left join ${deliveries} d on d.owner_id = s.owner_id and d.review_id = s.review_id and d.id = s.delivery_id where s.owner_id = ${reviews.ownerId} and s.review_id = ${reviews.id} and s.kind in ('go', 'approve') and s.set_aside_at is null and (s.kind = 'go' or s.delivery_id is not null or s.revision_id = ${newest.id}) and (s.delivery_id is null or d.confirmed_at is null))`,
+        answerWaiting: sql<number>`exists (select 1 from ${sends} s left join ${deliveries} d on d.owner_id = s.owner_id and d.review_id = s.review_id and d.id = s.delivery_id where s.owner_id = ${reviews.ownerId} and s.review_id = ${reviews.id} and s.kind in ('go', 'approve') and s.set_aside_at is null and d.confirmed_at is null and (s.kind = 'go' or s.revision_id = ${newest.id} or d.lease_until >= ${now}))`,
         approvedId: approved.id,
         approvedSeq: approved.seq,
         approvedHead: approved.head,
@@ -142,10 +171,15 @@ export async function listAgentReviews(
       .all(),
   );
   const diffs = new Map<string, AgentReviewDiff | null>();
-  for (const id of new Set(rows.flatMap((row) => [row.newestId, row.approvedId]))) {
-    if (id === null) continue;
-    if (diffs.size) await yieldToLoop("agent-review-diff");
-    diffs.set(id, await readRevisionDiff(db, principal.ownerId, id));
+  if (query.diff !== "0") {
+    for (const id of new Set(rows.flatMap((row) => [row.newestId, row.approvedId]))) {
+      if (id === null) continue;
+      if (diffs.size) await yieldToLoop("agent-review-diff");
+      if (signal?.aborted) break;
+      const diff = await readRevisionDiff(db, principal.ownerId, id, signal);
+      if (signal?.aborted) break;
+      diffs.set(id, diff);
+    }
   }
   return AgentReviewList.parse({
     items: rows.map((row) => ({

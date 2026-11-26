@@ -46,7 +46,7 @@ function attach(dir: string, hubUrl = "https://hub.example") {
 test("ls against a local server lists the instance's reviews, one tab-separated line each", async () => {
   const f = await commandFixture();
   f.setResponse(async (url, init) => {
-    expect(String(url)).toBe("http://127.0.0.1:3636/api/v1/agent/reviews");
+    expect(String(url)).toBe("http://127.0.0.1:3636/api/v1/agent/reviews?diff=0");
     expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
     return Response.json({ items: [item] });
   });
@@ -64,7 +64,10 @@ test("ls --json prints the waiting answer and both revision diffs as reported", 
     newest: { revision: 2, head: "c".repeat(40), diff: { files: 3, digest: "a".repeat(64) } },
     approved: { revision: 1, head: "d".repeat(40), diff: { files: 1, digest: "b".repeat(64) } },
   };
-  f.setResponse(async () => Response.json({ items: [reported] }));
+  f.setResponse(async (url) => {
+    expect(String(url)).toBe("http://127.0.0.1:3636/api/v1/agent/reviews");
+    return Response.json({ items: [reported] });
+  });
   expect(await run(["ls", "--json"], f.io)).toBe(0);
   expect(f.stdout).toHaveLength(1);
   expect(JSON.parse(f.stdout.join(""))).toEqual({ items: [reported] });

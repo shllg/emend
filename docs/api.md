@@ -114,7 +114,7 @@ a machine token reaches only reviews from its own instance.
 | PUT | `/api/v1/reviews/:id/group` | Reviewer | Move a review or pub into a group, or remove it (204). |
 | PUT | `/api/v1/reviews/:id/pin` | Reviewer | Pin or unpin a review or pub (204). |
 | PUT | `/api/v1/reviews/:id/pin/place` | Reviewer | Move a pin directly before or after another pin (204). |
-| GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head; `?key=<key>` keeps the review with that stored review key. |
+| GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`. `?head=<sha>` keeps those whose approved or newest revision has that head. `?key=<key>` keeps the review with that stored review key. `?diff=0` skips revision diffs. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
 | GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark`, `theme=light` or `theme=<name>` sets the look of files recense draws. |
@@ -1679,41 +1679,46 @@ the review's address on this server. The list carries no comment bodies,
 writeup text, doc content, tokens or other ids. A reviewer session receives `403 forbidden`.
 
 `diff` is `{ files, digest }` for that revision. `files` counts the owner's file rows for the
-revision with role `diff` (zero for docs or a plan alone). For each row, consider the `old` and
-`new` sides independently, in this order of precedence.
+revision with role `diff` (zero for docs or a plan alone). Consider each side independently.
+`added` includes only the new side, `deleted` only the old side, and all other statuses (including
+null) include both. The side's text hash is `old_blob` or `new_blob`. Its image, if present, is
+the corresponding `diff_images` row. The old side uses `oldPath ?? path` and the new side uses `path`.
 
-1. If a `diff_images` row exists for the side, use its `blob` hash or, when null, its `oversized` flag.
-2. Otherwise, use the side's `old_blob` or `new_blob` hash whenever present, regardless of status.
-3. Otherwise, use the file's flag (`binary` or `oversized`) if present and the status includes that
-   side. `added` includes only new, `deleted` only old, and every other status (including null) includes both.
-4. Otherwise, omit the line for that side.
+1. For an excluded side, omit the line unless a text hash or image exists. Either makes the value `unexpected`.
+2. For an included side with an image, use `oversized` if the image has that flag. Otherwise, a
+   text hash that differs from the image hash gives `unexpected`. If the side's path is SVG
+   (`diffImageType(sidePath) === "image/svg+xml"`) and it has no text hash, use the file's flag
+   (`binary` or `oversized`), or `unexpected` if it has none. Without the text hash the view
+   offers the SVG picture alone. The remaining cases use the image hash, including an SVG
+   whose text and image hashes agree.
+3. For an included side without an image, use the text hash if present, then the file's flag if
+   present. If neither exists, omit the line.
 
 Write each included line as `<sidePath>\t<side>\t<value>\n`, with literal tabs and a final newline.
-The old side uses `oldPath` when present and `path` otherwise. The new side uses `path`. Sort the
-complete lines by their UTF-8 bytes and concatenate them without separators. `digest` is the
+Sort the complete lines by their UTF-8 bytes and concatenate them without separators. `digest` is the
 lowercase hex SHA-256 of those bytes. With zero lines the digest is
 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 
-A side with content contributes the SHA-256 of its stored bytes. Callers can enumerate the sides
+To compute the expected digest from a commit, use the SHA-256 of each side's bytes as its value. Enumerate the sides
 with `git diff-tree -r --no-renames <base> <head>`, since a rename contributes its two paths
 separately. For a committed regular file or symlink, hash the git blob's bytes. For an image side,
 these are the image's bytes. For a submodule (git mode `160000`), publish stores the UTF-8 text
 `Subproject commit <oid>` followed by a line feed, where `<oid>` is the submodule's commit id.
-Hash that text including the line feed. A side stored with only a flag contributes the flag name
-and cannot match a digest computed from that side's bytes.
+Hash that text including the line feed. The markers `unexpected`, `binary` and `oversized`
+cannot equal the 64-character hex SHA-256 of any side's bytes.
 
 `answerWaiting` is true while the review holds a Send (`go` or `approve`) with `set_aside_at`
-null whose delivery is unconfirmed. This includes a null `delivery_id` and a delivery whose
-`confirmed_at` is null, whether its lease is live or expired. An approval for an older revision
-counts only if a delivery already holds it, because take sets an unclaimed older approval aside.
-It is false when no such Send
-exists. A snoozed or retired review's stop notice does not count. For both `answerWaiting` and
-`diff`, null means the server did not report the field. The schema defaults each to null when
-an older server or hub omits it. If the revision disappears before the server reads its files,
-the server returns `diff: null`.
+null that still awaits confirmation. A Go or an approval of the newest revision counts when
+`delivery_id` is null or the delivery's `confirmed_at` is null, including after lease expiry.
+An approval of an older revision counts only while a delivery holds it with `confirmed_at` null
+and `lease_until >= now`. Take releases expired deliveries and sets unclaimed older approvals aside.
+It is false when no such Send exists. A snoozed or retired review's stop notice does not count.
+For both `answerWaiting` and `diff`, null means the server did not report a value. The schema
+defaults each to null when an older server or hub omits it. If the revision disappears before
+the server reads its files, the server returns `diff: null`.
 
-The optional query `?head=<sha>` (`AgentReviewQuery = { head?: commit, key?: sha256 }`) keeps only reviews whose
-approved revision's head equals `<sha>` or whose newest revision's head equals `<sha>`. The match
+The query is `AgentReviewQuery = { head?: commit, key?: sha256, diff?: "0" }`.
+`?head=<sha>` keeps only reviews whose approved or newest revision's head equals `<sha>`. The match
 is exact and case-sensitive on the stored value; an older, superseded revision's head does not
 match. `<sha>` is a full object id of exactly 40 or 64 lowercase hex characters: no prefix and no
 `worktree`. The filter is applied together with the owner and origin-instance conditions, before the
@@ -1727,6 +1732,10 @@ The key filter applies with the owner and origin-instance conditions, before the
 the cap. A malformed or repeated `key` is `400 invalid_request`. Capabilities lists
 `agent-review-key` when the server applies `key`; an older server ignores `key` and returns the
 whole list, so a client checks that feature before it relies on the filter.
+
+`?diff=0` returns null for every `newest.diff` and `approved.diff` and skips reading file rows
+for the digest. A repeated `diff` or any value other than `0` is `400 invalid_request`. Older
+servers ignore this parameter and compute the diffs as usual.
 
 `head` and `branch` are the values the publisher sent. The server stores both unverified.
 A caller that gates on approval must require a non-null `approved`, `approved.head === sha`, the expected `branch`, and
@@ -1765,6 +1774,7 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `AgentReviewItem.newest.diff`, `AgentReviewItem.approved.diff` | `{ files, digest }` or `null`. `files` is an integer from 0 to `filesPerRevision` (10,000), and `digest` is 64 lowercase hex characters. Defaults to `null` when omitted |
 | `AgentReviewQuery.head` | Optional; exactly 40 or 64 lowercase hex characters, else `400 invalid_request` |
 | `AgentReviewQuery.key` | Optional; exactly 64 lowercase hex characters, else `400 invalid_request` |
+| `AgentReviewQuery.diff` | Optional. Accepts a single `0`. Any other value or a repeated parameter gives `400 invalid_request` |
 | `AgentReviewItem.updatedAt` | ISO 8601 UTC datetime string (`z.iso.datetime()`) |
 | `AgentReviewItem.url` | HTTP(S) URL of at most `pathChars` (4096) characters |
 | `InboxItem.title` | `titleChars` (200), including publish's nonblank requirement |

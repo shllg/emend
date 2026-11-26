@@ -9,18 +9,19 @@ const USAGE = "Usage: recense ls [--json] [--head <sha>].";
 
 function parse(args: string[]) {
   let json = false;
-  let head: string | undefined;
+  const query: AgentReviewQuery = {};
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--json" && !json) json = true;
-    else if (arg === "--head" && head === undefined) {
+    else if (arg === "--head" && query.head === undefined) {
       const value = args[++i];
       const parsed = AgentReviewQuery.safeParse({ head: value });
       if (!parsed.success || parsed.data.head === undefined) throw new CliUsageError(USAGE);
-      head = parsed.data.head;
+      query.head = parsed.data.head;
     } else throw new CliUsageError(USAGE);
   }
-  return { json, query: head === undefined ? {} : { head } };
+  if (!json) query.diff = "0";
+  return { json, query };
 }
 
 export async function lsCommand(stateDir: string, args: string[], io: Io) {
@@ -29,7 +30,8 @@ export async function lsCommand(stateDir: string, args: string[], io: Io) {
   let list: AgentReviewList;
   if (target.via === "direct") list = await listDirect(stateDir, query);
   else {
-    const path = query.head === undefined ? "/agent/reviews" : `/agent/reviews?head=${query.head}`;
+    const params = new URLSearchParams(query);
+    const path = params.size ? `/agent/reviews?${params}` : "/agent/reviews";
     const result = AgentReviewList.safeParse(await apiRequest(stateDir, target, path, { method: "GET" }));
     if (!result.success) throw new CliError("The recense server returned an invalid response.");
     list = result.data;

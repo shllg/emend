@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { expect, test } from "vitest";
+import { expect, onTestFinished, test } from "vitest";
+import { pacing } from "../../server/pacing.ts";
 import { revisionDiff } from "./agent-reviews.ts";
 
 type Row = Parameters<typeof revisionDiff>[0][number];
@@ -33,11 +34,13 @@ test("side lines sort by UTF-8 bytes even where UTF-16 code units order paths di
   expect(await revisionDiff(rows)).toEqual({ files: 3, digest: sha(text) });
 });
 
-test("an added file with an old blob shows an old line, a deleted file with a new blob a new line", async () => {
+test("a text or image blob on an excluded side contributes unexpected", async () => {
   const added = row({ path: "added", status: "added", oldBlob: oldHash });
-  expect((await revisionDiff([added])).digest).toBe(sha(`added\told\t${oldHash}\n`));
+  expect(await revisionDiff([added])).toEqual({ files: 1, digest: sha("added\told\tunexpected\n") });
   const deleted = row({ path: "deleted", status: "deleted", newBlob: newHash });
-  expect((await revisionDiff([deleted])).digest).toBe(sha(`deleted\tnew\t${newHash}\n`));
+  expect(await revisionDiff([deleted])).toEqual({ files: 1, digest: sha("deleted\tnew\tunexpected\n") });
+  const excludedImage = row({ path: "deleted.png", status: "deleted", newImageBlob: newHash });
+  expect(await revisionDiff([excludedImage])).toEqual({ files: 1, digest: sha("deleted.png\tnew\tunexpected\n") });
 });
 
 test("a modified file with only a new blob and no flag shows only the new line", async () => {
@@ -53,15 +56,76 @@ test("a flagged row without blobs shows flag lines by status", async () => {
   expect(await revisionDiff(rows)).toEqual({ files: 3, digest: sha(text) });
 });
 
-test("an image row uses its image blobs, or oversized for a flagged side", async () => {
-  const imageA = "c".repeat(64);
-  const imageB = "d".repeat(64);
-  const image = (fields: Partial<Row>) => row({ path: "logo.png", flag: "binary", ...fields });
-  const first = await revisionDiff([image({ oldImageBlob: imageA, newImageBlob: imageB })]);
-  expect(first.digest).toBe(sha(`logo.png\tnew\t${imageB}\nlogo.png\told\t${imageA}\n`));
-  const large = await revisionDiff([image({ oldImageBlob: imageA, newImageFlag: "oversized" })]);
-  expect(large.digest).toBe(sha(`logo.png\tnew\toversized\nlogo.png\told\t${imageA}\n`));
-  const other = await revisionDiff([image({ oldImageBlob: imageA, newImageBlob: imageA })]);
-  expect(other.digest).toBe(sha(`logo.png\tnew\t${imageA}\nlogo.png\told\t${imageA}\n`));
-  expect(other.digest).not.toBe(first.digest);
+test("a binary raster uses the image blobs, or oversized for an oversized image side", async () => {
+  const image = row({ path: "logo.png", flag: "binary", oldImageBlob: oldHash, newImageBlob: newHash });
+  expect(await revisionDiff([image])).toEqual({
+    files: 1,
+    digest: sha(`logo.png\tnew\t${newHash}\nlogo.png\told\t${oldHash}\n`),
+  });
+  const oversized = { ...image, newBlob: newHash, newImageBlob: null, newImageFlag: "oversized" as const };
+  expect(await revisionDiff([oversized])).toEqual({
+    files: 1,
+    digest: sha(`logo.png\tnew\toversized\nlogo.png\told\t${oldHash}\n`),
+  });
+});
+
+test("an added raster with stray old text marks only the old side unexpected", async () => {
+  const added = row({ path: "logo.png", status: "added", flag: "binary", oldBlob: oldHash, newImageBlob: newHash });
+  expect(await revisionDiff([added])).toEqual({
+    files: 1,
+    digest: sha(`logo.png\tnew\t${newHash}\nlogo.png\told\tunexpected\n`),
+  });
+});
+
+test.each([
+  ["oversized", "old.SVG\told\toversized\n"],
+  ["binary", "old.SVG\told\tbinary\n"],
+  [null, "old.SVG\told\tunexpected\n"],
+] as const)("an SVG picture without source uses its file flag or unexpected (%s)", async (flag, oldLine) => {
+  const renamed = row({
+    path: "logo.png",
+    oldPath: "old.SVG",
+    status: "renamed",
+    flag,
+    oldImageBlob: oldHash,
+    newImageBlob: newHash,
+  });
+  const expected = `logo.png\tnew\t${newHash}\n${oldLine}`;
+  expect(await revisionDiff([renamed])).toEqual({ files: 1, digest: sha(expected) });
+});
+
+test("an SVG with matching source and image uses their hash", async () => {
+  const svg = row({ path: "logo.svg", status: "added", newBlob: newHash, newImageBlob: newHash });
+  expect(await revisionDiff([svg])).toEqual({ files: 1, digest: sha(`logo.svg\tnew\t${newHash}\n`) });
+});
+
+test("a raster with conflicting text and image blobs contributes unexpected", async () => {
+  const raster = row({ path: "logo.png", status: "added", newBlob: oldHash, newImageBlob: newHash });
+  expect(await revisionDiff([raster])).toEqual({ files: 1, digest: sha("logo.png\tnew\tunexpected\n") });
+});
+
+test("the digest processes at most 500 diff rows between yields", async () => {
+  const seen = new Set<number>();
+  const rows = Array.from({ length: 1200 }, (_, i) => ({
+    ...row({ path: `file-${i}`, status: "added" }),
+    get newBlob() {
+      seen.add(i);
+      return newHash;
+    },
+  }));
+  const checkpoints: number[] = [];
+  const previousProbe = pacing.probe;
+  onTestFinished(() => {
+    pacing.probe = previousProbe;
+  });
+  pacing.probe = (phase) => {
+    if (phase === "agent-review-diff") checkpoints.push(seen.size);
+  };
+  expect((await revisionDiff(rows))?.files).toBe(rows.length);
+  expect(seen.size).toBe(rows.length);
+  let previous = 0;
+  for (const count of [...checkpoints, seen.size]) {
+    expect(count - previous).toBeLessThanOrEqual(500);
+    previous = count;
+  }
 });
