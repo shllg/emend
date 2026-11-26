@@ -135,7 +135,7 @@ export async function systemdService(action: ServiceAction, context: ServiceCont
         ? "the recense service did not start a server; run journalctl --user -u recense to see why."
         : "the recense service runs, but this command could not confirm its server; run journalctl --user -u recense to see why, or run recense service install again in your own terminal if an agent sandbox runs this command.",
     );
-  await printServiceInstalled(io, stateDir, found);
+  await printServiceInstalled(io, stateDir, found, flags);
   try {
     const loginctl = await tool("loginctl");
     const result = await loginctl(

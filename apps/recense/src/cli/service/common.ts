@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { isIP } from "node:net";
 import { dirname, isAbsolute, join } from "node:path";
 import type { Io } from "../../main.ts";
 import type { HolderProbe } from "../../state/legacy.ts";
+import { parseServeArgs } from "../commands/serve.ts";
 import { escapeReference } from "../escape.ts";
 import { findExecutable } from "../executable.ts";
 import { CliError } from "../http.ts";
@@ -154,9 +156,13 @@ export function clearServicePending(stateDir: string) {
   return removeIfPresent(join(stateDir, "service.pending"));
 }
 
-export async function printServiceInstalled(io: Io, stateDir: string, server: ServerReady) {
+export async function printServiceInstalled(io: Io, stateDir: string, server: ServerReady, flags: string[]) {
+  const { host } = parseServeArgs(flags);
+  const loopback = host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
   io.stdout("recense: service installed\n");
   io.stdout(`recense: the service starts at login and serves ${escapeReference(server.publicUrl ?? server.url)}\n`);
+  if (!loopback)
+    io.stdout(`recense: the service listens on ${escapeReference(host)}, so other machines can reach it\n`);
   const attachment = await readAttachment(stateDir).catch(() => null);
   io.stdout(
     attachment

@@ -44,9 +44,10 @@ const unsupported =
   "recense: recense service supports systemd on Linux and launchd on macOS; run recense serve yourself.\n";
 const linger = "To keep recense running after you log out, run sudo loginctl enable-linger $USER.\n";
 const publicUrl = "https://public.example.test";
-const installedOutput = (url = "http://127.0.0.1:3636") => [
+const installedOutput = (url = "http://127.0.0.1:3636", host?: string) => [
   "recense: service installed\n",
   `recense: the service starts at login and serves ${url}\n`,
+  ...(host ? [`recense: the service listens on ${host}, so other machines can reach it\n`] : []),
   "To sign a browser in, run recense in your own terminal.\n",
 ];
 
@@ -451,6 +452,11 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
     expect(stdout).toEqual([]);
     expect(calls()).toEqual([]);
     await expect(lstat(path())).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test.each(["0.0.0.0", "::", "127.0.0.2"])("reports whether other machines can reach --host %s", async (host) => {
+    expect(await invoke("install", "--host", host)).toBe(0);
+    expect(stdout).toEqual(installedOutput(undefined, host === "127.0.0.2" ? undefined : host));
   });
 
   test.each(["matching", "old", "zero"])("confirms only the managed server (pid: %s)", async (kind) => {
@@ -1448,16 +1454,19 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
   test.each([
     { flags: ["--tailscale"], url: publicUrl },
     { flags: ["--public-url", "https://recense.example.test"], url: publicUrl },
-    { flags: ["--port", "4000", "--host", "192.0.2.1"], url: "http://127.0.0.1:3636" },
-  ])("a bare reinstall keeps $flags in order and announces them first", async ({ flags, url }) => {
+    { flags: ["--port", "4000", "--host", "192.0.2.1"], url: "http://127.0.0.1:3636", host: "192.0.2.1" },
+  ])("a bare reinstall keeps $flags in order and announces them first", async ({ flags, url, host }) => {
     expect(await invoke("install", ...flags)).toBe(0);
-    expect(stdout).toEqual(installedOutput(url));
+    expect(stdout).toEqual(installedOutput(url, host));
     expect(await saved()).toEqual(flags);
     expect((await stat(optionsPath())).mode & 0o777).toBe(0o600);
     const content = await readFile(path(), "utf8");
     resetOutput();
     expect(await invoke("install")).toBe(0);
-    expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput(url)]);
+    expect(stdout).toEqual([
+      `recense: keeping the service options ${flags.join(" ")}\n`,
+      ...installedOutput(url, host),
+    ]);
     expect(await readFile(path(), "utf8")).toBe(content);
     expect(await saved()).toEqual(flags);
     expect(calls()).toContainEqual(
