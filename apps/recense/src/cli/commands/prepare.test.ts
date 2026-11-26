@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -45,7 +46,7 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function git(...args: string[]) {
+async function gitBytes(...args: string[]) {
   const result = await exec(
     "git",
     [
@@ -61,10 +62,14 @@ async function git(...args: string[]) {
     ],
     {
       cwd: root,
+      encoding: "buffer",
       env: { PATH: process.env.PATH, HOME: dir, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", LC_ALL: "C" },
     },
   );
-  return result.stdout.trim();
+  return result.stdout;
+}
+async function git(...args: string[]) {
+  return (await gitBytes(...args)).toString("utf8").trim();
 }
 async function commit() {
   await git("add", ".");
@@ -74,7 +79,7 @@ async function commit() {
 async function command(...args: string[]) {
   let stdout = "";
   let stderr = "";
-  const code = await run(["prepare", ...args], {
+  const code = await run(args, {
     env: { RECENSE_HOME: join(dir, "state"), XDG_CONFIG_HOME: join(dir, "config") },
     stdout: (line) => {
       stdout += line;
@@ -85,7 +90,8 @@ async function command(...args: string[]) {
   });
   return { code, stdout, stderr };
 }
-const prepare = (base: string, head: string, dest = folder) => command("--base", base, "--head", head, "--dir", dest);
+const prepare = (base: string, head: string, dest = folder) =>
+  command("prepare", "--base", base, "--head", head, "--dir", dest);
 const diff = (path: string, prepared: PreparedFile) => ({
   path,
   role: "diff",
@@ -102,6 +108,48 @@ const withLimits = (base: string, head: string, limits: NonNullable<Parameters<t
     root,
     limits,
   );
+
+test("a published change has the same listed digest as git without rename detection", async () => {
+  await git("init", "-b", "topic");
+  await writeFile(join(root, "delete.txt"), "discarded\n");
+  await writeFile(join(root, "edit.txt"), "original\n");
+  await writeFile(join(root, "old.txt"), "moves intact\n");
+  const base = await commit();
+  await rm(join(root, "delete.txt"));
+  await writeFile(join(root, "edit.txt"), "edited\n");
+  await rename(join(root, "old.txt"), join(root, "moved.txt"));
+  await writeFile(join(root, "added.txt"), "added\n");
+  const head = await commit();
+  const prepared = await prepare(base, head);
+  expect(prepared.code, prepared.stderr).toBe(0);
+  const published = await command("publish", "--manifest", path);
+  expect(published.code, published.stderr).toBe(0);
+
+  const raw = await gitBytes("diff-tree", "-r", "-z", "--raw", "--no-renames", base, head);
+  const records = raw.toString("utf8").split("\0");
+  expect(records.pop()).toBe("");
+  const lines: Buffer[] = [];
+  for (let i = 0; i < records.length; i += 2) {
+    const [, , oldOid, newOid] = (records[i] ?? "").split(" ");
+    const file = records[i + 1];
+    if (!file || !oldOid || !newOid) throw new Error("incomplete git diff-tree record");
+    for (const [side, oid] of [
+      ["old", oldOid],
+      ["new", newOid],
+    ] as const) {
+      if (/^0+$/.test(oid)) continue;
+      const bytes = await gitBytes("cat-file", "blob", oid);
+      const hash = createHash("sha256").update(bytes).digest("hex");
+      lines.push(Buffer.from(`${file}\t${side}\t${hash}\n`));
+    }
+  }
+  const digest = createHash("sha256")
+    .update(Buffer.concat(lines.sort(Buffer.compare)))
+    .digest("hex");
+  const listed = await command("ls", "--json", "--head", head);
+  expect(listed.code, listed.stderr).toBe(0);
+  expect(JSON.parse(listed.stdout).items).toMatchObject([{ newest: { head, diff: { files: 4, digest } } }]);
+});
 
 test("prepares a committed branch in listing order and resolves the same files as a handwritten manifest", async () => {
   await git("init", "-b", "topic");
@@ -712,9 +760,13 @@ test("concurrent prepares create exactly one manifest", async () => {
 test("requires a repository and each of the three flags exactly once", async () => {
   const flags = ["--head", "worktree", "--base", "a".repeat(40), "--dir", folder];
   vi.spyOn(roots, "worktreeRoot").mockResolvedValueOnce(null);
-  expect(await command(...flags)).toEqual({ code: 1, stderr: "recense: not a git repository\n", stdout: "" });
+  expect(await command("prepare", ...flags)).toEqual({
+    code: 1,
+    stderr: "recense: not a git repository\n",
+    stdout: "",
+  });
   for (const args of [[], flags.slice(2), flags.slice(0, -1), [...flags, "--dir", folder], [...flags, "--new"]])
-    expect(await command(...args)).toEqual({
+    expect(await command("prepare", ...args)).toEqual({
       code: 2,
       stdout: "",
       stderr: expect.stringMatching(/^recense: usage: [^\n]+\n$/),

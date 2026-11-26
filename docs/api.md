@@ -1659,10 +1659,10 @@ Every query is owner-scoped. Missing/foreign reviews return `404 unknown_review`
 invalid sequences of an owned review return `404 not_found`. Agent tokens receive `403 forbidden`.
 
 `GET /api/v1/agent/reviews` returns `AgentReviewList = { items: AgentReviewItem[] }` with
-`AgentReviewItem = { id, title, branch, state: ReviewState, turn, newest, approved, updatedAt, url }`.
+`AgentReviewItem = { id, title, branch, state: ReviewState, turn, answerWaiting, newest, approved, updatedAt, url }`.
 `branch` is the review's stored branch, `null` when the publish named none. `newest` is
-`{ revision, head }` for the review's newest revision (highest `seq`), or `null` for a review that
-has no revision. `approved` is `null` while no revision is approved, else `{ revision, head }` of the
+`{ revision, head, diff }` for the review's newest revision (highest `seq`), or `null` for a review that
+has no revision. `approved` is `null` while no revision is approved, else `{ revision, head, diff }` of the
 revision the approval points at. On an open review, `turn` is `agent` when a Send that is not set
 aside was made on the newest revision, else `reviewer`. It is `null` when the review is approved
 or settled, or has no revision. This matches the inbox's Answered group: a Send on the newest
@@ -1677,6 +1677,29 @@ pagination. Binned reviews are left out. The list has no other inbox filter: sno
 stored `state` (`open`, `approved` or `settled`). `updatedAt` is an ISO 8601 UTC string. `url` is
 the review's address on this server. The list carries no comment bodies,
 writeup text, doc content, tokens or other ids. A reviewer session receives `403 forbidden`.
+
+`diff` is `{ files, digest }` for that revision. `files` counts the owner's file rows for the
+revision with role `diff` (zero for docs or a plan alone). For each such row, write one line per
+side as `<sidePath>\t<side>\t<value>\n`, with literal tabs and a final newline. Include the
+`old` side unless status is `added`, and the `new` side unless status is `deleted`. All other
+statuses, including null, contribute both sides. Use `oldPath` for the old side when present
+and `path` otherwise. The new side always uses `path`. The value is the stored `old_blob` or
+`new_blob` hash for that side. If null, use the row's flag (`binary` or `oversized`), or the
+literal `missing` if the flag is also null. Sort the complete lines by their UTF-8 bytes and
+concatenate them without separators. `digest` is the lowercase hex SHA-256 of those bytes. With
+zero rows the text is empty and the digest is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+A rename contributes its old and new paths separately, so rename detection does not affect the
+digest. A caller can reproduce the lines from `git diff-tree -r --no-renames <base> <head>` and
+the SHA-256 of each blob's bytes. File modes are outside the digest. A mode-only change contributes
+two lines with the same value.
+
+`answerWaiting` is true while the review holds a Send (`go` or `approve`) with `set_aside_at`
+null whose delivery is unconfirmed. This includes a null `delivery_id` and a delivery whose
+`confirmed_at` is null, whether its lease is live or expired. It is false when no such Send
+exists. A snoozed or retired review's stop notice does not count. For both `answerWaiting` and
+`diff`, null means the server did not report the field. The schema defaults each to null when
+an older server or hub omits it. If the revision disappears before the server reads its files,
+the server returns `diff: null`.
 
 The optional query `?head=<sha>` (`AgentReviewQuery = { head?: commit, key?: sha256 }`) keeps only reviews whose
 approved revision's head equals `<sha>` or whose newest revision's head equals `<sha>`. The match
@@ -1694,20 +1717,24 @@ the cap. A malformed or repeated `key` is `400 invalid_request`. Capabilities li
 `agent-review-key` when the server applies `key`; an older server ignores `key` and returns the
 whole list, so a client checks that feature before it relies on the filter.
 
-`head` and `branch` are the values the publisher sent; the server stores them unverified, and a
-review without code files (docs or a plan only) shows the reviewer no diff of that commit. So
-`approved.head === sha` means the reviewer approved a revision that its publisher labelled with that
-commit, not that recense verified the commit's content was shown. A caller that gates on an approval
-should require all of: `approved` is not null, `approved.head === sha`,
-`approved.revision === newest.revision` (an import can carry an approval for an older revision) and
-the expected `branch`; it should also make sure itself that the approved review carried the commit's
-diff. `newest.head === sha` with `approved: null` means the commit is published but not approved.
+`head` and `branch` are the values the publisher sent. The server stores both unverified.
+A caller that gates on approval must require a non-null `approved`, `approved.head === sha`, the expected `branch`, and
+`approved.revision === newest.revision` (an import can carry an older approval). It must also
+require a non-null `approved.diff` whose `digest` equals the digest it computes by the rule above
+from its own merge base to `sha`, and `answerWaiting === false`. If either field is null, the
+server did not say and the gate refuses. The server computes the digest from the blob hashes stored
+with the revision and checks each blob's hash on upload, so a match means the revision showed
+exactly those sides. A flagged side represented by `binary` or `oversized` showed no content and cannot match
+a digest computed from that side's bytes. The publisher still chooses `base`, and a base that
+yields different sides yields a different digest. With `newest.head === sha` and `approved: null`,
+the commit awaits approval.
 
-This stays on the agent `publish` scope; it adds no scope. The new fields are metadata the same
-instance's agent published itself (branch, head, revision number) plus the approval pointer, which
-the agent already learns through the `approve` result of `wait`. The response still carries no
-comments, writeups or docs, keeps the owner and origin-instance filter, and the call is a
-read-only GET: it takes and confirms no delivery and writes no row.
+This stays on the agent `publish` scope. The list reports the same instance's published branch,
+head and revision number, plus the approval pointer the agent learns through `wait`. The diff
+summarizes only file metadata and blob hashes the same instance's agent uploaded. `answerWaiting`
+tells only whether a Send waits, which the agent learns from take anyway. The read-only GET
+keeps the owner and origin-instance filters and returns no comment, writeup or doc content.
+It takes and confirms no delivery and writes no row.
 
 Read-view bounds follow the write-side validators and rendering budgets; no history is truncated
 to make a read fit a per-Send or per-revision limit. The limits below apply to the schemas above.
@@ -1719,7 +1746,9 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `AgentReviewItem.title` | `titleChars` (200), as in `InboxItem.title` |
 | `AgentReviewItem.branch` | As `InboxItem.branch`: the stored branch or `null` |
 | `AgentReviewItem.turn` | `reviewer`, `agent` or `null`; defaults to `null` when omitted |
-| `AgentReviewItem.newest`, `.approved` | `{ revision, head }`: `revision` a positive integer, `head` a full commit id, `"worktree"` or `null` (as `RevisionView.head`); `newest` is `null` without any revision, `approved` while nothing is approved |
+| `AgentReviewItem.answerWaiting` | `true`, `false` or `null`. Defaults to `null` when omitted |
+| `AgentReviewItem.newest`, `.approved` | `{ revision, head, diff }` with a positive integer `revision` and a full commit id, `"worktree"` or `null` for `head` (as in `RevisionView.head`). `newest` is `null` without any revision, `approved` while nothing is approved |
+| `AgentReviewItem.newest.diff`, `AgentReviewItem.approved.diff` | `{ files, digest }` or `null`. `files` is an integer from 0 to `filesPerRevision` (10,000), and `digest` is 64 lowercase hex characters. Defaults to `null` when omitted |
 | `AgentReviewQuery.head` | Optional; exactly 40 or 64 lowercase hex characters, else `400 invalid_request` |
 | `AgentReviewQuery.key` | Optional; exactly 64 lowercase hex characters, else `400 invalid_request` |
 | `AgentReviewItem.updatedAt` | ISO 8601 UTC datetime string (`z.iso.datetime()`) |

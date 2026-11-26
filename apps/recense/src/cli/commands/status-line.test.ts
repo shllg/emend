@@ -24,7 +24,8 @@ const item: AgentReviewItem = {
   branch,
   state: "open",
   turn: "reviewer",
-  newest: { revision: 3, head: "ab".repeat(20) },
+  answerWaiting: false,
+  newest: { revision: 3, head: "ab".repeat(20), diff: null },
   approved: null,
   updatedAt: "2026-01-01T00:10:00.000Z",
   url: `http://127.0.0.1:3636/r/${reviewId}`,
@@ -428,7 +429,7 @@ test.each<{ name: string; overrides: Partial<AgentReviewItem>; expected: string 
   { name: "unknown turn", overrides: { turn: null }, expected: "recense r3" },
   {
     name: "approved revision",
-    overrides: { state: "approved", approved: { revision: 2, head: null } },
+    overrides: { state: "approved", approved: { revision: 2, head: null, diff: null } },
     expected: "recense r2 · approved",
   },
   { name: "approval without a revision pointer", overrides: { state: "approved" }, expected: "recense r3 · approved" },

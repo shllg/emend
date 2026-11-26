@@ -1,12 +1,15 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { AgentReviewList, LIMITS, PublishResponse } from "@recense/contract";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import type { Db } from "../../db/client.ts";
 import { listAgentReviews } from "../../db/repo/agent-reviews.ts";
 import {
   agentWaiters,
+  blobs,
   comments,
   deliveries,
+  files,
   instances,
   repos,
   reviews,
@@ -52,6 +55,29 @@ async function machine() {
   return { id, token: (await createToken(f.db, f.ownerId, "agent", { instanceId: id })).secret };
 }
 
+const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+const oldHash = "a".repeat(64);
+const newHash = "b".repeat(64);
+const emptyDiff = { files: 0, digest: digest("") };
+type FixtureFile = Pick<
+  typeof files.$inferInsert,
+  "path" | "oldPath" | "role" | "status" | "oldBlob" | "newBlob" | "flag"
+>;
+
+async function seedFiles(revisionId: string, rows: FixtureFile[]) {
+  const ownerId = f.ownerId;
+  await f.db.query(async (q) => {
+    const hashes = new Set(rows.flatMap((row) => [row.oldBlob, row.newBlob]));
+    for (const sha256 of hashes) {
+      if (sha256)
+        await q.insert(blobs).values({ ownerId, sha256, size: 1, mediaType: "text/plain" }).onConflictDoNothing();
+    }
+    await q
+      .insert(files)
+      .values(rows.map((row, ord) => ({ ...row, ownerId, revisionId, ord, mediaType: "text/plain" })));
+  });
+}
+
 test("an agent token lists its own instance's reviews newest first, with a review URL", async () => {
   const other = await machine();
   const older = await insert(f.ownerId, f.instanceId, "Older review", 1_000);
@@ -68,6 +94,7 @@ test("an agent token lists its own instance's reviews newest first, with a revie
     branch: null,
     state: "approved",
     turn: null,
+    answerWaiting: false,
     newest: null,
     approved: null,
     updatedAt: new Date(f.deps.now() + 3_000).toISOString(),
@@ -93,6 +120,7 @@ test("the list never carries comment bodies or any other field", async () => {
   expect(text).not.toContain("SECRET-COMMENT-BODY");
   const [item] = JSON.parse(text).items;
   expect(Object.keys(item).sort()).toEqual([
+    "answerWaiting",
     "approved",
     "branch",
     "id",
@@ -103,6 +131,7 @@ test("the list never carries comment bodies or any other field", async () => {
     "updatedAt",
     "url",
   ]);
+  expect(Object.keys(item.newest).sort()).toEqual(["diff", "head", "revision"]);
 });
 
 test("the list is capped at the agent review limit", async () => {
@@ -162,8 +191,8 @@ test("snoozed and settled reviews are listed with their stored state", async () 
   ).items;
   expect(items.find((item) => item.id === snoozed)?.state).toBe("open");
   expect(items.find((item) => item.id === settled)?.state).toBe("settled");
-  expect(items.find((item) => item.id === snoozed)?.turn).toBeNull();
-  expect(items.find((item) => item.id === settled)?.turn).toBeNull();
+  expect(items.find((item) => item.id === snoozed)).toMatchObject({ turn: null, answerWaiting: false });
+  expect(items.find((item) => item.id === settled)).toMatchObject({ turn: null, answerWaiting: false });
 });
 
 test("a reviewer session and a missing credential are refused", async () => {
@@ -208,11 +237,94 @@ async function approve(reviewId: string, revision: number) {
   const response = await f.request(`/reviews/${reviewId}/sends`, "POST", { revision, kind: "approve" });
   expect(response.status).toBe(201);
 }
-async function items(query = "", who: "agent" | "stranger" = "agent") {
+async function items(query = "", who: "agent" | "stranger" | "otherAgent" = "agent") {
   const response = await f.request(`/agent/reviews${query}`, "GET", undefined, who);
   expect(response.status).toBe(200);
   return AgentReviewList.parse(await response.json()).items;
 }
+
+test("a revision containing only a doc reports the empty diff", async () => {
+  await seedFiles(f.revisionId, [{ path: "plan.md", role: "doc", newBlob: newHash }]);
+  await approve(f.reviewId, 1);
+  const [item] = await items();
+  expect(item?.newest?.diff).toEqual(emptyDiff);
+  expect(item?.approved?.diff).toEqual(emptyDiff);
+});
+
+test("a revision deleted between the list and file queries has an unreported diff", async () => {
+  let deleted = false;
+  const db: Db = {
+    ...f.db,
+    read: async (query) => {
+      const result = await f.db.read(query);
+      if (!deleted) {
+        await f.db.query((q) => q.delete(revisions).where(eq(revisions.id, f.revisionId)));
+        deleted = true;
+      }
+      return result;
+    },
+  };
+  const list = await listAgentReviews(
+    db,
+    {
+      ownerId: f.ownerId,
+      instanceId: f.instanceId,
+      kind: "agent",
+      tokenId: "",
+      scopes: ["publish"],
+    },
+    f.deps.config.baseUrl,
+  );
+  expect(list.items[0]?.newest).toEqual({ revision: 1, head: null, diff: null });
+});
+
+test("the digest hashes one sorted line for each side shown in the revision's diff", async () => {
+  await seedFiles(f.revisionId, [
+    { role: "diff", status: "renamed", oldPath: "before", path: "renamed", oldBlob: oldHash, newBlob: newHash },
+    { role: "diff", status: "mode-changed", path: "mode", oldBlob: oldHash, newBlob: oldHash },
+    { role: "diff", status: "deleted", path: "deleted", oldBlob: oldHash },
+    { role: "diff", status: "modified", path: "edit", oldBlob: oldHash, newBlob: newHash },
+    { role: "diff", status: "added", path: "added", newBlob: newHash },
+    { role: "diff", status: "modified", path: "binary", flag: "binary" },
+    { role: "diff", status: null, path: "partial", newBlob: newHash },
+    { role: "diff", status: "modified", path: "large", oldBlob: oldHash, flag: "oversized" },
+    { role: "doc", path: "plan.md", newBlob: newHash },
+  ]);
+  const expected =
+    `added\tnew\t${newHash}\nbefore\told\t${oldHash}\nbinary\tnew\tbinary\nbinary\told\tbinary\n` +
+    `deleted\told\t${oldHash}\nedit\tnew\t${newHash}\nedit\told\t${oldHash}\n` +
+    `large\tnew\toversized\nlarge\told\t${oldHash}\nmode\tnew\t${oldHash}\nmode\told\t${oldHash}\n` +
+    `partial\tnew\t${newHash}\npartial\told\tmissing\nrenamed\tnew\t${newHash}\n`;
+  expect((await items())[0]?.newest?.diff).toEqual({ files: 8, digest: digest(expected) });
+});
+
+test("a rename and the same deletion and addition have equal digests", async () => {
+  await seedFiles(f.revisionId, [
+    { role: "diff", path: "b", oldPath: "a", status: "renamed", oldBlob: oldHash, newBlob: newHash },
+  ]);
+  const renamed = (await items())[0]?.newest?.diff;
+  expect(renamed?.files).toBe(1);
+  await seedFiles(await f.revision(2), [
+    { role: "diff", path: "b", status: "added", newBlob: newHash },
+    { role: "diff", path: "a", status: "deleted", oldBlob: oldHash },
+  ]);
+  expect((await items())[0]?.newest?.diff).toEqual({ files: 2, digest: renamed?.digest });
+});
+
+test.each(["go", "approve"] as const)("an answer waits from %s through any unconfirmed lease", async (kind) => {
+  const waiting = async () => (await items())[0]?.answerWaiting;
+  expect(await waiting()).toBe(false);
+  await f.send(kind === "go" ? { revision: 1, kind, instruction: "Synthetic feedback" } : { revision: 1, kind });
+  expect(await waiting()).toBe(true);
+  expect(await f.take()).toMatchObject({ kind });
+  expect(await waiting()).toBe(true);
+  f.advance(121_000);
+  expect(await waiting()).toBe(true);
+  const retry = await f.take();
+  if (retry.kind !== kind) throw new Error("missing redelivery");
+  expect((await f.request(`/deliveries/${retry.deliveryId}/confirm`, "POST", undefined, "agent")).status).toBe(204);
+  expect(await waiting()).toBe(false);
+});
 
 test("the turn follows a live Send on the newest revision and clears on approval", async () => {
   const first = await publishAs("agent", "d", shaA);
@@ -233,9 +345,12 @@ test("the turn follows a live Send on the newest revision and clears on approval
 
 test("a Send that was set aside does not pass the turn to the agent", async () => {
   await f.send({ revision: 1, kind: "go", instruction: "Synthetic feedback" });
-  expect((await items()).find((row) => row.id === f.reviewId)?.turn).toBe("agent");
+  expect((await items()).find((row) => row.id === f.reviewId)).toMatchObject({ turn: "agent", answerWaiting: true });
   await f.db.query((q) => q.update(sends).set({ setAsideAt: f.deps.now() }).where(eq(sends.reviewId, f.reviewId)));
-  expect((await items()).find((row) => row.id === f.reviewId)?.turn).toBe("reviewer");
+  expect((await items()).find((row) => row.id === f.reviewId)).toMatchObject({
+    turn: "reviewer",
+    answerWaiting: false,
+  });
 });
 
 test("a retired review has no turn even with a Send on its newest revision", async () => {
@@ -245,13 +360,23 @@ test("a retired review has no turn even with a Send on its newest revision", asy
 });
 
 test("the key lookup keeps only the exact key within the owner and origin instance", async () => {
-  const own = await publishAs("agent", "d", shaA);
+  // The fixture review already has key "a" and belongs to the first agent.
+  await seedFiles(f.revisionId, [{ role: "diff", path: "own", status: "added", newBlob: newHash }]);
+  await approve(f.reviewId, 1);
   await publishAs("agent", "e", shaA);
-  await publishAs("otherAgent", "d", shaA);
-  const foreign = await publishAs("stranger", "d", shaA);
-  const query = `?key=${"d".repeat(64)}`;
-  expect((await items(query)).map((row) => row.id)).toEqual([own.reviewId]);
-  expect((await items(query, "stranger")).map((row) => row.id)).toEqual([foreign.reviewId]);
+  const second = await publishAs("otherAgent", "a", shaA);
+  const foreign = await publishAs("stranger", "a", shaA);
+  const query = `?key=${"a".repeat(64)}`;
+  const ownDiff = { files: 1, digest: digest(`own\tnew\t${newHash}\n`) };
+  expect(await items(query)).toMatchObject([
+    { id: f.reviewId, answerWaiting: true, newest: { diff: ownDiff }, approved: { diff: ownDiff } },
+  ]);
+  expect(await items(query, "otherAgent")).toMatchObject([
+    { id: second.reviewId, answerWaiting: false, newest: { diff: emptyDiff }, approved: null },
+  ]);
+  expect(await items(query, "stranger")).toMatchObject([
+    { id: foreign.reviewId, answerWaiting: false, newest: { diff: emptyDiff }, approved: null },
+  ]);
   expect(await items(`?key=${"f".repeat(64)}`)).toEqual([]);
 });
 
@@ -300,14 +425,23 @@ test("a new revision clears the approval and moves the head lookup to the new co
   expect(found[0]?.approved).toBeNull();
 });
 
-test("an approval of an older revision keeps its own head while a newer one exists", async () => {
-  const first = await publishAs("agent", "d", shaA);
-  await approve(first.reviewId, 1);
-  await publishAs("agent", "d", shaB);
-  await approve(first.reviewId, 2);
-  const [item] = await items(`?head=${shaB}`);
-  expect(item).toMatchObject({ approved: { revision: 2, head: shaB }, newest: { revision: 2, head: shaB } });
-  expect(await items(`?head=${shaA}`)).toEqual([]);
+test("an approval of an older revision keeps its own head and diff while a newer one exists", async () => {
+  await f.db.query((q) => q.update(revisions).set({ head: shaA }).where(eq(revisions.id, f.revisionId)));
+  await seedFiles(f.revisionId, [{ role: "diff", path: "old", status: "deleted", oldBlob: oldHash }]);
+  await approve(f.reviewId, 1);
+  // An import can retain the approval pointer when a newer revision exists.
+  const nextId = await f.revision(2);
+  await f.db.query((q) => q.update(revisions).set({ head: shaB }).where(eq(revisions.id, nextId)));
+  await seedFiles(nextId, [{ role: "diff", path: "new", status: "added", newBlob: newHash }]);
+  for (const head of [shaA, shaB]) {
+    expect(await items(`?head=${head}`)).toMatchObject([
+      {
+        approved: { revision: 1, head: shaA, diff: { files: 1, digest: digest(`old\told\t${oldHash}\n`) } },
+        newest: { revision: 2, head: shaB, diff: { files: 1, digest: digest(`new\tnew\t${newHash}\n`) } },
+        answerWaiting: true,
+      },
+    ]);
+  }
 });
 
 test("worktree and null heads come out unchanged", async () => {
