@@ -402,15 +402,34 @@ test("a fragment link into the page itself must match a heading", () => {
   expect(found).toEqual(['docs/setup/a.md:3: the link "#gone" has no matching heading anchor in docs/setup/a.md']);
 });
 
-test("a Markdown link with ?plain=1 accepts an existing line", () => {
-  const found = check(edit("docs/setup.md", "setup/a.md#undo", "setup/a.md?plain=1#L1"));
+test("a ?plain=1 link to non-public Markdown accepts an existing line", () => {
+  const found = check((files) => {
+    files["docs/notes.md"] = "# Notes\n";
+    edit("docs/setup.md", "setup/a.md#undo", "notes.md?plain=1#L1")(files);
+  });
   expect(found).toEqual([]);
 });
 
-test("a Markdown link with ?plain=1 refuses an out-of-range line", () => {
-  const found = check(edit("docs/setup.md", "setup/a.md#undo", "setup/a.md?plain=1#L999999"));
+test("a ?plain=1 link to non-public Markdown refuses an out-of-range line", () => {
+  const found = check((files) => {
+    files["docs/notes.md"] = "# Notes\n";
+    edit("docs/setup.md", "setup/a.md#undo", "notes.md?plain=1#L999999")(files);
+  });
   expect(found).toEqual([
-    'docs/setup.md:3: the link "setup/a.md?plain=1#L999999" needs a valid line fragment in docs/setup/a.md',
+    'docs/setup.md:3: the link "notes.md?plain=1#L999999" needs a valid line fragment in docs/notes.md',
+  ]);
+});
+
+test("public page links and definitions refuse ?plain=1 with or without a fragment", () => {
+  const found = check(
+    put(
+      "docs/setup.md",
+      "# Setup\n\nSee [page A](setup/a.md?plain=1#L1).\n\n[a]: setup/a.md?plain=1\n\n## The setups\n\nThe list.\n",
+    ),
+  );
+  expect(found).toEqual([
+    'docs/setup.md:3: the link "setup/a.md?plain=1#L1" points a public page at its source; link the page or one of its headings instead',
+    'docs/setup.md:5: the link "setup/a.md?plain=1" points a public page at its source; link the page or one of its headings instead',
   ]);
 });
 

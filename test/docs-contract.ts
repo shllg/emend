@@ -483,6 +483,14 @@ export function checkDocs(root: string, tracked: TrackedEntries): string[] {
 
     const checkUrl = (line: number, url: string, image = false) => {
       const target = resolveUrl(file, line, url, image);
+      if (!image && target?.query === "plain=1" && expected.has(target.rel)) {
+        add(
+          file,
+          line,
+          `the link "${url}" points a public page at its source; link the page or one of its headings instead`,
+        );
+        return;
+      }
       if (image && target && (target.folder || !target.rel.startsWith("docs/images/") || !target.rel.endsWith(".png")))
         add(file, line, `the image "${url}" must be a .png file in docs/images/`);
       if (target?.fragment === undefined) return;
