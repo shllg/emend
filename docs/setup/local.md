@@ -97,10 +97,12 @@ Open a new terminal afterwards and run the two version commands again. You shoul
 24.18 or newer and git 2.44 or newer.
 
 ```text
-Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
-stores) or recense's state folder; if a dotfiles tool manages a file or link you would change (a
-symlink into a dotfiles repository, stow, chezmoi, home-manager or similar), change its source and
-tell me how to apply it.
+Rules: show me each change and wait for my yes; never read secrets (tokens, .env
+files, credential stores) or recense's state folder; never open mise's config files and
+never run a mise command that prints environment values (such as mise env, mise set,
+mise doctor or mise config get), since they can show secrets from [env]; if a dotfiles
+tool manages a file or link you would change (a symlink into a dotfiles repository,
+stow, chezmoi, home-manager or similar), change its source and tell me how to apply it.
 Check that Node.js 24.18 or newer and git 2.44 or newer are installed: run node --version, git
 --version and command -v git, and show me the output. If one is missing or too old: on macOS with
 Homebrew (brew exists), run brew install node git; git must come from Homebrew's folder, not
@@ -135,10 +137,11 @@ run the command above.
 package manager refuses an npm package that is new or seldom downloaded until you approve it;
 without the option, mise stops with `refusing to add @shllg/recense`.
 
-mise also holds back every release for 24 hours (its `minimum_release_age` setting). Right
-after a release it installs the one before, and `mise upgrade` and `recense update` find
-nothing newer. To get each release on its first day, add recense to
-`minimum_release_age_excludes` in `~/.config/mise/config.toml`:
+mise also holds back every release for 24 hours (its `minimum_release_age` setting). Right after a
+release it installs the one before, and `mise upgrade` and `recense update` find nothing newer. The
+hold gives a broken release time to be found and withdrawn before mise installs it, and with a
+`postinstall` line, before it runs as your service. To get each release on its first day anyway,
+add recense to `minimum_release_age_excludes` in `~/.config/mise/config.toml`:
 
 ```toml
 [settings]
@@ -182,8 +185,9 @@ recense --version and show me the result; with mise, run it again from my home f
 is not found, tell me to open a new terminal; with mise, if it is found in one folder but not in my
 home folder, tell me it went into a project's config and point me to the -g paragraph in step 2 of
 https://github.com/shllg/recense/blob/release/docs/setup/local.md. With mise, ask me whether I want
-each release on its first day; if I do, point me to the minimum_release_age_excludes lines in step
-2 of that page to copy into ~/.config/mise/config.toml myself.
+each release on its first day, and tell me that mise's 24-hour hold gives a broken
+release time to be withdrawn; if I do, point me to the minimum_release_age_excludes
+lines in step 2 of that page to copy into ~/.config/mise/config.toml myself.
 ```
 
 ## 3. Start recense

@@ -54,7 +54,8 @@ If the package manager installs the same version, recense says
 has no newer release: the tool may defer one under its own release policy.
 
 mise holds back every release for its first 24 hours unless recense is in
-`minimum_release_age_excludes`: see [local.md](local.md#2-install-recense).
+`minimum_release_age_excludes`: see [local.md](local.md#2-install-recense). The hold gives a broken
+release time to be found and withdrawn before mise installs it.
 
 A local build gets the commands and nothing else. If you built recense from a checkout (or linked it
 with `pnpm install:local`), `recense update` prints `git pull`, `pnpm install` and
@@ -75,6 +76,9 @@ the other options of the recense entry in mise's config. A `postinstall` line
 skills again and updates the Claude Code plugin, and the notes then show the links in
 `~/.agents/skills` on the new version. `recense update` does not pass `CLAUDE_CONFIG_DIR` on,
 so inside it the line updates the plugin only in Claude Code's default config folder.
+The line runs while mise installs, before `recense update` checks the new package, so when the
+update then stops with an error, the service and the skill links can already be on the new
+version; the restore steps it prints ([Undo](#undo)) move them back.
 
 The other steps still apply unless a mise `postinstall` line did them, and the notes name them.
 Update the hub first, link the skills again (step 4), update the
@@ -160,9 +164,11 @@ points there then breaks, and a service still installed on it fails at its next 
 ### Let mise finish the update
 
 A `postinstall` command in mise's config runs each time mise installs a recense version: with
-`mise upgrade`, `mise install` or `mise use`, also when they upgrade or install all your tools,
-and inside `recense update`. This one does steps 3 to 5 for the parts you set up. In
-`~/.config/mise/config.toml`, replace the recense line under `[tools]` with:
+`mise upgrade`, `mise install` or `mise use`, also when they upgrade or install all your tools, and
+inside `recense update`. This one does steps 3 to 5 for the parts you set up. Inside
+`recense update` it runs before recense checks the new package (see
+[Update with one command](#update-with-one-command)). In `~/.config/mise/config.toml`, replace the
+recense line under `[tools]` with:
 
 ```toml
 "npm:@shllg/recense" = { version = "latest", allow_low_downloads = true, postinstall = '''
