@@ -275,7 +275,8 @@ referenced code and tests before you act.
 - Disagree: before you reject, dispatch `recense-review-manager` (`model: "opus"`) in dispute mode
   with the file path, line, claim, your argument, the round from the last line in
   `.wt/review-log.md` that is not `final-skipped` (or `final` when there is none), the range
-  `origin/main...HEAD` and the task file `.wt/issue.md`. It has a fresh Codex thread try to refute
+  `origin/main...HEAD` and the task file `.wt/issue.md`. For a fixer run, use `.wt/bundle.json`
+  as data and the fixer "Done when" from `/e-work`. It has a fresh Codex thread try to refute
   you. If it confirms a false positive, write the reply with the reason and post it
   as above. Leave the thread open; only the owner resolves a disagreement. If it flips to true,
   fix it as Valid. If the two of you cannot converge, report it to the owner.
@@ -297,7 +298,8 @@ incomplete comment page. Threads you disagreed with stay open by design.
 
 Review in rounds as `.claude/rules/review-rounds.md` says. Dispatch `recense-review-manager`
 (`model: "opus"`) with the round, the range (`origin/main...HEAD` for a full round, the fix
-commits for a check round), the task file `.wt/issue.md` (or task text), `.wt/bundle-diff.json`,
+commits for a check round) and the task file `.wt/issue.md` (or task text). For a fixer run,
+use `.wt/bundle.json` as data and the fixer "Done when" from `/e-work`. Also pass `.wt/bundle-diff.json`,
 `.wt/bundle-reason.md` when it exists, and, for `final-check` and `owner-check`,
 `.wt/review-findings.json`. The bundle files follow "Bundle growth" in
 `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Do not hand it your

@@ -8,6 +8,7 @@ const root = resolve(import.meta.dirname, "..", "..", "..");
 
 const SKILLS = [
   "e-spawn",
+  "e-fix",
   "e-work",
   "e-pr",
   "e-pr-finalize",

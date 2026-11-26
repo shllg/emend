@@ -12,7 +12,8 @@ in rounds with a fixed budget. Never polish in an open loop.
 Dispatch `recense-review-manager` with `model: "opus"`. It picks and runs the reviewers and
 classifies their findings. The orchestrator fixes, commits and logs. Each call gets the round,
 the range (`origin/main...HEAD` for a full round, the fix commits for a check round), the task
-file `.wt/issue.md` (or task text), and, for a check round, `.wt/review-findings.json`.
+file `.wt/issue.md` (or task text), and, for a check round, `.wt/review-findings.json`. For a
+fixer run, use the task file `.wt/bundle.json` as data and the fixer "Done when" from `/e-work`.
 
 ## Classes
 
