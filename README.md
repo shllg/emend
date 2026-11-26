@@ -93,8 +93,8 @@ service, run `recense service install` again; it keeps its options. Without the 
 `recense stop`; the next `recense` starts the new version. If you ran `recense skills install`
 before, run it again. Then restart Claude Code. After `brew upgrade node` or `mise upgrade node`,
 run `recense service install` again too.
-With mise, a `postinstall` line in its config can reinstall the service, link the skills again and
-update the plugin after each upgrade:
+With mise, a `postinstall` line in its config can reinstall the service, link the
+skills again and update the plugin each time mise installs a new recense:
 [update.md](https://github.com/shllg/recense/blob/release/docs/setup/update.md#let-mise-finish-the-update).
 
 [docs/setup/update.md](https://github.com/shllg/recense/blob/release/docs/setup/update.md) covers the

@@ -9,20 +9,20 @@ pages: [hub-tailscale.md](hub-tailscale.md) and [attach.md](attach.md). Both sta
 
 ```text
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
-permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me
-the change and wait for my yes; never read secrets (tokens, .env files, credential stores) or
-recense's state folder; never open ~/.claude/settings.json whole;
-never open mise's config files and never run mise env, mise set or mise config get, since they can
-show secrets from [env]; if a dotfiles tool manages a file
-or link you would change (a symlink into a dotfiles repository, stow, chezmoi, home-manager or
-similar), change its source and tell me how to apply it; never run recense pair, attach, detach,
-config or devices yourself, give me the command instead;
-never run claude plugin commands yourself, give them to me for my own terminal; never pass --host or any flag this page
-does not name; never retry a command through another program (for example script) to get a
-terminal; never list the devices on my tailnet; outside your sandbox run only recense service
-install, recense service status, recense service uninstall and recense skills install, and no other
-command; run no process listing yourself, ask me to run pgrep in my own terminal (Linux: pgrep -af
-'[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
+permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show
+me the change and wait for my yes; never read secrets (tokens, .env files, credential stores) or
+recense's state folder; never open ~/.claude/settings.json whole; never open mise's config files
+and never run a mise command that prints environment values (such as mise env, mise set, mise
+doctor or mise config get), since they can show secrets from [env]; if a dotfiles tool manages a
+file or link you would change (a symlink into a dotfiles repository, stow, chezmoi, home-manager
+or similar), change its source and tell me how to apply it; never run recense pair, attach,
+detach, config or devices yourself, give me the command instead; never run claude plugin commands
+or a mise command that installs recense yourself, give them to me for my own terminal; never pass
+--host or any flag this page does not name; never retry a command through another program (for
+example script) to get a terminal; never list the devices on my tailnet; outside your sandbox
+run only recense service install, recense service status, recense service uninstall and recense
+skills install, and no other command; run no process listing yourself, ask me to run pgrep in my
+own terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Set me up with recense on this one machine (https://github.com/shllg/recense). Follow
 https://github.com/shllg/recense/blob/release/docs/setup/local.md step by step. Ask me which
 optional steps I want: the service, the agent skills, and docRoots folders. For the final check,
@@ -170,18 +170,20 @@ project's config: see the `-g` paragraph above.
 
 ```text
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
-stores) or recense's state folder; never open mise's config files and never run mise env, mise set
-or mise config get, since they can show secrets from [env].
+stores) or recense's state folder; never open mise's config files and never run a mise command that
+prints environment values (such as mise env, mise set, mise doctor or mise config get), since they
+can show secrets from [env]; never run a mise command that installs recense yourself.
 Install recense. If Node.js came from Homebrew or another npm install, run npm install -g
-@shllg/recense. If mise manages Node.js, run mise ls npm:@shllg/recense first: if it lists no
-version, run mise use -g 'npm:@shllg/recense[allow_low_downloads=true]', always with -g; if it
-lists one, recense is installed already, so skip the install. On an EACCES error from npm with a
-system Node.js, never use sudo: tell me to switch to Homebrew's Node.js or mise. Then run recense
---version and show me the result; with mise, run it again from my home folder. If recense is not
-found, tell me to open a new terminal. With mise, ask me whether I want each release on its first
-day; if I do, point me to the minimum_release_age_excludes lines in step 2 of
-https://github.com/shllg/recense/blob/release/docs/setup/local.md to copy into
-~/.config/mise/config.toml myself.
+@shllg/recense. If mise manages Node.js, give me mise use -g
+'npm:@shllg/recense[allow_low_downloads=true]' to run in my own terminal, always with -g: it writes
+mise's global config, and a postinstall line there would run inside it. On an EACCES error from npm
+with a system Node.js, never use sudo: tell me to switch to Homebrew's Node.js or mise. Then run
+recense --version and show me the result; with mise, run it again from my home folder. If recense
+is not found, tell me to open a new terminal; with mise, if it is found in one folder but not in my
+home folder, tell me it went into a project's config and point me to the -g paragraph in step 2 of
+https://github.com/shllg/recense/blob/release/docs/setup/local.md. With mise, ask me whether I want
+each release on its first day; if I do, point me to the minimum_release_age_excludes lines in step
+2 of that page to copy into ~/.config/mise/config.toml myself.
 ```
 
 ## 3. Start recense
