@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://recense.dev/"><img src="https://raw.githubusercontent.com/shllg/recense/main/docs/images/logo.svg" alt="recense" width="80" height="80"></a>
+<a href="https://recense.dev/"><img src="https://raw.githubusercontent.com/shllg/recense/main/assets/logo.svg" alt="recense" width="80" height="80"></a>
 
 # recense
 
