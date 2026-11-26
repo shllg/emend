@@ -17,6 +17,7 @@ import { resolveMergedFindings } from "./findings.ts";
 import { checkIssue, githubRepository, originRepository } from "./issues.ts";
 import { type RunResult, run } from "./proc.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
+import { readRegistry } from "./registry.ts";
 import { assertNoHistoryOverrides, fetchOrigin, gitTry, type Repo, requireGlobalIdentity } from "./repo.ts";
 import { hasTerminal, readTerminalLine } from "./terminal.ts";
 import {
@@ -1314,14 +1315,16 @@ export function prMerge(
     if (isFixerBranch(branch)) {
       let fixed: string[];
       try {
-        fixed = resolveMergedFindings(repo, branch, oid);
+        const entry = readRegistry(repo).worktrees[branch];
+        if (!entry?.findings) throw new WtError(1, "The fixer has no findings list in the worktree registry.");
+        fixed = resolveMergedFindings(repo, entry.findings, { branch, worktree: entry.path }, oid);
       } catch (error) {
         print(`MERGED ${oid}`);
         const reason = error instanceof Error ? error.message.replace(/\.$/, "") : "unknown error";
         throw new WtError(
           1,
           `Warning: the merge is done, but its findings were not recorded as fixed: ${reason}. ` +
-            `From the main checkout, run bin/findings resolve <id> --fixed ${oid} for each finding the branch still claims.`,
+            `From the main checkout, run bin/wt fetch, then bin/findings resolve <id> --fixed ${oid} for each finding the branch still claims.`,
         );
       }
       for (const id of fixed) print(`FIXED ${id}`);

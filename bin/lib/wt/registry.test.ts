@@ -113,7 +113,7 @@ test("a symlinked registry lock is never read through or reaped", (t) => {
       (error) =>
         error instanceof WtError &&
         error.code === 69 &&
-        error.message === "Another bin/wt call holds the registry lock. Try again in a moment.",
+        error.message === "Another bin/wt or bin/findings call holds the registry lock. Try again in a moment.",
     );
     assert.equal(read.mock.callCount(), 0);
     assert.equal(lstatSync(lock).isSymbolicLink(), true);
@@ -157,7 +157,10 @@ test("a FIFO registry lock times out without blocking", async (t) => {
       timeoutMs: 5000,
     });
     assert.equal(result.code, 69, result.stderr);
-    assert.equal(result.stderr, "Another bin/wt call holds the registry lock. Try again in a moment.\n");
+    assert.equal(
+      result.stderr,
+      "Another bin/wt or bin/findings call holds the registry lock. Try again in a moment.\n",
+    );
     assert.equal(lstatSync(lock).isFIFO(), true);
     assert.deepEqual(readdirSync(dirname(lock)).sort(), [...before, "lock"].sort());
   } finally {

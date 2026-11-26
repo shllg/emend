@@ -17,6 +17,7 @@ import {
 import { isAbsolute, join } from "node:path";
 import { checkText } from "../../../scripts/check-public.ts";
 import type { CommandTable } from "./command.ts";
+import { renderTriagePage } from "./findings-page.ts";
 import { run, runBytes } from "./proc.ts";
 import { isFindingId, stateDir, withStateLock } from "./registry.ts";
 import { GIT_BASE, type Repo } from "./repo.ts";
@@ -311,6 +312,17 @@ function stageFile(directory: string, id: string, content: string | Buffer, temp
   return temp;
 }
 
+function replaceFile(directory: string, name: string, content: string): void {
+  const temps = new Set<string>();
+  try {
+    const temp = stageFile(directory, name, content, temps);
+    renameSync(temp, join(directory, name));
+    temps.delete(temp);
+  } finally {
+    for (const temp of temps) unlinkSync(temp);
+  }
+}
+
 function writeFindings(repo: Repo, findings: Finding[]): void {
   storageDirectory(repo, true);
   const temps = new Set<string>();
@@ -453,8 +465,8 @@ export function showFinding(repo: Repo, id: string): Finding & { orphaned: boole
   return withOrphaned(readFinding(repo, findingId(id)));
 }
 
-/** Read under the findings lock. Only a listing may skip an unreadable record. */
-function readStoredFindings(repo: Repo, onSkipped: (message: string) => void = () => storageError()): Finding[] {
+/** Read under the findings lock. Report each unreadable record skipped by the listing. */
+function readStoredFindings(repo: Repo, onSkipped?: (message: string) => void): Finding[] {
   if (!storageDirectory(repo)) return [];
   let names: string[];
   try {
@@ -467,17 +479,22 @@ function readStoredFindings(repo: Repo, onSkipped: (message: string) => void = (
     if (!name.endsWith(".json")) continue;
     const id = name.slice(0, -5);
     if (!isFindingId(id)) {
-      onSkipped("Skipped a finding file with an invalid name.");
+      onSkipped?.("Skipped a finding file with an invalid name.");
       continue;
     }
     try {
       findings.push(readFinding(repo, id));
     } catch {
       storageDirectory(repo);
-      onSkipped(`Skipped unreadable finding ${id}.`);
+      onSkipped?.(`Skipped unreadable finding ${id}.`);
     }
   }
   return findings;
+}
+
+function triageStatus(finding: Finding): "approved" | "untriaged" | undefined {
+  if (finding.approval) return "approved";
+  if (finding.state === "open") return "untriaged";
 }
 
 export function listFindings(
@@ -490,17 +507,39 @@ export function listFindings(
   if (filters.kind !== undefined) choice(filters.kind, KINDS, "kind");
   if (filters.path !== undefined) inputPath(filters.path);
   if (!storageDirectory(repo)) return [];
-  const findings = withStateLock(repo, "findings", () => readStoredFindings(repo, (message) => onSkipped?.(message)));
+  const findings = withStateLock(repo, "findings", () => readStoredFindings(repo, onSkipped));
   return findings
     .filter(
       (finding) =>
         (filters.state === undefined || finding.state === filters.state) &&
-        (filters.triage === undefined || filters.triage === (finding.approval ? "approved" : "untriaged")) &&
+        (filters.triage === undefined || filters.triage === triageStatus(finding)) &&
         (filters.kind === undefined || finding.kind === filters.kind) &&
         (filters.path === undefined || finding.path === filters.path || finding.path.startsWith(`${filters.path}/`)),
     )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
     .map(withOrphaned);
+}
+
+function writeTriagePage(repo: Repo): { page: string | null; key: string; findings: string[] } {
+  if (repo.callerTop !== repo.mainRoot)
+    throw new WtError(2, "Only the main checkout writes the triage page. Nothing was changed.");
+  const key = `e-triage-${sha256(realpathSync(repo.mainRoot)).slice(0, 12)}`;
+  const findings = listFindings(repo, { triage: "untriaged" }, (message) => process.stderr.write(`${message}\n`));
+  const directory = join(repo.mainRoot, ".wt");
+  const folderError = "The main checkout's .wt must be a real folder. Nothing was changed.";
+  const rendered = findings.length ? renderTriagePage(repo, findings) : null;
+  if (rendered) {
+    try {
+      mkdirSync(directory, { mode: 0o700 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw new WtError(2, folderError);
+    }
+  }
+  const entry = lstatSync(directory, { throwIfNoEntry: false });
+  if (entry?.isDirectory() === false || (!entry && rendered)) throw new WtError(2, folderError);
+  if (!rendered) return { page: null, key, findings: [] };
+  replaceFile(directory, "triage.md", rendered.markdown);
+  return { page: join(directory, "triage.md"), key, findings: rendered.ids };
 }
 
 export function checkedFindingIds(ids: string[]): string[] {
@@ -615,12 +654,19 @@ export function releaseOrphanedClaim(
   });
 }
 
-export function resolveMergedFindings(repo: Repo, branch: string, commit: string): string[] {
+export function resolveMergedFindings(repo: Repo, ids: string[], target: ClaimOwner, commit: string): string[] {
   commitSha(commit);
+  const owner = claimTarget(target);
+  const validIds = checkedFindingIds(ids);
   return mutate(repo, () => {
-    const findings = readStoredFindings(repo).filter(
-      (finding) => finding.state === "claimed" && finding.claim?.branch === branch,
-    );
+    const findings = validIds
+      .map((id) => readFinding(repo, id))
+      .filter(
+        (finding) =>
+          finding.state === "claimed" &&
+          finding.claim?.branch === owner.branch &&
+          finding.claim.worktree === owner.worktree,
+      );
     if (!findings.length) return [];
     const resolution = { at: new Date().toISOString(), commit };
     for (const finding of findings) {
@@ -752,16 +798,10 @@ function writeVisits(repo: Repo, visits: Map<string, GroomVisit>): void {
   // Never write a file that the bounded reader would refuse on the next pass.
   if (Buffer.byteLength(content) > 1024 * 1024) storageError("groom");
   storageDirectory(repo, true, "groom");
-  const directory = join(stateDir(repo), "groom");
-  const temps = new Set<string>();
   try {
-    const temp = stageFile(directory, "visits", content, temps);
-    renameSync(temp, join(directory, "visits.json"));
-    temps.delete(temp);
+    replaceFile(join(stateDir(repo), "groom"), "visits.json", content);
   } catch {
     storageError("groom");
-  } finally {
-    for (const temp of temps) unlinkSync(temp);
   }
 }
 
@@ -888,6 +928,11 @@ export const commands: CommandTable = {
         process.stdout.write(
           `${finding.id}\t${finding.state}${finding.orphaned ? " orphaned" : ""}\t${finding.approval?.priority ?? "-"}\t${finding.kind}\t${finding.severity}\t${finding.path}:${finding.line}\t${finding.title}\n`,
         );
+    return 0;
+  },
+  page({ repo, args }) {
+    options(args, {});
+    process.stdout.write(`${JSON.stringify(writeTriagePage(repo))}\n`);
     return 0;
   },
   show({ repo, args }) {

@@ -34,7 +34,7 @@ invent work.
 - `bin/`: `bin/wt`, the worktree and pull-request lifecycle CLI (node only, no dependencies, tests
   in `bin/lib/wt/`), and `.claude/skills/e-*`, its skills. `bin/findings` records, lists and settles
   local findings, runs the groom walk and spawns a fixer. Tests may borrow packages/core's installed
-  Markdown parser; bin/wt itself stays dependency-free.
+  Markdown parser; bin/wt and bin/findings stay dependency-free.
 - `plugin/`: the Claude Code plugin. `plugin/skills/` holds the review skills, their only copy;
   `plugin/` holds nothing else but `.claude-plugin/plugin.json`. `docs/api.md`: the v1 contract.
   `sync/`: surfaces shared with hunk-review-skill, and synthetic fixtures.

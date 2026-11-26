@@ -64,8 +64,8 @@ export function emptyRegistry(): Registry {
 }
 
 /**
- * The folder bin/wt keeps its registry, lock and findings in. On first use it takes over the folder of the
- * name before the rename (`emend-wt`) with one atomic rename, when the new one is missing. Nothing is deleted.
+ * The folder main.ts (bin/wt) and findings-main.ts (bin/findings) share for the registry, locks and findings.
+ * On first use it takes over the old folder (`emend-wt`) with one atomic rename when the new one is missing.
  */
 export function stateDir(repo: Repo): string {
   const current = join(repo.commonDir, "recense-wt");
@@ -178,7 +178,7 @@ function acquireLock(path: string, name = "registry"): () => void {
       }
       if (reapIfStale(path)) continue;
       if (Date.now() >= deadline) {
-        throw new WtError(69, `Another bin/wt call holds the ${name} lock. Try again in a moment.`);
+        throw new WtError(69, `Another bin/wt or bin/findings call holds the ${name} lock. Try again in a moment.`);
       }
       sleepSync(25);
     }

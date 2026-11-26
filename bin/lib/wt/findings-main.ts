@@ -14,6 +14,8 @@ const HELP = `bin/findings: the local findings registry
 Registry:
   add --file <file>                                record a local finding (3 when already recorded)
   list [--state <s>] [--kind <k>] [--path <p>] [--triage approved|untriaged] [--json]
+                                                   untriaged means open with no approval. approved means an approval in any state.
+  page                                             write the main checkout's triage page (JSON)
   show <id>
   approve <id>... --priority P0|P1|P2              approve open findings from the main checkout
   release <id>...

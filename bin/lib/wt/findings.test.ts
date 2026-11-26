@@ -340,6 +340,145 @@ test("a linked worktree uses its own HEAD and the shared finding store", () => {
   assert.throws(() => addFinding(repo, input({ path: "linked.md" })), fails(2));
 });
 
+async function triagePage(cwd = fx.main): Promise<{ page: string | null; key: string; findings: string[] }> {
+  const result = await runWt(join(fx.main, "bin/findings"), ["page"], { cwd });
+  assert.equal(result.code, 0, result.stderr);
+  return JSON.parse(result.stdout);
+}
+
+test("page groups findings in page order, fences their text and excerpts main HEAD", async () => {
+  const path = "docs/guide`/chapter.md";
+  const lines = Array.from({ length: 16 }, (_, i) => `source line ${i + 1}.`);
+  lines[7] = "````";
+  commitFile(fx.main, path, `${lines.join("\n")}\n`);
+  commitFile(fx.main, "private.md", "private excerpt marker\n");
+  function record(day: number, fields: Partial<FindingInput>): string {
+    const id = addFinding(repo, input(fields)).id;
+    const data = JSON.parse(readFileSync(stored(id), "utf8"));
+    writeFileSync(stored(id), JSON.stringify({ ...data, createdAt: `2026-01-0${day}T00:00:00.000Z` }));
+    return id;
+  }
+  const security = record(1, {
+    path: "private.md",
+    kind: "security",
+    title: "private title marker",
+    detail: "private detail marker",
+  });
+  const first = record(2, { path, line: 8, title: "`a``b`", detail: "before\n```\n### literal text" });
+  const root = record(3, {});
+  const second = record(4, { path, line: 9 });
+  const large = record(5, { size: "large", rule: "large", title: "Large change" });
+  writeFileSync(join(fx.main, path), "working tree marker\n");
+
+  const { page, findings } = await triagePage();
+  const directory = join(fx.main, ".wt");
+  assert.equal(page, join(directory, "triage.md"));
+  assert.deepEqual(readdirSync(directory), ["triage.md"]);
+  assert.equal(statSync(directory).mode & 0o777, 0o700);
+  assert.equal(statSync(page).mode & 0o777, 0o600);
+  assert.deepEqual(findings, [first, second, root, security, large]);
+  const text = readFileSync(page, "utf8");
+  assert.deepEqual(text.match(/^#{1,3} .+$/gm), [
+    "# Findings triage",
+    "## How to answer",
+    "## `` docs/guide` ``",
+    `### ${first}`,
+    "### literal text", // Inside the detail's text fence.
+    `### ${second}`,
+    "## `README.md`",
+    `### ${root}`,
+    "## Not for /e-fix",
+    `### ${security}`,
+    `### ${large}`,
+  ]);
+  const block = text.slice(text.indexOf(`### ${first}`), text.indexOf(`### ${second}`));
+  assert.ok(block.includes("bug · medium · small · ``docs/guide`/chapter.md:8`` · 2026-01-02T00:00:00.000Z"));
+  assert.ok(block.includes("\n\n``` `a``b` ```\n\n````text\nbefore\n```\n### literal text\n````\n"));
+  assert.ok(block.includes(["", "", "`````", ...lines.slice(1, 14), "`````", ""].join("\n")));
+  assert.doesNotMatch(block, /source line (1|15)\./);
+  assert.doesNotMatch(text, /working tree marker|private (title|detail|excerpt) marker/);
+  assert.ok(
+    text.includes(`A security finding's text stays on this machine. Read it with \`bin/findings show ${security}\`.`),
+  );
+  assert.ok(text.includes("`Large change`"));
+});
+
+test("page omits untracked files present on disk and symlinks tracked by main", async () => {
+  const linked = join(env.root, "linked");
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-linked", linked);
+  const linkedRepo = resolveRepo(linked);
+  for (const path of ["local.md", "link.md"]) {
+    commitFile(linked, path, "linked excerpt marker\n");
+    addFinding(linkedRepo, input({ path }));
+  }
+  writeFileSync(join(fx.main, "local.md"), "untracked excerpt marker\n");
+  symlinkSync("local.md", join(fx.main, "link.md"));
+  gitIn(fx.main, "add", "--", "link.md");
+  gitIn(fx.main, "commit", "--quiet", "-m", "track the link");
+  const { page } = await triagePage();
+  assert.ok(page);
+  const text = readFileSync(page, "utf8");
+  assert.equal(text.split("Not tracked as a file in the main checkout's HEAD.").length - 1, 2);
+  assert.doesNotMatch(text, /excerpt marker/);
+});
+
+test("page omits excerpts for oversized blobs and blobs containing NUL", async () => {
+  const files = [
+    ["large.txt", "x".repeat(1024 * 1024 + 1)],
+    ["binary.txt", "binary marker\0tail"],
+  ] as const;
+  for (const [path, content] of files) {
+    commitFile(fx.main, path, "plain text\n");
+    addFinding(repo, input({ path }));
+    commitFile(fx.main, path, content);
+  }
+  const { page } = await triagePage();
+  assert.ok(page);
+  const text = readFileSync(page, "utf8");
+  assert.equal(text.split("The file is too large or not text.").length - 1, 2);
+  assert.doesNotMatch(text, /binary marker|x{10}|plain text/);
+});
+
+test("page writes nothing without untriaged findings and returns a stable key per checkout", async () => {
+  const empty = await triagePage();
+  const key = `e-triage-${createHash("sha256").update(realpathSync(fx.main)).digest("hex").slice(0, 12)}`;
+  assert.deepEqual(empty, { page: null, key, findings: [] });
+  assert.equal(existsSync(join(fx.main, ".wt")), false);
+  const other = join(env.root, "other-main");
+  gitIn(fx.main, "clone", "--quiet", fx.main, other);
+  assert.notEqual((await triagePage(other)).key, key);
+  const id = addFinding(repo, input()).id;
+  const outside = join(env.root, "previous-page");
+  writeFileSync(outside, "preserve this file\n");
+  mkdirSync(join(fx.main, ".wt"), { mode: 0o700 });
+  symlinkSync(outside, join(fx.main, ".wt", "triage.md"));
+  const written = await triagePage();
+  assert.equal(written.key, key);
+  assert.ok(written.page);
+  assert.ok(lstatSync(written.page).isFile());
+  assert.equal(readFileSync(outside, "utf8"), "preserve this file\n");
+  const before = statSync(written.page);
+  approveFindings(repo, [id], "P2");
+  assert.deepEqual(await triagePage(), empty);
+  assert.deepEqual(statSync(written.page), before);
+});
+
+test("page refuses linked worktrees, arguments and a symlinked .wt folder", async () => {
+  addFinding(repo, input());
+  const linked = join(env.root, "linked");
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-linked", linked);
+  const result = await runWt(join(fx.main, "bin/findings"), ["page"], { cwd: linked });
+  assert.equal(result.code, 2);
+  assert.equal(result.stderr.trim(), "Only the main checkout writes the triage page. Nothing was changed.");
+  assert.equal((await cli("page", "extra")).code, 2);
+  assert.equal(existsSync(join(fx.main, ".wt")), false);
+  const outside = join(env.root, "outside");
+  mkdirSync(outside);
+  symlinkSync(outside, join(fx.main, ".wt"));
+  assert.equal((await cli("page")).code, 2);
+  assert.deepEqual(readdirSync(outside), []);
+});
+
 test("approve records a priority for every id from main and replaces the priority and time", async () => {
   const first = addFinding(repo, input()).id;
   const second = addFinding(repo, input({ rule: "second" })).id;
@@ -693,24 +832,27 @@ test("a linked worktree cannot resolve its claim as fixed", async () => {
   assert.deepEqual(showFinding(repo, id), claimed);
 });
 
-test("resolveMergedFindings fixes only the branch's current claims, including legacy claims", () => {
+test("resolveMergedFindings matches listed claims by branch and path, including legacy claims", () => {
   const first = addFinding(repo, input()).id;
   const legacy = addFinding(repo, input({ rule: "legacy" })).id;
   const other = addFinding(repo, input({ rule: "other" })).id;
+  const wrongPath = addFinding(repo, input({ rule: "wrong-path" })).id;
+  const unlisted = addFinding(repo, input({ rule: "unlisted" })).id;
   const released = addFinding(repo, input({ rule: "released" })).id;
-  approveFindings(repo, [first, legacy, other, released], "P2");
-  claimFindings(repo, [first, legacy, released], target());
+  const ids = [first, legacy, other, wrongPath, released];
+  approveFindings(repo, [...ids, unlisted], "P2");
+  claimFindings(repo, [first, legacy, released, unlisted], target());
   claimFindings(repo, [other], { ...target(), branch: "other-worker" });
+  claimFindings(repo, [wrongPath], { ...target(), worktree: join(env.root, "old-worker") });
   releaseFindings(repo, [released]);
   const record = JSON.parse(readFileSync(stored(legacy), "utf8"));
   delete record.approval;
   writeFileSync(stored(legacy), JSON.stringify(record));
   const before = listFindings(repo);
-  const untouched = [other, released].map((id) => readFileSync(stored(id)));
   const commit = "c".repeat(40);
-  assert.throws(() => resolveMergedFindings(repo, target().branch, "bad"), fails(2));
+  assert.throws(() => resolveMergedFindings(repo, ids, target(), "bad"), fails(2));
   assert.deepEqual(listFindings(repo), before);
-  assert.deepEqual(resolveMergedFindings(repo, target().branch, commit), [first, legacy].sort());
+  assert.deepEqual(resolveMergedFindings(repo, ids, target(), commit), [first, legacy].sort());
   for (const id of [first, legacy]) {
     const finding = showFinding(repo, id);
     assert.equal(finding.state, "fixed");
@@ -719,11 +861,12 @@ test("resolveMergedFindings fixes only the branch's current claims, including le
     assert.deepEqual(finding.resolution, { at: new Date(finding.resolution.at).toISOString(), commit });
     assert.deepEqual(finding.approval, before.find((record) => record.id === id)?.approval);
   }
-  assert.deepEqual(
-    [other, released].map((id) => readFileSync(stored(id))),
-    untouched,
-  );
-  assert.deepEqual(resolveMergedFindings(repo, target().branch, commit), []);
+  for (const id of [other, released, wrongPath, unlisted])
+    assert.deepEqual(
+      showFinding(repo, id),
+      before.find((record) => record.id === id),
+    );
+  assert.deepEqual(resolveMergedFindings(repo, ids, target(), commit), []);
 });
 
 test("release validates the whole batch before writing", () => {
@@ -840,6 +983,30 @@ test("list filters approved and untriaged findings and prints the priority after
     assert.deepEqual(JSON.parse(json.stdout), [showFinding(repo, id)]);
   }
   assert.equal((await cli("list", "--triage", "unknown")).code, 2);
+});
+
+test("untriaged alone selects only open unapproved findings and approved includes any state", async () => {
+  const open = addFinding(repo, input()).id;
+  const claimed = addFinding(repo, input({ rule: "legacy-claim" })).id;
+  const fixed = addFinding(repo, input({ rule: "fixed" })).id;
+  const dismissed = addFinding(repo, input({ rule: "dismissed" })).id;
+  const stale = addFinding(repo, input({ rule: "stale" })).id;
+  approveFindings(repo, [claimed, stale], "P2");
+  claimFindings(repo, [claimed], target());
+  const record = JSON.parse(readFileSync(stored(claimed), "utf8"));
+  delete record.approval;
+  writeFileSync(stored(claimed), JSON.stringify(record));
+  resolveFinding(repo, fixed, { fixed: gitIn(fx.main, "rev-parse", "HEAD") });
+  resolveFinding(repo, dismissed, { dismissed: "reviewed" });
+  resolveFinding(repo, stale, { stale: true });
+  for (const [filter, expected] of [
+    ["untriaged", open],
+    ["approved", stale],
+  ] as const) {
+    const result = await cli("list", "--triage", filter, "--json");
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), [showFinding(repo, expected)]);
+  }
 });
 
 test("symlinked state and findings folders are refused on reads and writes without touching targets", () => {
@@ -1020,7 +1187,7 @@ test("busy state locks name the lock and exit 69", (t) => {
         (error) =>
           error instanceof WtError &&
           error.code === 69 &&
-          error.message === `Another bin/wt call holds the ${name} lock. Try again in a moment.`,
+          error.message === `Another bin/wt or bin/findings call holds the ${name} lock. Try again in a moment.`,
       );
     } finally {
       mocked.mock.restore();
@@ -1044,7 +1211,7 @@ test("list waits for the findings lock when the findings folder exists", (t) => 
       (error) =>
         error instanceof WtError &&
         error.code === 69 &&
-        error.message === "Another bin/wt call holds the findings lock. Try again in a moment.",
+        error.message === "Another bin/wt or bin/findings call holds the findings lock. Try again in a moment.",
     );
   } finally {
     mocked.mock.restore();
@@ -1106,7 +1273,7 @@ test("a FIFO findings lock times out without blocking", async (t) => {
     timeoutMs: 5000,
   });
   assert.equal(result.code, 69, result.stderr);
-  assert.equal(result.stderr, "Another bin/wt call holds the findings lock. Try again in a moment.\n");
+  assert.equal(result.stderr, "Another bin/wt or bin/findings call holds the findings lock. Try again in a moment.\n");
   assert.equal(lstatSync(lock).isFIFO(), true);
   assert.deepEqual(readdirSync(stateDir(repo)), ["findings.lock"]);
 });
@@ -1157,6 +1324,8 @@ test("bin/findings help lists every registry, fixer and groom command", async ()
   for (const usage of [
     "add --file <file>",
     "list [--state <s>] [--kind <k>] [--path <p>] [--triage approved|untriaged] [--json]",
+    "untriaged means open with no approval. approved means an approval in any state.",
+    "page ",
     "show <id>",
     "approve <id>... --priority P0|P1|P2",
     "release <id>...",
@@ -1630,7 +1799,10 @@ test("groom reads and writes both wait for the groom lock", (t) => {
   const mocked = t.mock.method(Date, "now", () => (now += 31_000));
   try {
     for (const call of [() => groomNext(repo, 5), () => groomVisited(repo, "README.md", blob, 0)])
-      assert.throws(call, { code: 69, message: "Another bin/wt call holds the groom lock. Try again in a moment." });
+      assert.throws(call, {
+        code: 69,
+        message: "Another bin/wt or bin/findings call holds the groom lock. Try again in a moment.",
+      });
   } finally {
     mocked.mock.restore();
   }

@@ -130,14 +130,23 @@ test("e-fix selects approved findings by priority and counts those waiting for t
   assert.match(skill, /bin\/findings list --state open --triage untriaged --json/);
 });
 
-test("e-triage uses validated ids, literal priorities and a fixed dismissal reason", () => {
+test("e-triage validates the page key, checks explain mode and shows a heading's finding before a change", () => {
   const skill = readFileSync(join(root, ".claude/skills/e-triage/SKILL.md"), "utf8");
   assert.match(skill, /^disable-model-invocation: true$/m);
   assert.ok(skill.includes("^f-[0-9a-f]{12}$"));
+  assert.ok(skill.includes("^e-triage-[0-9a-f]{12}$"));
+  assert.ok(skill.includes(`recense publish '<main>/.wt/triage.md' --title "Findings triage" --key <key>`));
+  assert.ok(skill.includes("targets the `### <id>` heading itself"));
+  const mode = skill.indexOf("read the hand-off's `mode` first");
+  const explain = skill.indexOf("In `explain`, change nothing in the registry");
+  const show = skill.indexOf("<main>/bin/findings show <id>");
+  assert.ok(mode >= 0 && mode < explain && explain < show);
+  assert.ok(skill.includes("still `open` and has no approval"));
   assert.ok(skill.includes("a literal priority from `P0`, `P1`, `P2`"));
   const commands = [...skill.matchAll(/<main>\/bin\/findings ([^`\n]+)/g)].map((match) => match[1]);
   assert.deepEqual(commands, [
-    "list --state open --triage untriaged --json",
+    "page",
+    "show <id>",
     "approve <id> --priority <P>",
     'resolve <id> --dismissed "skipped by the owner in triage"',
   ]);
