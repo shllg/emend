@@ -43,8 +43,11 @@ claude plugin install recense@recense
 recense skills install
 ```
 
-With mise activated in your shell, install with `mise use -g npm:@shllg/recense` instead of the
-`npm` line. `recense service install` runs the server at login, which is recommended. `recense` prints a
+With mise activated in your shell, install with
+`mise use -g 'npm:@shllg/recense[allow_low_downloads=true]'` instead of the `npm` line, from any
+folder; [local.md](https://github.com/shllg/recense/blob/release/docs/setup/local.md#2-install-recense)
+says why it needs `-g` and `allow_low_downloads`.
+`recense service install` runs the server at login, which is recommended. `recense` prints a
 one-time sign-in link. The two `claude plugin` lines add the skills to Claude Code, and
 `recense skills install` adds them for Codex and other agents that read `~/.agents/skills`.
 
@@ -84,12 +87,15 @@ claude plugin update recense@recense
 `recense update` backs up the database, updates recense with mise, npm or pnpm, and restarts the
 service. It runs only in your own terminal. A local build only gets the commands.
 
-To update by hand, run `npm install -g @shllg/recense@latest`, or with mise
-`mise upgrade npm:@shllg/recense`. If you installed the
+To update by hand, run `npm install -g @shllg/recense@latest`, or with mise, from your home folder,
+`mise upgrade npm:@shllg/recense`. Either one replaces only the package. If you installed the
 service, run `recense service install` again; it keeps its options. Without the service, run
 `recense stop`; the next `recense` starts the new version. If you ran `recense skills install`
 before, run it again. Then restart Claude Code. After `brew upgrade node` or `mise upgrade node`,
 run `recense service install` again too.
+With mise, a `postinstall` line in its config can reinstall the service, link the
+skills again and update the plugin each time mise installs a new recense:
+[update.md](https://github.com/shllg/recense/blob/release/docs/setup/update.md#let-mise-finish-the-update).
 
 [docs/setup/update.md](https://github.com/shllg/recense/blob/release/docs/setup/update.md) covers the
 order for a hub and its machines, Node.js upgrades and the phone app.

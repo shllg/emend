@@ -84,6 +84,8 @@ folder instead.
 Run `recense skills install` again after every update. mise keeps each version in its own folder,
 and the command moves the links to the new one. A link that points into an old folder breaks when
 mise removes that folder.
+With mise, the `postinstall` line in [update.md](update.md#let-mise-finish-the-update) does this
+for you.
 
 recense never replaces something it did not make. It stops with `<path> exists and was not made by
 recense; move it away, then run recense skills install again`.
