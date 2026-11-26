@@ -13,6 +13,8 @@ export interface HandoffNotice {
   readonly sentAt: number;
   readonly pickedUp: boolean;
   readonly held: boolean;
+  readonly asked: boolean;
+  readonly lost: boolean;
 }
 
 const notices = new Map<string, HandoffNotice>();
@@ -30,22 +32,40 @@ function subscribe(listener: () => void) {
   };
 }
 
+export function getHandoffNotice(reviewId: string) {
+  return notices.get(reviewId);
+}
+
 export function useHandoffNotice(reviewId: string) {
-  return useSyncExternalStore(subscribe, () => notices.get(reviewId));
+  return useSyncExternalStore(subscribe, () => getHandoffNotice(reviewId));
 }
 
 export function openHandoffNotice(reviewId: string, baseline: SendBaseline) {
-  notices.set(reviewId, { id: ++nextId, baseline, sentAt: performance.now(), pickedUp: false, held: false });
+  notices.set(reviewId, {
+    id: ++nextId,
+    baseline,
+    sentAt: performance.now(),
+    pickedUp: false,
+    held: false,
+    asked: false,
+    lost: false,
+  });
   notify();
 }
 
-export function markHandoffNotice(reviewId: string, id: number, patch: { pickedUp?: true; held?: true }) {
+export function markHandoffNotice(
+  reviewId: string,
+  id: number,
+  patch: { pickedUp?: true; held?: true; asked?: true; lost?: boolean },
+) {
   const entry = notices.get(reviewId);
   if (entry?.id !== id) return;
   const pickedUp = patch.pickedUp ?? entry.pickedUp;
   const held = patch.held ?? entry.held;
-  if (pickedUp === entry.pickedUp && held === entry.held) return;
-  notices.set(reviewId, { ...entry, pickedUp, held });
+  const asked = patch.asked ?? entry.asked;
+  const lost = patch.lost ?? entry.lost;
+  if (pickedUp === entry.pickedUp && held === entry.held && asked === entry.asked && lost === entry.lost) return;
+  notices.set(reviewId, { ...entry, pickedUp, held, asked, lost });
   notify();
 }
 

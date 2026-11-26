@@ -1,11 +1,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
-import { closeHandoffNotice, type HandoffNotice, markHandoffNotice } from "../../lib/handoff-notices.ts";
+import {
+  closeHandoffNotice,
+  getHandoffNotice,
+  type HandoffNotice,
+  markHandoffNotice,
+} from "../../lib/handoff-notices.ts";
 import { shortDate } from "../../lib/time.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
-import { cn } from "../ui/utils.ts";
 import { ResumeCommand } from "./ResumeCommand.tsx";
 
 /** What the Send bar knows about the agent, from the review on screen. */
@@ -123,7 +127,7 @@ export function SentNotice({
 }) {
   const client = useQueryClient();
   const notice = useRef<HTMLElement>(null);
-  const { id, baseline, sentAt, held } = entry;
+  const { id, baseline, sentAt, held, lost } = entry;
   const pickedNow =
     (agent.pickedUpAt !== null && agent.pickedUpAt !== baseline.pickedUpAt) ||
     (agent.newestRevision > baseline.newestRevision && !agent.pendingSend);
@@ -138,42 +142,47 @@ export function SentNotice({
     const timer = window.setTimeout(() => setFallback(true), Math.max(0, deadline - performance.now()));
     return () => window.clearTimeout(timer);
   }, [pickedUp, fallback, deadline]);
-  // True once the notice could not reach the server: the stream did not reopen and the refetch
-  // failed or did not settle in time. A pick-up may then exist without showing here.
-  const [lost, setLost] = useState(false);
   // A later successful review fetch (from any source) shows the server is reachable again.
   useEffect(() => {
     if (!lost) return;
     return client.getQueryCache().subscribe((event) => {
-      const [name, id] = event.query.queryKey;
+      const [name, queryReviewId] = event.query.queryKey;
       // A manual write (setQueryData, such as the accepted-Send update) is not a fetch: it proves nothing.
       if (
         name === "review" &&
-        id === reviewId &&
+        queryReviewId === reviewId &&
         event.type === "updated" &&
         event.action.type === "success" &&
         !event.action.manual
       )
-        setLost(false);
+        markHandoffNotice(reviewId, id, { lost: false });
     });
-  }, [lost, client, reviewId]);
+  }, [lost, client, reviewId, id]);
   useEffect(() => {
     if (pickedUp || !fallback) return;
     let live = true;
-    let slow: number | undefined;
     // Asks once, in the background: the fallback text never waits on it. A reopened stream
     // refetches every query by itself; otherwise this refetches, and a failure or a stall says so.
     const ask = async () => {
+      const current = getHandoffNotice(reviewId);
+      if (!live || current?.id !== id || current.pickedUp || (current.asked && !current.lost)) return;
+      markHandoffNotice(reviewId, id, { asked: true });
+      // The first ask can finish across visits. A retry belongs to this visit because the next can retry too.
+      const stillPending = () => {
+        const latest = getHandoffNotice(reviewId);
+        return latest?.id === id && !latest.pickedUp && (live || !current.asked);
+      };
       let reopened = false;
       try {
         reopened = await reconnectReviewEvents();
       } catch {
         reopened = false;
       }
-      if (reopened || !live) return;
+      if (reopened || !stillPending()) return;
       // Join a refetch already running (the Send's own) instead of cancelling and restarting it.
       const options = { cancelRefetch: false };
       void client.invalidateQueries({ queryKey: ["inbox"] }, options).catch(() => undefined);
+      let slow: number | undefined;
       try {
         // Only the review decides "cannot reach": a slow inbox says nothing about the server.
         await Promise.race([
@@ -184,19 +193,18 @@ export function SentNotice({
         ]);
       } catch (error) {
         // A network failure or a fetch still unfinished counts; an HTTP error means the server answered.
-        if (live && (error === TOO_SLOW || error instanceof TypeError)) setLost(true);
+        if ((error === TOO_SLOW || error instanceof TypeError) && stillPending()) {
+          markHandoffNotice(reviewId, id, { lost: true });
+        }
       }
       window.clearTimeout(slow);
     };
     // A StrictMode cleanup or an immediate unmount can cancel the ask before it starts.
-    queueMicrotask(() => {
-      if (live) void ask();
-    });
+    queueMicrotask(() => void ask());
     return () => {
       live = false;
-      window.clearTimeout(slow);
     };
-  }, [pickedUp, fallback, client, reviewId]);
+  }, [pickedUp, fallback, client, reviewId, id]);
 
   const close = useCallback(() => {
     const restoreFocus = notice.current?.contains(document.activeElement);
@@ -224,10 +232,7 @@ export function SentNotice({
     <section
       aria-label="Sent"
       ref={notice}
-      className={cn(
-        "absolute bottom-full z-(--z-bar) mb-2 space-y-2 rounded-lg border border-line-1 bg-raised p-3 shadow-3",
-        phone ? "inset-x-3" : "right-3 w-[min(400px,calc(100%-1.5rem))]",
-      )}
+      className="space-y-2 rounded-lg border border-line-1 bg-raised p-3 shadow-3"
       onPointerDownCapture={hold}
       onFocusCapture={hold}
       onKeyDownCapture={(event) => {

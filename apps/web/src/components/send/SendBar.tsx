@@ -376,7 +376,7 @@ export function SendBar({
     </div>
   );
   return (
-    <section aria-label="Send and approve" className="relative shrink-0 border-t border-line-1 bg-surface">
+    <section aria-label="Send and approve" className="shrink-0 border-t border-line-1 bg-surface">
       {notice && (
         <SentNotice
           key={notice.id}

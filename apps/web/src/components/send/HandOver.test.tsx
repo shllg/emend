@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
+import { getHandoffNotice } from "../../lib/handoff-notices.ts";
 import { shortDate } from "../../lib/time.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
 import { HANDOFF_CLOSE_MS, HANDOFF_REFETCH_MS, HANDOFF_WAIT_MS, type SendAgent } from "./HandOver.tsx";
@@ -438,12 +439,19 @@ test("closing the notice does not cancel the Send", async () => {
   expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
 });
 
-test("the phone shows the Sent notice inside the Send bar", async () => {
-  mount({ agent: idle, phone: true });
-  await send(true);
+test.each([
+  { layout: "desktop", phone: false },
+  { layout: "phone", phone: true },
+])("the $layout Sent notice occupies the first row of the Send bar", async ({ phone }) => {
+  mount({ agent: idle, phone });
+  await send(phone);
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(screen.queryByRole("dialog")).toBeNull();
-  const notice = within(screen.getByRole("region", { name: "Send and approve" })).getByRole("region", { name: "Sent" });
+  const bar = screen.getByRole("region", { name: "Send and approve" });
+  const notice = sentNotice();
+  expect(bar.firstElementChild).toBe(notice);
+  expect(notice.classList.contains("absolute")).toBe(false);
+  expect(notice.classList.contains("fixed")).toBe(false);
   expect(notice.textContent).toContain(pickedUp);
   expect(notice.textContent).toContain(command);
 });
@@ -651,6 +659,35 @@ test("returning before the fallback deadline waits only the time left since Send
   expect(reconnectReviewEvents).toHaveBeenCalledOnce();
 });
 
+test("returning after the fallback asked keeps the notice without reconnecting or invalidating queries", async () => {
+  const first = mount({ agent: waiting });
+  await send();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  first.unmount();
+  invalidate.mockClear();
+  mount({ agent: waiting });
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  expect(invalidate).not.toHaveBeenCalled();
+});
+
+test("leaving before the fallback ask starts lets the next visit ask once", async () => {
+  const first = mount({ agent: waiting });
+  await send();
+  first.unmount();
+  await settle(HANDOFF_WAIT_MS);
+  mount({ agent: waiting }).unmount();
+  await settle();
+  expect(getHandoffNotice(reviewId)?.asked).toBe(false);
+  expect(reconnectReviewEvents).not.toHaveBeenCalled();
+  render(tree({ agent: waiting }), { reactStrictMode: true });
+  await settle();
+  expect(getHandoffNotice(reviewId)?.asked).toBe(true);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+});
+
 test("a pick-up while away shows on return for three seconds, then stays closed", async () => {
   const view = mount({ agent: waiting });
   await send();
@@ -816,6 +853,49 @@ test("on the phone, the notice mounts in the Send bar during the Send sheet's ex
 
 const lostText =
   "recense cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below.";
+
+test("returning while the server is unreachable keeps the warning through one retry until the review fetch succeeds", async () => {
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "fail";
+  await settle(HANDOFF_WAIT_MS);
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  first.unmount();
+
+  const retry = Promise.withResolvers<boolean>();
+  vi.mocked(reconnectReviewEvents).mockReturnValueOnce(retry.promise);
+  invalidate.mockClear();
+  render(tree({ agent: waiting }), { reactStrictMode: true });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  await settle();
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  expect(getHandoffNotice(reviewId)?.lost).toBe(true);
+
+  probe.mode = "ok";
+  await act(async () => retry.resolve(false));
+  await settle();
+  expect(reviewRefetches()).toBe(1);
+  expect(inboxRefetches()).toBe(1);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+});
+
+test("a fallback refetch that times out while the reader is away records the failure for the next visit", async () => {
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "hang";
+  await settle(HANDOFF_WAIT_MS);
+  first.unmount();
+  await settle(HANDOFF_REFETCH_MS);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+  mount({ agent: waiting });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+});
 
 test("a Send answered by the server opens the notice and frees the button while the refetch never settles", async () => {
   mountProbe();
