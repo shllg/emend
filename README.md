@@ -1,4 +1,23 @@
+<div align="center">
+
+<a href="https://recense.dev/"><img src="https://raw.githubusercontent.com/shllg/recense/main/docs/images/logo.svg" alt="recense" width="80" height="80"></a>
+
 # recense
+
+**Review what your agents wrote.**
+
+[![CI](https://github.com/shllg/recense/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/shllg/recense/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@shllg/recense?color=f5af2e)](https://www.npmjs.com/package/@shllg/recense)
+[![node](https://img.shields.io/node/v/@shllg/recense)](https://github.com/shllg/recense/blob/release/docs/setup/local.md#1-install-nodejs-and-git)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/shllg/recense/blob/main/LICENSE)
+![platform: Linux | macOS](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey)
+
+**[Website](https://recense.dev/)** · [Install](https://recense.dev/#install) ·
+[Docs](https://github.com/shllg/recense/blob/release/docs/setup.md) ·
+[Vision](https://github.com/shllg/recense/blob/main/VISION.md) ·
+[Changelog](https://github.com/shllg/recense/releases)
+
+</div>
 
 recense was called emend until this release. The `emend` command still works for now; see
 [Coming from emend](docs/usage.md#coming-from-emend).
