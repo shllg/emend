@@ -93,6 +93,15 @@ test("no file in the repo contains a real home path", () => {
   assert.deepEqual(hits, []);
 });
 
+test("tracked agent instructions use bin/findings for registry commands", () => {
+  const paths = [".claude/", "AGENTS.md", ":(exclude).claude/worktrees/**"];
+  const files = execFileSync("git", ["ls-files", "-z", "--", ...paths], { cwd: root, encoding: "utf8" });
+  const oldCommand = /bin\/wt\s+(?:findings\b|groom\b|spawn\s+--findings\b)/;
+  for (const path of files.split("\0").filter(Boolean)) {
+    assert.doesNotMatch(readFileSync(join(root, path), "utf8"), oldCommand, path);
+  }
+});
+
 test("every lifecycle skill exists with a matching name and a description", () => {
   for (const name of SKILLS) {
     const text = readFileSync(join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
@@ -114,8 +123,8 @@ function fixerBuildItem(): string {
 
 test("e-work reads each claim before its first resolve in build item 1", () => {
   const item = fixerBuildItem();
-  const show = item.indexOf("<main>/bin/wt findings show <id>");
-  const firstResolve = item.indexOf("<main>/bin/wt findings resolve");
+  const show = item.indexOf("<main>/bin/findings show <id>");
+  const firstResolve = item.indexOf("<main>/bin/findings resolve");
   assert.ok(show >= 0 && show < firstResolve);
 });
 
@@ -123,7 +132,7 @@ test("e-work records a security finding before dismissing the original", () => {
   const bullet = /^ {3}- [^\n]*security problem.*(?:\n {5}.*)*/m.exec(fixerBuildItem());
   assert.ok(bullet, "missing security bullet");
   assert.match(bullet[0], /Use the `path` and `line` of the problem at this worktree's `HEAD`/);
-  const add = bullet[0].indexOf("<main>/bin/wt findings add --file");
+  const add = bullet[0].indexOf("<main>/bin/findings add --file");
   const dismiss = bullet[0].indexOf("--dismissed");
   assert.ok(add >= 0 && add < dismiss);
 });

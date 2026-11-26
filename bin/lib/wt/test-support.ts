@@ -514,8 +514,11 @@ function copyBin(destRoot: string): void {
   copyFileSync(join(BIN_DIR, "..", "scripts", "check-public.ts"), join(destRoot, "scripts", "check-public.ts"));
   const libDest = join(destRoot, "bin", "lib", "wt");
   mkdirSync(libDest, { recursive: true });
-  copyFileSync(join(BIN_DIR, "wt"), join(destRoot, "bin", "wt"));
-  chmodSync(join(destRoot, "bin", "wt"), 0o755);
+  for (const name of ["wt", "findings"]) {
+    const launcher = join(destRoot, "bin", name);
+    copyFileSync(join(BIN_DIR, name), launcher);
+    chmodSync(launcher, 0o755);
+  }
   for (const file of readdirSync(join(BIN_DIR, "lib", "wt"))) {
     if (!file.endsWith(".ts") || file.endsWith(".test.ts") || file === "test-support.ts") continue;
     copyFileSync(join(BIN_DIR, "lib", "wt", file), join(libDest, file));
@@ -525,7 +528,7 @@ function copyBin(destRoot: string): void {
 
 /**
  * A main checkout with one commit, pushed to a bare origin. With `withBin`, the checkout also holds a
- * committed copy of bin/wt, so linked worktrees carry one too.
+ * committed copies of bin/wt and bin/findings, so linked worktrees carry both.
  */
 export function makeFixture(env: TestEnv, o: { withBin?: boolean } = {}): Fixture {
   const origin = join(env.root, "origin.git");

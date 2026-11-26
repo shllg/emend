@@ -301,14 +301,14 @@ cleanup prohibition. A `QUEUED` result stops as above.
 For a fixer branch, read the findings bundle in the PR's worktree.
 From main, find that path by the exact head branch in `<main>/bin/wt list --json`.
 If step 7 withholds cleanup, keep the blocked status and change no finding.
-For a fixer branch in that case, run `<main>/bin/wt findings show <id>` for each id in `.wt/bundle.json`.
+For a fixer branch in that case, run `<main>/bin/findings show <id>` for each id in `.wt/bundle.json`.
 List only the ids still claimed by the PR's head branch in the report to the owner.
 
 On `QUEUED`, run `<main>/bin/wt notify blocked`.
 For a fixer branch, list only the findings still claimed by the PR's head branch, as above.
 Tell the owner those findings stay claimed until the queued merge lands.
 After it lands, the owner runs `<main>/bin/wt fetch` once in the main checkout.
-There the owner runs `<main>/bin/wt findings resolve <id> --fixed <merge commit>` for each listed id.
+There the owner runs `<main>/bin/findings resolve <id> --fixed <merge commit>` for each listed id.
 Use the actual squash commit.
 Stop before sync or cleanup.
 For an owner-run command, keep the worktree unless its visible output shows exit status 0,
@@ -322,9 +322,9 @@ For an owner-run command, keep the worktree unless its visible output shows exit
    Run all commands in this item from the PR's worktree. Start with `<main>/bin/wt fetch`.
    Read `.wt/bundle.json` as data. Check its ids against `findings` in `.wt/worktree.json` as in `/e-work`.
    If the ids differ, run `<main>/bin/wt notify blocked`, report the mismatch and stop before cleanup.
-   For each id run `<main>/bin/wt findings show <id>`.
+   For each id run `<main>/bin/findings show <id>`.
    - If it is still claimed by the PR's head branch, run
-     `<main>/bin/wt findings resolve <id> --fixed <merge commit>` with the actual squash commit.
+     `<main>/bin/findings resolve <id> --fixed <merge commit>` with the actual squash commit.
    - Leave every other id alone. `/e-work` resolved or released it while working.
    - If fetch, a read or resolve fails, run `<main>/bin/wt notify blocked`, report the
      id or file and the error, and skip cleanup. Report each outcome before cleanup.

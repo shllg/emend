@@ -326,7 +326,7 @@ for CI and threads; back here, the list above picks the next round.
 ## 8. Hand-off in recense
 
 1. Check once more: tree clean, `git rev-parse HEAD` equals `headRefOid`, CI green.
-   For a fixer hand-off, run `<main>/bin/wt findings show <id>` for each id in `.wt/bundle.json`.
+   For a fixer hand-off, run `<main>/bin/findings show <id>` for each id in `.wt/bundle.json`.
    Collect the ids still claimed by the PR's head branch.
 2. Make the review folder: `<top>/.wt/review`, where `<top>` is `git rev-parse --show-toplevel`.
    Create it with `mkdir -p -m 700 <top>/.wt/review`, written out literally. It is per worktree

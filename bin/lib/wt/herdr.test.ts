@@ -162,7 +162,7 @@ function recordFinding(repo: Repo, overrides: Partial<FindingInput> = {}): strin
   }).id;
 }
 
-test("spawn --findings claims, snapshots and prompts", () =>
+test("bin/findings spawn claims, snapshots and prompts", () =>
   scenario({}, ({ env, repo }) =>
     inHerdr(async () => {
       const first = recordFinding(repo, { rule: "selection" });
@@ -208,7 +208,7 @@ test("spawn --findings claims, snapshots and prompts", () =>
     }),
   ));
 
-test("hc spawn --findings labels the terminal and prints the selected ids", () =>
+test("bin/findings spawn labels the hc terminal and prints the selected ids", () =>
   scenario({ withBin: true }, async ({ env, fx, repo }) => {
     const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
     installFake(env, "claude", []);
@@ -217,7 +217,8 @@ test("hc spawn --findings labels the terminal and prints the selected ids", () =
       { match: ["run"], stdout: JSON.stringify({ address: "t2", state: "live" }) },
       { match: ["get", "t2"], stdout: JSON.stringify({ address: "t2", status: { state: "working" } }) },
     ]);
-    const r = await runWt(join(fx.main, "bin/wt"), ["spawn", "--findings", ids.join(","), "--slug", "readme-md"], {
+    const args = ["spawn", ids.join(","), "--slug", "readme-md", "--model", "opus", "--effort", "high"];
+    const r = await runWt(join(fx.main, "bin/findings"), args, {
       cwd: fx.main,
       env: { HC_TERMINAL_ID: "t1" },
     });
@@ -228,28 +229,33 @@ test("hc spawn --findings labels the terminal and prints the selected ids", () =
     assert.ok(launch);
     assert.ok(launch.includes(`recense.findings=${ids.join(",")}`));
     assert.ok(!launch.some((arg) => arg.startsWith("recense.issue=")));
+    assert.deepEqual(launch.slice(-5, -1), ["--model", "opus", "--effort", "high"]);
     assert.equal(launch.at(-1), spawnPrompt(".wt/bundle.json", "github"));
   }));
 
-test("spawn --findings refuses invalid requests before setup", () =>
+test("bin/findings spawn refuses invalid requests before setup", () =>
   scenario({ withBin: true }, async ({ env, fx, repo }) => {
     const open = recordFinding(repo);
     const security = recordFinding(repo, { kind: "security" });
     const large = recordFinding(repo, { size: "large", rule: "large" });
     const before = listFindings(repo);
     installFake(env, "herdr", herdrRules("unused"));
-    const flags = ["--findings", open, "--slug", "readme-md"];
+    const flags = [open, "--slug", "readme-md"];
     for (const args of [
       [...flags, "--issue", "42"],
       [...flags, "--mode", "local"],
       ["--slug", "readme"],
-      ["--findings", open],
+      [open],
+      [open, open, "--slug", "readme"],
       ...["", `${open},`, `,${open}`, "bad", `${open},f-000000000000`, `${open},${security}`, `${open},${large}`].map(
-        (ids) => ["--findings", ids, "--slug", "readme"],
+        (ids) => [ids, "--slug", "readme"],
       ),
-      ...["", "UPPER", "double--dash", "a".repeat(64)].map((slug) => ["--findings", open, "--slug", slug]),
+      ...["", "UPPER", "double--dash", "a".repeat(64)].map((slug) => [open, "--slug", slug]),
     ]) {
-      const r = await runWt(join(fx.main, "bin/wt"), ["spawn", ...args], { cwd: fx.main, env: { HERDR_ENV: "1" } });
+      const r = await runWt(join(fx.main, "bin/findings"), ["spawn", ...args], {
+        cwd: fx.main,
+        env: { HERDR_ENV: "1" },
+      });
       assert.equal(r.code, 2, r.stderr);
       assert.match(r.stderr, /Nothing was created\./);
     }
@@ -260,7 +266,7 @@ test("spawn --findings refuses invalid requests before setup", () =>
     assert.deepEqual(fakeCalls(env, "herdr"), []);
   }));
 
-test("spawn --findings refuses a non-GitHub origin before setup or claims", () =>
+test("bin/findings spawn refuses a non-GitHub origin before setup or claims", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
@@ -279,7 +285,7 @@ test("spawn --findings refuses a non-GitHub origin before setup or claims", () =
     }),
   ));
 
-test("spawn --findings refuses a taken finding or branch", () =>
+test("bin/findings spawn refuses a taken finding or branch", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
@@ -324,7 +330,7 @@ test("fixer setup refuses a live origin branch and accepts a stale tracking ref"
     assert.deepEqual(readRegistry(repo).worktrees[FIXER_BRANCH]?.findings, [finding.id]);
   }));
 
-test("spawn --findings reports a refused claim without a release command", () =>
+test("bin/findings spawn reports a refused claim without a release command", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
@@ -334,9 +340,9 @@ test("spawn --findings reports a refused claim without a release command", () =>
       try {
         await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
           assert.ok(e instanceof WtError);
-          const wt = join(repo.mainRoot, "bin/wt");
+          const findings = join(repo.mainRoot, "bin/findings");
           assert.match(e.message, /findings were not claimed by this run/);
-          for (const id of ids) assert.ok(e.message.includes(`Check each with: ${wt} findings show ${id}`));
+          for (const id of ids) assert.ok(e.message.includes(`Check each with: ${findings} show ${id}`));
           assert.match(e.message, /Optional teardown:/);
           assert.doesNotMatch(e.message, /findings release|stay claimed|failed write/);
           return true;
@@ -351,7 +357,7 @@ test("spawn --findings reports a refused claim without a release command", () =>
     }),
   ));
 
-test("spawn --findings scopes the release command to its worktree after an uncertain claim failure", () =>
+test("bin/findings spawn scopes the release command to its worktree after an uncertain claim failure", () =>
   scenario({}, ({ env, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
@@ -361,9 +367,9 @@ test("spawn --findings scopes the release command to its worktree after an uncer
         await assert.rejects(spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
           assert.ok(e instanceof WtError);
           assert.match(e.message, /Unknown finding\./);
-          const wt = join(repo.mainRoot, "bin/wt");
-          assert.ok(e.message.includes(`Check each with: ${wt} findings show ${id}`));
-          const release = `cd ${join(repo.worktreesDir, FIXER_BRANCH)} && ${wt} findings release ${id}`;
+          const findings = join(repo.mainRoot, "bin/findings");
+          assert.ok(e.message.includes(`Check each with: ${findings} show ${id}`));
+          const release = `cd ${join(repo.worktreesDir, FIXER_BRANCH)} && ${findings} release ${id}`;
           assert.ok(e.message.includes(`Release any claimed by ${FIXER_BRANCH} with: ${release}`));
           return true;
         });
@@ -373,7 +379,7 @@ test("spawn --findings scopes the release command to its worktree after an uncer
     }),
   ));
 
-test("spawn --findings keeps claims after a workspace failure", () =>
+test("bin/findings spawn keeps claims after a workspace failure", () =>
   scenario({}, ({ env, repo }) =>
     inHerdr(async () => {
       const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
@@ -381,7 +387,7 @@ test("spawn --findings keeps claims after a workspace failure", () =>
       await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
         assert.ok(e instanceof WtError);
         const path = join(repo.worktreesDir, FIXER_BRANCH);
-        const release = `cd ${path} && ${repo.mainRoot}/bin/wt findings release ${ids.join(" ")}`;
+        const release = `cd ${path} && ${repo.mainRoot}/bin/findings release ${ids.join(" ")}`;
         const notice = `Findings ${ids.join(", ")} stay claimed by ${FIXER_BRANCH}. Release them before any teardown with: ${release}`;
         const releaseIndex = e.message.indexOf(notice);
         assert.ok(releaseIndex >= 0 && releaseIndex < e.message.indexOf("Optional teardown:"));

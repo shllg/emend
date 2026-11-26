@@ -68,10 +68,10 @@ stop.
 
 Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not restate it here.
 
-1. On every fixer pass, run `<main>/bin/wt findings show <id>` from this worktree for each id in `.wt/bundle.json`.
+1. On every fixer pass, run `<main>/bin/findings show <id>` from this worktree for each id in `.wt/bundle.json`.
    If a read fails, run `<main>/bin/wt notify blocked` and stop.
    Skip any finding this branch no longer holds. Keep its earlier outcome.
-   Only `bin/wt spawn` claims findings. After spawn, this branch's set of claims can only shrink.
+   Only `bin/findings spawn` claims findings. After spawn, this branch's set of claims can only shrink.
    Re-check only findings still claimed by this branch on the worktree's base from local main.
    Settle them from this worktree as follows.
 
@@ -80,20 +80,20 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
      Copy `title`, `detail`, `severity`, `size` and `source` from `findings show`.
      Use the `path` and `line` of the problem at this worktree's `HEAD`.
      Include `rule` when present. Set `kind` to `security`.
-     Run `<main>/bin/wt findings add --file <file>` from this worktree.
+     Run `<main>/bin/findings add --file <file>` from this worktree.
      If it refuses the path or line, correct the JSON file and retry once.
      Exit 0 or 3 means the security finding is recorded.
      On any other exit, name the failure in the private report and continue with the dismissal.
-     Run `<main>/bin/wt findings resolve <id> --dismissed "needs a private security report"`.
+     Run `<main>/bin/findings resolve <id> --dismissed "needs a private security report"`.
      Run `<main>/bin/wt notify question`.
      Report it only in the final report to the owner and the local recense hand-off writeup.
      Keep its id, title and reason out of all PR text, commits, Follow-ups and issues.
      If a PR body already named the finding, give the owner the PR number in the private report.
      Tell the owner that earlier body revisions in the PR's edit history name the finding.
      Tell them that only they can delete those revisions.
-   - Resolve each finding that no longer holds with `<main>/bin/wt findings resolve <id> --stale`.
+   - Resolve each finding that no longer holds with `<main>/bin/findings resolve <id> --stale`.
    - Use `not fixed` only when the fix needs a large change or goes outside the findings bundle's area.
-     Run `<main>/bin/wt findings release <id>` right away. List its id and reason under "Follow-ups".
+     Run `<main>/bin/findings release <id>` right away. List its id and reason under "Follow-ups".
    - Fix every other finding and keep it claimed by this branch. Add a test where behaviour changes.
 
    Plan from the remaining findings, the issue's sections, or the description. Read the rule files
@@ -186,12 +186,12 @@ With an issue, run `<main>/bin/wt issue check` again before step 5; any exit but
 as in step 1. For a findings bundle, skip the issue check.
 
 For a fixer run, if `git rev-list --count main..HEAD` prints `0`, open no PR.
-For each id in `.wt/bundle.json`, read `<main>/bin/wt findings show <id>`.
-Release each finding still claimed by this branch with `<main>/bin/wt findings release <id>`.
+For each id in `.wt/bundle.json`, read `<main>/bin/findings show <id>`.
+Release each finding still claimed by this branch with `<main>/bin/findings release <id>`.
 Report each finding's outcome. Run `<main>/bin/wt notify blocked`.
 Tell the owner to remove the worktree with `<main>/bin/wt cleanup <branch>`. End the loop as in step 6.
 
-For a fixer run with commits, run `<main>/bin/wt findings show <id>` for each id in `.wt/bundle.json`.
+For a fixer run with commits, run `<main>/bin/findings show <id>` for each id in `.wt/bundle.json`.
 A finding still claimed by this branch is fixed by this change.
 A stale or dismissed finding is settled.
 A finding this branch no longer holds, other than a stale or dismissed one, is not fixed.

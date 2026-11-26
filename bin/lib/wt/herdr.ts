@@ -744,11 +744,11 @@ export function writeFindingsBundle(dir: string, findings: BundleFinding[]): voi
   writeNew(dir, "bundle.json", `${JSON.stringify({ version: 1, findings: snapshot }, null, 2)}\n`, 0o600);
 }
 
-function nothingCreated(e: unknown): WtError {
+function nothingCreated(e: unknown, program: string): WtError {
   if (e instanceof WtError) {
     return e.message.includes("Nothing was created.") ? e : new WtError(e.code, `${e.message} Nothing was created.`);
   }
-  return new WtError(1, "bin/wt failed unexpectedly. Nothing was created.");
+  return new WtError(1, `${program} failed unexpectedly. Nothing was created.`);
 }
 
 /** Resolve the program before hc can interpret a bare name as a template. */
@@ -769,18 +769,17 @@ function claudeExecutable(): string {
 type Stage = "brief" | "opening" | "already_open" | "starting" | "not_ready" | "mismatch" | "prompting";
 
 const SPAWN_USAGE =
-  "Usage: bin/wt spawn --issue <n> [--mode github] [--model <m>] [--effort <e>] or " +
-  "bin/wt spawn --findings <id,id> --slug <slug> [--model <m>] [--effort <e>]. " +
+  "Usage: bin/wt spawn --issue <n> [--mode github] [--model <m>] [--effort <e>]. " +
   "A description becomes an issue first (the /e-spawn skill creates it).";
+const FINDINGS_SPAWN_USAGE = "Usage: bin/findings spawn <id,id> --slug <slug> [--model <m>] [--effort <e>].";
 
 function spawnTask(o: SpawnOptions, clock: SpawnClock): number | { ids: string[]; slug: string; branch: string } {
   if (o.findings === undefined) {
-    if (o.slug !== undefined) throw new WtError(2, "--slug requires --findings.");
+    if (o.slug !== undefined) throw new WtError(2, FINDINGS_SPAWN_USAGE);
     if (o.issue === undefined) throw new WtError(2, SPAWN_USAGE);
     return o.issue;
   }
-  if (o.issue !== undefined) throw new WtError(2, "Give either --issue or --findings.");
-  if (o.slug === undefined) throw new WtError(2, "--findings requires --slug.");
+  if (o.issue !== undefined || o.slug === undefined) throw new WtError(2, FINDINGS_SPAWN_USAGE);
   if (o.mode !== "github") throw new WtError(2, "A fixer uses the github mode.");
   const date = (clock.date?.() ?? new Date()).toISOString().slice(0, 10).replaceAll("-", "");
   const branch = `${BRANCH_PREFIX}fix-${date}-${o.slug}`;
@@ -811,6 +810,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
   let branch: string;
   let claudePath = "";
   const backend = detectedBackend();
+  const program = o.findings === undefined ? "bin/wt" : "bin/findings";
   try {
     task = spawnTask(o, clock);
     if (o.mode === "local") throw new WtError(2, "A local landing does not close the issue; use the github mode.");
@@ -848,7 +848,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
     busy = await busyPorts();
     allocatePort(readRegistry(repo), busy);
   } catch (e) {
-    throw nothingCreated(e);
+    throw nothingCreated(e, program);
   }
 
   let agent: string;
@@ -871,7 +871,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
           : "A herdr or herdr desktop agent with that name already exists.",
       );
   } catch (e) {
-    throw nothingCreated(e);
+    throw nothingCreated(e, program);
   }
 
   // Refresh after all asynchronous preflight work, immediately before setup. No issue comments are read.
@@ -879,7 +879,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
     if (typeof task === "number") issue = pickIssue(repo, task);
     else findings = pickFindings(repo, task.ids);
   } catch (e) {
-    throw nothingCreated(e);
+    throw nothingCreated(e, program);
   }
 
   // ---- setup: from here on something may exist
@@ -892,7 +892,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
       Object.hasOwn(readRegistry(repo).worktrees, branch) ||
       refExists(repo, `refs/heads/${branch}`) ||
       listGitWorktrees(repo).some((w) => w.branch === branch);
-    if (!exists) throw nothingCreated(e);
+    if (!exists) throw nothingCreated(e, program);
     throw new WtError(
       e instanceof WtError ? e.code : 1,
       `${e instanceof WtError ? e.message : "Setup failed unexpectedly."}\n${existsReport(repo, branch, join(repo.worktreesDir, worktreeDirName(branch)))}`,
@@ -1002,18 +1002,18 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
     try {
       claimFindings(repo, ids, { branch, worktree: wt.path });
     } catch (e) {
-      const wtBin = quote(join(repo.mainRoot, "bin", "wt"));
+      const findingsBin = quote(join(repo.mainRoot, "bin", "findings"));
       const refused = e instanceof Error && e.message.endsWith("Nothing was changed.");
       const lines = [
         e instanceof WtError ? e.message : "Claiming findings failed.",
         refused
           ? "The findings were not claimed by this run."
           : `A failed write can leave some of these findings claimed: ${ids.join(", ")}.`,
-        ...ids.map((id) => `Check each with: ${wtBin} findings show ${id}`),
+        ...ids.map((id) => `Check each with: ${findingsBin} show ${id}`),
       ];
       if (!refused) {
         lines.push("Include only ids claimed by this branch in the release command.");
-        lines.push(`Release any claimed by ${branch} with: ${releaseCommand(wt.path, wtBin, ids)}`);
+        lines.push(`Release any claimed by ${branch} with: ${releaseCommand(wt.path, findingsBin, ids)}`);
       }
       lines.push(existsReport(repo, branch, wt.path));
       throw new WtError(e instanceof WtError ? e.code : 1, lines.join("\n"));
@@ -1155,8 +1155,8 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
   return result(state);
 }
 
-function releaseCommand(path: string, quotedWt: string, ids: string[]): string {
-  return `cd ${quote(path)} && ${quotedWt} findings release ${ids.map(quote).join(" ")}`;
+function releaseCommand(path: string, quotedFindings: string, ids: string[]): string {
+  return `cd ${quote(path)} && ${quotedFindings} release ${ids.map(quote).join(" ")}`;
 }
 
 /** What exists after setup and the owner's cleanup commands. Never run automatically. */
@@ -1164,7 +1164,7 @@ function existsReport(repo: Repo, branch: string, path: string, claims?: string[
   const wt = quote(join(repo.mainRoot, "bin", "wt"));
   const lines = [`Branch ${branch} and its worktree ${path} exist. No automatic cleanup was performed.`];
   if (claims) {
-    const release = releaseCommand(path, wt, claims);
+    const release = releaseCommand(path, quote(join(repo.mainRoot, "bin", "findings")), claims);
     lines.push(
       `Findings ${claims.join(", ")} stay claimed by ${branch}. Release them before any teardown with: ${release}`,
     );
@@ -1177,33 +1177,35 @@ function existsReport(repo: Repo, branch: string, path: string, claims?: string[
 // ---------------------------------------------------------------------------------------------
 // Commands
 
-function spawnOptions(args: string[]): SpawnOptions {
+function spawnOptions(program: "bin/wt" | "bin/findings", args: string[]): SpawnOptions {
   try {
-    const { flags } = parseFlags(args, {
-      issue: "string",
-      findings: "string",
-      slug: "string",
-      mode: "string",
-      model: "string",
-      effort: "string",
-    });
+    const agentFlags = { model: "string", effort: "string" } as const;
+    const { flags, positionals } =
+      program === "bin/findings"
+        ? parseFlags(args, { ...agentFlags, slug: "string" }, 1)
+        : parseFlags(args, { ...agentFlags, issue: "string", mode: "string" });
+    const model = typeof flags.model === "string" ? flags.model : undefined;
+    const effort = typeof flags.effort === "string" ? flags.effort : undefined;
+    if (program === "bin/findings") {
+      const [ids] = positionals;
+      if (ids === undefined || typeof flags.slug !== "string") throw new WtError(2, FINDINGS_SPAWN_USAGE);
+      return { findings: ids.split(","), slug: flags.slug, mode: "github", model, effort };
+    }
     const mode = flags.mode ?? "github";
     if (mode !== "github" && mode !== "local") throw new WtError(2, "Invalid mode.");
     return {
       issue: typeof flags.issue === "string" ? issueNumber(flags.issue) : undefined,
-      findings: typeof flags.findings === "string" ? flags.findings.split(",") : undefined,
-      slug: typeof flags.slug === "string" ? flags.slug : undefined,
       mode,
-      model: typeof flags.model === "string" ? flags.model : undefined,
-      effort: typeof flags.effort === "string" ? flags.effort : undefined,
+      model,
+      effort,
     };
   } catch (e) {
-    throw nothingCreated(e);
+    throw nothingCreated(e, program);
   }
 }
 
-const spawnCommand: Command = async ({ repo, args }) => {
-  const r = await spawn(repo, spawnOptions(args));
+async function spawnAndReport(repo: Repo, options: SpawnOptions): Promise<number> {
+  const r = await spawn(repo, options);
   if (r.findings) say(`Findings: ${r.findings.join(", ")}`);
   else if (r.issue) say(`Issue: #${r.issue.number} ${r.issue.url}`);
   say(`Branch: ${r.branch}`);
@@ -1217,7 +1219,11 @@ const spawnCommand: Command = async ({ repo, args }) => {
     say(`Claude agent ${r.agent} is working on ${r.branch} in ${where}.`);
   }
   return 0;
-};
+}
+
+const spawnCommand: Command = ({ repo, args }) => spawnAndReport(repo, spawnOptions("bin/wt", args));
+export const spawnFindingsCommand: Command = ({ repo, args }) =>
+  spawnAndReport(repo, spawnOptions("bin/findings", args));
 
 const notifyCommand: Command = ({ repo, args }) => {
   const { positionals } = parseFlags(args, {}, 1);

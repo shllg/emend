@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Bash, Agent
 
 Run one review call for the orchestrator (the worker's main session). Change nothing in the
 repository: no edit, commit, push, GitHub write or label. Your only durable write is the findings
-registry, through `<main>/bin/wt findings add`. Find `<main>` as the parent of
+registry, through `<main>/bin/findings add`. Find `<main>` as the parent of
 `git rev-parse --path-format=absolute --git-common-dir`. Read the head with `git rev-parse HEAD`.
 
 ## Inputs
@@ -148,8 +148,8 @@ named route is either no longer over or covered by a reason line. Do not dispatc
 
 ## Record
 
-Before the first `findings add` of a call, run `<main>/bin/wt help` once. If its usage does not
-list `findings`, the registry is unavailable; use the unavailable handling below.
+Before the first `findings add` of a call, run `<main>/bin/findings help` once. If its usage does not
+list `add --file <file>`, the registry is unavailable; use the unavailable handling below.
 
 For each finding to record, use one Bash call in this exact form, with a temporary file outside
 the repository:
@@ -164,7 +164,7 @@ f=$(mktemp) && cat > "$f" <<'RECENSE_FINDING_<random hex>'
   "source": {"kind": "review", "branch": "<current branch>", "round": "<round name>"}
 }
 RECENSE_FINDING_<random hex>
-<main>/bin/wt findings add --file "$f"; rc=$?; rm -f "$f"; exit "$rc"
+<main>/bin/findings add --file "$f"; rc=$?; rm -f "$f"; exit "$rc"
 ```
 
 Replace `<random hex>` with new random hex for each call, and check that the delimiter does not

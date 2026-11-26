@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Launcher for bin/findings: runs the TypeScript entry point that sits next to this file. Works through a symlink.
+self="${BASH_SOURCE[0]}"
+while [ -L "$self" ]; do
+  link="$(readlink "$self")"
+  case "$link" in
+    /*) self="$link" ;;
+    *)
+      case "$self" in
+        */*) self="${self%/*}/$link" ;;
+        *) self="./$link" ;;
+      esac
+      ;;
+  esac
+done
+case "$self" in
+  */*) dir="${self%/*}" ;;
+  *) dir="." ;;
+esac
+dir="$(cd -P "$dir" && pwd -P)"
+exec node "$dir/lib/wt/findings-main.ts" "$@"

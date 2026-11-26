@@ -29,7 +29,7 @@ The manager sorts every finding before the orchestrator acts on it:
 The manager decides whether the change caused a finding: its lines are new or changed in the
 range, or the change altered what reaches them. An old bug that stops "Done when" counts as
 caused. What the change did not cause is **recorded** (a bug or defect, written to the local
-findings registry with `bin/wt findings add`), a **follow-up** (an idea, listed under
+findings registry with `bin/findings add`), a **follow-up** (an idea, listed under
 "Follow-ups"), or dropped (code style or cleanup no written rule asks for). A finding a reviewer
 calls a bug or a security issue is blocking, and every `recense-security-reviewer` finding is at
 least a defect.

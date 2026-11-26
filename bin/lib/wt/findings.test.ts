@@ -70,7 +70,7 @@ function input(overrides: Partial<FindingInput> = {}): FindingInput {
 }
 
 function cli(...args: string[]) {
-  return runWt(join(fx.main, "bin", "wt"), ["findings", ...args], { cwd: fx.main });
+  return runWt(join(fx.main, "bin", "findings"), args, { cwd: fx.main });
 }
 
 function inputFile(value: unknown = input()): string {
@@ -182,7 +182,6 @@ test("add requires regular bounded UTF-8 JSON input and safe flags", async () =>
     assert.equal((await cli("add", "--file", file)).code, 2);
   }
   for (const args of [
-    [],
     ["add"],
     ["add", "--file"],
     ["list", "--json=true"],
@@ -511,7 +510,7 @@ test("a failed rollback reports possible changes and cleans up remaining temp fi
         error instanceof WtError &&
         error.code === 1 &&
         error.message.includes("Some findings may have changed") &&
-        error.message.includes("bin/wt findings list") &&
+        error.message.includes("bin/findings list") &&
         !error.message.includes("Nothing was changed"),
     );
   } finally {
@@ -569,7 +568,7 @@ test("a linked worktree can release and resolve only its own claims", async () =
   claimFindings(repo, [own], { branch, worktree: alias });
   claimFindings(repo, [otherBranch], { branch: "other-worker", worktree });
   claimFindings(repo, [otherPath], { branch, worktree: fx.main });
-  const linked = (...args: string[]) => runWt(join(fx.main, "bin/wt"), ["findings", ...args], { cwd: worktree });
+  const linked = (...args: string[]) => runWt(join(fx.main, "bin/findings"), args, { cwd: worktree });
   const before = listFindings(repo);
   const refused = async (...args: string[]) => {
     const result = await linked(...args);
@@ -605,7 +604,7 @@ test("a linked worktree can resolve its claim as fixed only with a commit on ori
   const claimed = showFinding(repo, id);
   const commit = commitFile(worktree, "fix.md", "local fix\n");
   const resolveFixed = () =>
-    runWt(join(fx.main, "bin/wt"), ["findings", "resolve", id, "--fixed", commit], { cwd: worktree });
+    runWt(join(fx.main, "bin/findings"), ["resolve", id, "--fixed", commit], { cwd: worktree });
 
   const local = await resolveFixed();
   assert.equal(local.code, 1, local.stderr);
@@ -1029,15 +1028,78 @@ test("missing git is unavailable and does not create a finding", async () => {
   assert.equal((await cli("list")).code, 69);
 });
 
-test("bin/wt help lists findings", async () => {
-  const result = await runWt(join(fx.main, "bin", "wt"), ["help"], { cwd: fx.main });
+test("bin/findings help lists every registry, fixer and groom command", async () => {
+  const result = await cli("help");
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /findings add --file/);
-  assert.match(result.stdout, /findings resolve/);
+  const lines = result.stdout.split("\n").map((line) => line.trim());
+  for (const usage of [
+    "add --file <file>",
+    "list [--state <s>] [--kind <k>] [--path <p>] [--json]",
+    "show <id>",
+    "release <id>...",
+    "resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)",
+    "groom next [--count N]",
+    "groom visited <path> --blob <sha> --findings N",
+    "Exit codes:",
+  ]) {
+    assert.ok(
+      lines.some((line) => line.startsWith(usage)),
+      usage,
+    );
+  }
+  assert.deepEqual(
+    lines.filter((line) => line.includes("--slug")),
+    ["spawn <id,id> --slug <slug> [--model <m>] [--effort <e>]"],
+  );
+  for (const args of [[], ["--help"], ["-h"]]) assert.deepEqual(await cli(...args), result);
+});
+
+test("bin/findings rejects unknown subcommands with exit 2", async () => {
+  for (const sub of ["unknown", "toString"]) {
+    assert.deepEqual(await cli(sub), { code: 2, stdout: "", stderr: "Unknown subcommand. Run bin/findings help.\n" });
+  }
+  assert.equal(existsSync(stateDir(repo)), false);
+});
+
+test("bin/findings lists through a symlink chain", async () => {
+  const id = addFinding(repo, input()).id;
+  const direct = await cli("list", "--json");
+  assert.equal(direct.code, 0, direct.stderr);
+  assert.deepEqual(JSON.parse(direct.stdout), [showFinding(repo, id)]);
+  const link = join(env.root, "findings-link");
+  const second = join(env.root, "second-link");
+  symlinkSync(join(fx.main, "bin/findings"), link);
+  symlinkSync("findings-link", second);
+  for (const path of [link, second]) {
+    const result = await runWt(path, ["list", "--json"], {
+      cwd: fx.main,
+      env: { PATH: `${env.fakeBin}${delimiter}${env.realPath}` },
+    });
+    assert.deepEqual(result, direct);
+  }
+});
+
+test("bin/wt rejects the former findings commands without claiming or creating a worktree", async () => {
+  const id = addFinding(repo, input()).id;
+  const before = readFileSync(stored(id));
+  const wt = join(fx.main, "bin/wt");
+  for (const args of [
+    ["findings", "list"],
+    ["groom", "next"],
+    ["spawn", "--findings", id, "--slug", "x"],
+  ]) {
+    const result = await runWt(wt, args, { cwd: fx.main });
+    assert.equal(result.code, 2, result.stderr);
+    assert.match(result.stderr, args[0] === "spawn" ? /Unknown option --findings/ : /Unknown subcommand/);
+    assert.deepEqual(readFileSync(stored(id)), before);
+    assert.deepEqual(readdirSync(stateDir(repo)), ["findings"]);
+    assert.equal(existsSync(repo.worktreesDir), false);
+    assert.equal(gitIn(fx.main, "branch", "--list", "recense-*"), "");
+  }
 });
 
 function groomCli(...args: string[]) {
-  return runWt(join(fx.main, "bin", "wt"), ["groom", ...args], { cwd: fx.main });
+  return cli("groom", ...args);
 }
 
 function visitsPath(): string {
@@ -1175,7 +1237,7 @@ test("groom next defaults to five JSON candidates and leaves absent groom storag
   }
   assert.equal(existsSync(join(stateDir(repo), "groom")), false);
   assert.deepEqual(readdirSync(stateDir(repo)), []);
-  const help = await runWt(join(fx.main, "bin", "wt"), ["help"], { cwd: fx.main });
+  const help = await cli("help");
   assert.match(help.stdout, /groom next \[--count N\]/);
   assert.match(help.stdout, /groom visited <path> --blob <sha> --findings N/);
 });
@@ -1315,7 +1377,7 @@ test("groom CLI refuses malformed counts, options and actions without changing v
   for (const args of [[], ["unknown"]]) {
     const result = await groomCli(...args);
     assert.equal(result.code, 2, result.stderr);
-    assert.equal(result.stderr.trim(), "Unknown groom action. Run bin/wt help.");
+    assert.equal(result.stderr.trim(), "Unknown groom action. Run bin/findings help.");
   }
   assert.deepEqual(readFileSync(visitsPath()), before);
 });
@@ -1327,7 +1389,7 @@ test("groom reads main HEAD from a worktree and ignores staged changes in main",
   commitFile(worktree, "README.md", "worktree content\n");
   writeFileSync(join(fx.main, "README.md"), "staged content\n");
   gitIn(fx.main, "add", "README.md");
-  const result = await runWt(join(fx.main, "bin", "wt"), ["groom", "next", "--count", "50"], { cwd: worktree });
+  const result = await runWt(join(fx.main, "bin", "findings"), ["groom", "next", "--count", "50"], { cwd: worktree });
   assert.equal(result.code, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).find((entry: { path: string }) => entry.path === "README.md").blob, blob);
   groomVisited(resolveRepo(worktree), "README.md", blob, 0);

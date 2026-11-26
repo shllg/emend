@@ -349,7 +349,7 @@ function writeFindings(repo: Repo, findings: Finding[]): void {
     }
   }
   if (failed) {
-    if (!restored) throw new WtError(1, "Some findings may have changed; run `bin/wt findings list`.");
+    if (!restored) throw new WtError(1, "Some findings may have changed; run `bin/findings list`.");
     storageError();
   }
 }
@@ -803,53 +803,55 @@ export const commands: CommandTable = {
       groomVisited(repo, positionals[0] as string, flags.blob, Number(flags.findings));
       return 0;
     }
-    throw new WtError(2, "Unknown groom action. Run bin/wt help.");
+    throw new WtError(2, "Unknown groom action. Run bin/findings help.");
   },
-  findings({ repo, args }) {
-    const [action, ...rest] = args;
-    if (action === "add") {
-      const { flags } = options(rest, { file: "string" });
-      if (typeof flags.file !== "string") invalid("file option");
-      let input: unknown;
-      try {
-        input = JSON.parse(readTextFile(flags.file));
-      } catch {
-        throw new WtError(2, "The finding file must be regular UTF-8 JSON of at most 1 MiB (no symlinks).");
-      }
-      const result = addFinding(repo, input);
-      process.stdout.write(`${result.id}\n`);
-      return result.created ? 0 : 3;
+  add({ repo, args }) {
+    const { flags } = options(args, { file: "string" });
+    if (typeof flags.file !== "string") invalid("file option");
+    let input: unknown;
+    try {
+      input = JSON.parse(readTextFile(flags.file));
+    } catch {
+      throw new WtError(2, "The finding file must be regular UTF-8 JSON of at most 1 MiB (no symlinks).");
     }
-    if (action === "list") {
-      const { flags } = options(rest, { state: "string", kind: "string", path: "string", json: "boolean" });
-      const findings = listFindings(
-        repo,
-        {
-          state: flags.state as string | undefined,
-          kind: flags.kind as string | undefined,
-          path: flags.path as string | undefined,
-        },
-        (message) => process.stderr.write(`${message}\n`),
-      );
-      if (flags.json) process.stdout.write(`${JSON.stringify(findings, null, 2)}\n`);
-      else
-        for (const finding of findings)
-          process.stdout.write(
-            `${finding.id}\t${finding.state}${finding.orphaned ? " orphaned" : ""}\t${finding.kind}\t${finding.severity}\t${finding.path}:${finding.line}\t${finding.title}\n`,
-          );
-      return 0;
-    }
-    if (action === "show" || action === "release" || action === "resolve") {
-      const spec: Parameters<typeof parseFlags>[1] =
-        action === "resolve" ? { fixed: "string", dismissed: "string", stale: "boolean" } : {};
-      const { flags, positionals } = options(rest, spec, action === "release" ? rest.length : 1);
-      const ids = checkedFindingIds(positionals);
-      const id = ids[0] as string;
-      if (action === "show") process.stdout.write(`${JSON.stringify(showFinding(repo, id), null, 2)}\n`);
-      else if (action === "release") releaseFindings(repo, ids, callerOwner(repo));
-      else resolveFinding(repo, id, flags as FindingResolution, callerOwner(repo));
-      return 0;
-    }
-    throw new WtError(2, "Unknown findings action. Run bin/wt help.");
+    const result = addFinding(repo, input);
+    process.stdout.write(`${result.id}\n`);
+    return result.created ? 0 : 3;
+  },
+  list({ repo, args }) {
+    const { flags } = options(args, { state: "string", kind: "string", path: "string", json: "boolean" });
+    const findings = listFindings(
+      repo,
+      {
+        state: flags.state as string | undefined,
+        kind: flags.kind as string | undefined,
+        path: flags.path as string | undefined,
+      },
+      (message) => process.stderr.write(`${message}\n`),
+    );
+    if (flags.json) process.stdout.write(`${JSON.stringify(findings, null, 2)}\n`);
+    else
+      for (const finding of findings)
+        process.stdout.write(
+          `${finding.id}\t${finding.state}${finding.orphaned ? " orphaned" : ""}\t${finding.kind}\t${finding.severity}\t${finding.path}:${finding.line}\t${finding.title}\n`,
+        );
+    return 0;
+  },
+  show({ repo, args }) {
+    const { positionals } = options(args, {}, 1);
+    const id = checkedFindingIds(positionals)[0] as string;
+    process.stdout.write(`${JSON.stringify(showFinding(repo, id), null, 2)}\n`);
+    return 0;
+  },
+  release({ repo, args }) {
+    const { positionals } = options(args, {}, args.length);
+    releaseFindings(repo, checkedFindingIds(positionals), callerOwner(repo));
+    return 0;
+  },
+  resolve({ repo, args }) {
+    const { flags, positionals } = options(args, { fixed: "string", dismissed: "string", stale: "boolean" }, 1);
+    const id = checkedFindingIds(positionals)[0] as string;
+    resolveFinding(repo, id, flags as FindingResolution, callerOwner(repo));
+    return 0;
   },
 };

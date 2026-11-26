@@ -62,7 +62,7 @@ Format: `type(scope): summary`, from Conventional Commits.
 Fill `.github/pull_request_template.md` section by section, in its order. Its HTML comments are
 instructions; they do not go into the body.
 
-For a findings bundle, read `<main>/bin/wt findings show <id>` for each id in `.wt/bundle.json` in order.
+For a findings bundle, read `<main>/bin/findings show <id>` for each id in `.wt/bundle.json` in order.
 If a read fails, follow the stop in `/e-work` step 4.
 Omit every dismissed finding from all PR text.
 A fixer dismisses a finding only with the reason `needs a private security report`.
