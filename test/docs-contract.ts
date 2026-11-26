@@ -1,6 +1,6 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { join, posix } from "node:path";
 
 // Resolve through core's declared dependencies. A missing package is a failure, never a skip.
 const core = createRequire(new URL("../packages/core/package.json", import.meta.url));
@@ -12,6 +12,7 @@ type MdNode = {
   lang?: string | null;
   meta?: string | null;
   url?: string;
+  identifier?: string;
   alt?: string | null;
   children?: MdNode[];
   position?: { start: { line: number } };
@@ -47,6 +48,7 @@ const PAGE_KEYS = ["id", "path", "title", "description"];
 const SHOT_KEYS = ["file", "view", "device", "theme", "width", "height"];
 const TOP_KEYS = ["schema", "pages", "screenshots"];
 const MANIFEST = "docs/site.json";
+const SETUP_PAGE = /^docs\/setup\/[^/]+\.md$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -110,10 +112,11 @@ function locate(text: string): Map<string, number> {
   return lines;
 }
 
-function textOf(node: MdNode): string {
+function textOf(node: MdNode, forAnchor = false): string {
+  if (forAnchor && (node.type === "image" || node.type === "imageReference" || node.type === "html")) return "";
   if (typeof node.value === "string") return node.value;
   if (node.type === "image" && typeof node.alt === "string") return node.alt;
-  return (node.children ?? []).map(textOf).join("");
+  return (node.children ?? []).map((child) => textOf(child, forAnchor)).join("");
 }
 
 // GitHub's rule: lowercase, drop everything but letters, marks, numbers, connector punctuation,
@@ -131,13 +134,27 @@ function visit(node: MdNode, callback: (node: MdNode) => void): void {
 
 const lineOf = (node: MdNode): number => node.position?.start.line ?? 1;
 
-type Page = { root: MdNode; lines: string[]; anchors: Set<string>; headings: { node: MdNode; base: string }[] };
+type Page = {
+  root: MdNode;
+  lines: string[];
+  anchors: Set<string>;
+  headings: { node: MdNode; base: string }[];
+  definitions: Map<string, string>;
+};
 
 function readPage(text: string): Page {
   const root = parser.parse(text);
   const headings: Page["headings"] = [];
+  const definitions = new Map<string, string>();
   visit(root, (node) => {
-    if (node.type === "heading") headings.push({ node, base: slug(textOf(node)) });
+    if (node.type === "heading") headings.push({ node, base: slug(textOf(node, true)) });
+    if (
+      node.type === "definition" &&
+      node.identifier !== undefined &&
+      node.url !== undefined &&
+      !definitions.has(node.identifier)
+    )
+      definitions.set(node.identifier, node.url);
   });
   const occurrences = new Map<string, number>();
   const anchors = new Set<string>();
@@ -151,7 +168,7 @@ function readPage(text: string): Page {
     occurrences.set(result, 0);
     anchors.add(result);
   }
-  return { root, lines: text.split("\n"), anchors, headings };
+  return { root, lines: text.split("\n"), anchors, headings, definitions };
 }
 
 function pngSize(path: string): { width: number; height: number } | string {
@@ -166,14 +183,56 @@ function pngSize(path: string): { width: number; height: number } | string {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (read < 24 || !buffer.subarray(0, 8).equals(signature)) return "is not a PNG file (bad signature)";
   if (buffer.toString("latin1", 12, 16) !== "IHDR") return "is not a PNG file (no IHDR chunk first)";
+  if (buffer.readUInt32BE(8) !== 13) return "is not a PNG file (IHDR length must be 13)";
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
-function isFile(path: string): boolean {
-  return existsSync(path) && statSync(path).isFile();
+function publicPages(tracked: ReadonlySet<string>): Set<string> {
+  const pages = new Set(["docs/setup.md", "docs/usage.md"]);
+  for (const path of tracked) if (SETUP_PAGE.test(path)) pages.add(path);
+  return pages;
 }
 
-export function checkDocs(root: string): string[] {
+// A tracked path can have a symlink in its working-tree ancestry, even when its index mode is regular.
+function isDirectory(root: string, dir: string): boolean {
+  return (
+    dir === "." ||
+    (isDirectory(root, posix.dirname(dir)) &&
+      lstatSync(join(root, dir), { throwIfNoEntry: false })?.isDirectory() === true)
+  );
+}
+
+function isTrackedFile(root: string, tracked: ReadonlySet<string>, path: string): boolean {
+  return (
+    tracked.has(path) &&
+    isDirectory(root, posix.dirname(path)) &&
+    lstatSync(join(root, path), { throwIfNoEntry: false })?.isFile() === true
+  );
+}
+
+type PromptFence = { file: string; line: number; text: string };
+type Section = { file: string; depth: number; title: string };
+
+export function publicPromptFences(root: string, tracked: ReadonlySet<string>, section?: Section): PromptFence[] {
+  const prompts: PromptFence[] = [];
+  for (const file of publicPages(tracked)) {
+    if ((section && section.file !== file) || !isTrackedFile(root, tracked, file)) continue;
+    const page = parser.parse(readFileSync(join(root, file), "utf8"));
+    let included = !section;
+    for (const block of page.children ?? []) {
+      if (section && block.type === "heading" && block.depth !== undefined && block.depth <= section.depth)
+        included = block.depth === section.depth && textOf(block) === section.title;
+      if (included)
+        visit(block, (node) => {
+          if (node.type === "code" && node.lang === "text" && node.meta === "prompt")
+            prompts.push({ file, line: lineOf(node), text: node.value ?? "" });
+        });
+    }
+  }
+  return prompts;
+}
+
+export function checkDocs(root: string, tracked: ReadonlySet<string>): string[] {
   const violations: Violation[] = [];
   const seen = new Set<string>();
   const add = (file: string, line: number, message: string) => {
@@ -190,7 +249,7 @@ export function checkDocs(root: string): string[] {
       .map(({ file, line, message }) => `${file}:${line}: ${message}`);
 
   const manifestPath = join(root, MANIFEST);
-  if (!isFile(manifestPath)) {
+  if (!isTrackedFile(root, tracked, MANIFEST)) {
     add(MANIFEST, 1, "the manifest is missing");
     return finish();
   }
@@ -234,6 +293,7 @@ export function checkDocs(root: string): string[] {
 
   const ids = new Set<string>();
   const paths = new Set<string>();
+  const expected = publicPages(tracked);
   if (Array.isArray(manifest.pages)) {
     manifest.pages.forEach((page: unknown, index: number) => {
       const base = `pages.${index}`;
@@ -255,6 +315,11 @@ export function checkDocs(root: string): string[] {
           path.startsWith("/") ? ["must not start with /"] : [],
         );
         if (problems.length > 0) manifestViolation(`${base}.path`, `"path" ${problems.join(" and ")}`);
+        else if (
+          path.includes("\\") ||
+          (path !== "usage.md" && path !== "setup.md" && !SETUP_PAGE.test(`docs/${path}`))
+        )
+          manifestViolation(`${base}.path`, `"${path}" is not a canonical public page path`);
         else if (paths.has(path)) manifestViolation(`${base}.path`, `duplicate page path "${path}"`);
         else {
           paths.add(path);
@@ -276,6 +341,7 @@ export function checkDocs(root: string): string[] {
           manifestViolation(`${base}.description`, '"description" must not contain a line break');
         if (!description.endsWith("."))
           manifestViolation(`${base}.description`, '"description" must end with a period');
+        if (/[.!?]\s/.test(description)) manifestViolation(`${base}.description`, '"description" must be one sentence');
       }
     });
   }
@@ -320,59 +386,64 @@ export function checkDocs(root: string): string[] {
   }
 
   // Rule 2: the page set.
-  const docs = join(root, "docs");
-  const expected = ["setup.md", "usage.md"];
-  if (existsSync(join(docs, "setup")))
-    for (const name of readdirSync(join(docs, "setup")).sort())
-      if (name.endsWith(".md")) expected.push(`setup/${name}`);
-  for (const path of expected)
-    if (!paths.has(path)) manifestViolation("pages", `docs/${path} is a public page but is not listed`);
+  if (tracked.has("docs/setup")) add("docs/setup", 1, "is not a folder");
+  for (const file of expected)
+    if (!paths.has(file.slice("docs/".length)))
+      manifestViolation("pages", `${file} is a public page but is not listed`);
   for (const { path, index } of listed)
-    if (!isFile(join(docs, path)))
-      manifestViolation(`pages.${index}.path`, `the listed page docs/${path} does not exist`);
+    if (!isTrackedFile(root, tracked, `docs/${path}`))
+      manifestViolation(`pages.${index}.path`, `the listed page docs/${path} is not a tracked file`);
 
   const cache = new Map<string, Page | null>();
   const pageAt = (rel: string): Page | null => {
     if (!cache.has(rel))
-      cache.set(rel, isFile(join(root, rel)) ? readPage(readFileSync(join(root, rel), "utf8")) : null);
+      cache.set(rel, isTrackedFile(root, tracked, rel) ? readPage(readFileSync(join(root, rel), "utf8")) : null);
     return cache.get(rel) ?? null;
   };
-  const inside = (abs: string): boolean => {
-    const rel = relative(root, abs);
-    return !rel.startsWith("..") && !isAbsolute(rel);
-  };
+  const folders = new Set<string>();
+  for (const path of tracked) {
+    let dir = posix.dirname(path);
+    while (!folders.has(dir)) {
+      folders.add(dir);
+      if (dir === ".") break;
+      dir = posix.dirname(dir);
+    }
+  }
 
-  // Resolves a relative URL found in `file`; reports a violation and returns undefined when it fails.
-  const resolveUrl = (file: string, line: number, url: string): { rel: string; fragment: string } | undefined => {
+  const resolveUrl = (file: string, line: number, url: string, image: boolean) => {
+    const scheme = SCHEME.exec(url)?.[0].toLowerCase();
+    if (scheme || url.startsWith("//")) {
+      if (image) add(file, line, `the image "${url}" must have a relative path`);
+      else if (scheme && !["http:", "https:", "mailto:"].includes(scheme))
+        add(file, line, `the link "${url}" has a disallowed URL scheme`);
+      return;
+    }
     const hash = url.indexOf("#");
     const rawPath = (hash < 0 ? url : url.slice(0, hash)).split("?")[0] ?? "";
-    const rawFragment = hash < 0 ? "" : url.slice(hash + 1);
-    if (rawPath.startsWith("/")) {
-      add(file, line, `the link "${url}" must be relative, not start with /`);
-      return undefined;
-    }
     let decoded: string;
-    let fragment: string;
+    let fragment: string | undefined;
     try {
       decoded = decodeURIComponent(rawPath);
-      fragment = decodeURIComponent(rawFragment);
+      if (hash >= 0) fragment = decodeURIComponent(url.slice(hash + 1));
     } catch {
       add(file, line, `the link "${url}" has invalid percent-encoding`);
       return undefined;
     }
-    const abs = decoded === "" ? join(root, file) : resolve(root, dirname(file), decoded);
-    if (!inside(abs) || !existsSync(abs)) {
-      add(file, line, `the link "${url}" does not resolve to a file or folder in the repository`);
-      return undefined;
+    if (decoded.startsWith("/")) {
+      add(file, line, `the link "${url}" must be relative, not start with /`);
+      return;
     }
-    return { rel: relative(root, abs).split(sep).join(posix.sep), fragment };
+    const rel = decoded === "" ? file : posix.join(posix.dirname(file), decoded).replace(/\/$/, "");
+    const folder = folders.has(rel) && isDirectory(root, rel);
+    if (!folder && !isTrackedFile(root, tracked, rel)) {
+      add(file, line, `the target "${url}" is not a tracked file or a folder containing one`);
+      return;
+    }
+    return { rel, fragment, folder };
   };
-
-  const isRelative = (url: string): boolean => !SCHEME.test(url) && !url.startsWith("//");
 
   for (const { path, title } of listed) {
     const file = `docs/${path}`;
-    if (!isFile(join(root, file))) continue;
     const page = pageAt(file);
     if (page === null) continue;
     const { lines } = page;
@@ -400,29 +471,28 @@ export function checkDocs(root: string): string[] {
       bases.add(base);
     }
 
-    const checkUrl = (line: number, url: string) => {
-      if (!isRelative(url)) return;
-      const target = resolveUrl(file, line, url);
-      if (target === undefined || target.fragment === "") return;
-      if (!target.rel.endsWith(".md")) return;
-      const targetPage = pageAt(target.rel);
-      if (targetPage !== null && !targetPage.anchors.has(target.fragment))
-        add(file, line, `the link "${url}" has no matching heading anchor in ${target.rel}`);
+    const checkUrl = (line: number, url: string, image = false) => {
+      const target = resolveUrl(file, line, url, image);
+      if (image && target && (target.folder || !target.rel.startsWith("docs/images/") || !target.rel.endsWith(".png")))
+        add(file, line, `the image "${url}" must be a .png file in docs/images/`);
+      if (target?.fragment === undefined) return;
+      if (target.folder) add(file, line, `the link "${url}" cannot have a fragment on a folder`);
+      else if (target.rel.endsWith(".md")) {
+        if (target.fragment && !pageAt(target.rel)?.anchors.has(target.fragment))
+          add(file, line, `the link "${url}" has no matching heading anchor in ${target.rel}`);
+      } else if (!validLineFragment(join(root, target.rel), target.fragment))
+        add(file, line, `the link "${url}" needs a valid line fragment in ${target.rel}`);
     };
-    const checkImage = (line: number, alt: string | null | undefined, src: string) => {
+    const checkImage = (line: number, alt: string | null | undefined, src: string | undefined) => {
       if (alt === null || alt === undefined || alt.trim() === "") add(file, line, "an image needs alt text");
-      if (!isRelative(src)) return add(file, line, `the image "${src}" must have a relative path`);
-      if (src.startsWith("/")) return;
-      const abs = resolve(root, dirname(file), decodeSafe(src.split("#")[0] ?? ""));
-      const images = join(docs, "images");
-      if (!abs.startsWith(images + sep) || !abs.endsWith(".png"))
-        add(file, line, `the image "${src}" must be a .png file in docs/images/`);
+      if (src !== undefined) checkUrl(line, src, true);
     };
 
     visit(page.root, (node) => {
       const line = lineOf(node);
-      if (node.type === "link" || node.type === "definition" || node.type === "image") checkUrl(line, node.url ?? "");
-      if (node.type === "image") checkImage(line, node.alt, node.url ?? "");
+      if (node.type === "link" || node.type === "definition") checkUrl(line, node.url ?? "");
+      if (node.type === "image") checkImage(line, node.alt, node.url);
+      if (node.type === "imageReference") checkImage(line, node.alt, page.definitions.get(node.identifier ?? ""));
 
       // Rule 6: fences.
       if (node.type === "code") {
@@ -442,7 +512,10 @@ export function checkDocs(root: string): string[] {
 
       // Rule 7 and the img parts of rules 5 and 8: raw HTML.
       if (node.type === "html") {
-        const fragment = parse5.parseFragment(node.value ?? "", { sourceCodeLocationInfo: true });
+        const html = node.value ?? "";
+        if (/<(?=[a-zA-Z/!?])(?!(?:p>|\/p>|img[\s/>]))/.test(html))
+          add(file, line, "raw HTML contains a disallowed tag");
+        const fragment = parse5.parseFragment(html, { sourceCodeLocationInfo: true });
         const lineIn = (child: Parse5Node) => line + (child.sourceCodeLocation?.startLine ?? 1) - 1;
         const walk = (children: Parse5Node[]) => {
           for (const child of children) {
@@ -459,11 +532,7 @@ export function checkDocs(root: string): string[] {
               if (extra.length > 0)
                 add(file, lineIn(child), `an img element may not have the attribute ${extra.join(", ")}`);
               if (!attrs.has("src") || !attrs.has("alt")) add(file, lineIn(child), "an img element needs src and alt");
-              const src = attrs.get("src");
-              if (src !== undefined) {
-                checkUrl(lineIn(child), src);
-                checkImage(lineIn(child), attrs.get("alt"), src);
-              } else if (!attrs.has("alt")) checkImage(lineIn(child), undefined, "images/x.png");
+              checkImage(lineIn(child), attrs.get("alt"), attrs.get("src"));
             } else add(file, lineIn(child), `raw HTML may not use the element ${child.tagName ?? child.nodeName}`);
           }
         };
@@ -474,12 +543,12 @@ export function checkDocs(root: string): string[] {
 
   // Rule 9: screenshots.
   for (const { file, width, height, index } of shots) {
-    const path = join(docs, file);
-    if (!isFile(path)) {
-      manifestViolation(`screenshots.${index}.file`, `the screenshot docs/${file} does not exist`);
+    const path = `docs/${file}`;
+    if (!isTrackedFile(root, tracked, path)) {
+      manifestViolation(`screenshots.${index}.file`, `the screenshot docs/${file} is not a tracked file`);
       continue;
     }
-    const size = pngSize(path);
+    const size = pngSize(join(root, path));
     if (typeof size === "string") manifestViolation(`screenshots.${index}.file`, `docs/${file} ${size}`);
     else {
       if (typeof width === "number" && size.width !== width)
@@ -498,10 +567,14 @@ export function checkDocs(root: string): string[] {
   return finish();
 }
 
-function decodeSafe(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+function validLineFragment(path: string, fragment: string): boolean {
+  const range = /^L(\d+)(?:-L(\d+))?$/.exec(fragment);
+  if (!range) return false;
+  const start = Number(range[1]);
+  const end = Number(range[2] ?? start);
+  if (start < 1 || end < start) return false;
+  const text = readFileSync(path, "utf8");
+  const lines = text.split(/\r\n|\n|\r/);
+  const count = lines.at(-1) === "" ? lines.length - 1 : lines.length;
+  return end <= count;
 }

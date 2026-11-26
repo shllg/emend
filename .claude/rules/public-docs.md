@@ -13,8 +13,10 @@ paths:
 
 `docs/setup.md`, every `docs/setup/*.md` and `docs/usage.md` are public pages. The website copies
 them and the images from the newest `vX.Y.Z` tag on the release branch. It owns its navigation,
-URLs, layout and prompts. `test/docs-contract.test.ts` holds the rules below; run it after any
-change here.
+URLs, layout and prompts. `test/docs-contract.test.ts` checks the manifest, the page set, the H1 and
+lead, heading slugs, links and fragments, fence info strings, the `$` prompt in `sh` fences, prompt
+markers, raw HTML, images and screenshot sizes. Run it after any change here. The other rules below
+are for authors and reviewers.
 
 ## Manifest `docs/site.json`
 
@@ -38,6 +40,8 @@ change here.
 - Setup steps stay `## N. Title` headings. A page that undoes its setup has exactly one `## Undo`.
 - Links between docs pages are relative paths with fragments, for example `setup/local.md#undo`.
   Links to files that are not public pages are fine; the website points them at GitHub.
+- Only tracked files count: the website copies the tag, so a link to an untracked, ignored or
+  symlinked file fails.
 - Every code fence has an info string: `sh` for commands the reader types (one per line, no `$`
   prompt, no output), `text` for output and other text only shown, the file's language for config.
 - A fence that holds a prompt the reader pastes into an agent has the info string `text prompt`,

@@ -1,9 +1,21 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "vitest";
-import { checkDocs } from "./docs-contract.ts";
+import { integrations } from "../apps/web/src/lib/integrations.ts";
+import { themeSkillPrompt, UNRELEASED_VERSION } from "../apps/web/src/lib/theme-skill.ts";
+import { checkDocs, publicPromptFences } from "./docs-contract.ts";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const fence = "```";
@@ -79,7 +91,7 @@ const validFiles = (): Files => ({
   "docs/images/review-desktop.png": png(100, 50),
 });
 
-function check(change: (files: Files) => void = () => {}): string[] {
+function fixture(change: (files: Files) => void = () => {}): string {
   const files = validFiles();
   change(files);
   const root = mkdtempSync(join(tmpdir(), "docs-contract-"));
@@ -88,7 +100,26 @@ function check(change: (files: Files) => void = () => {}): string[] {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), content);
   }
-  return checkDocs(root);
+  return root;
+}
+
+function fixtureFiles(root: string): Set<string> {
+  const tracked = new Set<string>();
+  function walk(dir: string) {
+    for (const name of readdirSync(join(root, dir))) {
+      const path = dir ? `${dir}/${name}` : name;
+      const stat = lstatSync(join(root, path));
+      if (stat.isDirectory()) walk(path);
+      else if (stat.isFile()) tracked.add(path);
+    }
+  }
+  walk("");
+  return tracked;
+}
+
+function check(change?: (files: Files) => void): string[] {
+  const root = fixture(change);
+  return checkDocs(root, fixtureFiles(root));
 }
 
 const put = (path: string, content: string | Buffer) => (files: Files) => {
@@ -109,9 +140,77 @@ const page = (path: string, change: (text: string) => string) => (files: Files) 
   files[path] = change(String(files[path]));
 };
 
+const index = execFileSync("git", ["ls-files", "-s", "-z"], {
+  cwd: repo,
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "inherit"],
+});
+const tracked = new Set(
+  index
+    .split("\0")
+    .filter((record) => /^(100644|100755) /.test(record))
+    .map((record) => record.slice(record.indexOf("\t") + 1)),
+);
+
 test("the repository's public docs follow the contract", () => {
-  const violations = checkDocs(repo);
+  const violations = checkDocs(repo, tracked);
   expect(violations, violations.join("\n")).toEqual([]);
+});
+
+const themePrefix = themeSkillPrompt(UNRELEASED_VERSION);
+const themes = { file: "docs/usage.md", depth: 3, title: "Themes" };
+
+function unknownPrompts(root: string, files: ReadonlySet<string>): string[] {
+  return publicPromptFences(root, files)
+    .filter(
+      ({ text }) =>
+        !text.startsWith("Rules:") &&
+        !text.startsWith(themePrefix) &&
+        !integrations.some((entry) => entry.prompt === text),
+    )
+    .map(({ file, line }) => `${file}:${line}: unexpected text prompt fence`);
+}
+
+test("every marked repository prompt matches a setup, integration or theme prompt", () => {
+  expect(unknownPrompts(repo, tracked)).toEqual([]);
+});
+
+test("the Themes section of usage.md has exactly one marked prompt starting with the theme skill prompt", () => {
+  const prompts = publicPromptFences(repo, tracked, themes);
+  expect(prompts, "docs/usage.md must have one text prompt fence under ### Themes").toHaveLength(1);
+  const [prompt] = prompts;
+  expect(
+    prompt?.text.startsWith(themePrefix),
+    `docs/usage.md:${prompt?.line}: theme prompt differs from the skill prompt`,
+  ).toBe(true);
+});
+
+test("marked output is reported and a theme prompt under the next heading is outside Themes", () => {
+  const root = fixture(
+    put(
+      "docs/usage.md",
+      [
+        "# Using",
+        "",
+        "Lead.",
+        "",
+        "### Themes",
+        "",
+        `${fence}text prompt`,
+        "some output",
+        fence,
+        "",
+        "## Next",
+        "",
+        `${fence}text prompt`,
+        `${themePrefix}my theme`,
+        fence,
+      ].join("\n"),
+    ),
+  );
+  const files = fixtureFiles(root);
+  expect(unknownPrompts(root, files)).toEqual(["docs/usage.md:7: unexpected text prompt fence"]);
+  expect(publicPromptFences(root, files, themes)).toEqual([{ file: "docs/usage.md", line: 7, text: "some output" }]);
 });
 
 test("a valid docs tree has no violations", () => {
@@ -229,7 +328,9 @@ test("a public page that the manifest does not list is reported", () => {
 
 test("a listed page that does not exist is reported at its manifest entry", () => {
   const found = check(drop("docs/usage.md"));
-  expect(found).toEqual(expect.arrayContaining(["docs/site.json:18: the listed page docs/usage.md does not exist"]));
+  expect(found).toEqual(
+    expect.arrayContaining(["docs/site.json:18: the listed page docs/usage.md is not a tracked file"]),
+  );
 });
 
 test("front matter is refused", () => {
@@ -271,9 +372,7 @@ test("a repeated slug stays refused even when a numbered link would resolve", ()
 
 test("a relative link to a missing file is refused", () => {
   const found = check(edit("docs/setup.md", "(usage.md)", "(missing.md)"));
-  expect(found).toEqual([
-    'docs/setup.md:3: the link "missing.md" does not resolve to a file or folder in the repository',
-  ]);
+  expect(found).toEqual(['docs/setup.md:3: the target "missing.md" is not a tracked file or a folder containing one']);
 });
 
 test("a link with a leading slash is refused", () => {
@@ -296,13 +395,32 @@ test("a fragment link into the page itself must match a heading", () => {
 test("a link that leaves the repository is refused", () => {
   const found = check(edit("docs/setup.md", "(usage.md)", "(../../outside.md)"));
   expect(found).toEqual([
-    'docs/setup.md:3: the link "../../outside.md" does not resolve to a file or folder in the repository',
+    'docs/setup.md:3: the target "../../outside.md" is not a tracked file or a folder containing one',
   ]);
 });
 
-test("absolute URLs and mailto links are not checked", () => {
-  const found = check(edit("docs/setup.md", "(usage.md)", "(https://example.com/x#y) or <mailto:a@example.com>"));
-  expect(found).toEqual([]);
+test("only HTTP, HTTPS and mailto schemes are accepted on links and definitions", () => {
+  const found = check(
+    put(
+      "docs/usage.md",
+      [
+        "# Using",
+        "",
+        "See [one](HTTP://example.com), [two](https://example.com/x#y) and <MAILTO:a@example.com>.",
+        "",
+        "[three](javascript:example)",
+        "",
+        "[four]: DATA:example",
+        "",
+        "[five](vbscript:example)",
+      ].join("\n"),
+    ),
+  );
+  expect(found).toEqual([
+    'docs/usage.md:5: the link "javascript:example" has a disallowed URL scheme',
+    'docs/usage.md:7: the link "DATA:example" has a disallowed URL scheme',
+    'docs/usage.md:9: the link "vbscript:example" has a disallowed URL scheme',
+  ]);
 });
 
 test("a code block without an info string is refused", () => {
@@ -332,9 +450,15 @@ test("an sh fence line that starts with a dollar prompt is refused", () => {
 
 test("raw HTML comments, other elements and loose text are refused", () => {
   const comment = check(page("docs/usage.md", (text) => `${text}\n<!-- note -->\n`));
-  expect(comment).toEqual(["docs/usage.md:7: raw HTML may not hold comments"]);
+  expect(comment).toEqual([
+    "docs/usage.md:7: raw HTML contains a disallowed tag",
+    "docs/usage.md:7: raw HTML may not hold comments",
+  ]);
   const element = check(page("docs/usage.md", (text) => `${text}\n<div>x</div>\n`));
-  expect(element).toEqual(["docs/usage.md:7: raw HTML may not use the element div"]);
+  expect(element).toEqual([
+    "docs/usage.md:7: raw HTML contains a disallowed tag",
+    "docs/usage.md:7: raw HTML may not use the element div",
+  ]);
   const attribute = check(page("docs/usage.md", (text) => `${text}\n<p class="x">y</p>\n`));
   expect(attribute).toEqual(
     expect.arrayContaining([
@@ -374,7 +498,7 @@ test("an image outside docs/images or that is not a PNG is refused", () => {
 test("an image that does not exist is refused", () => {
   const found = check(edit("docs/setup.md", "images/review-desktop.png", "images/gone.png"));
   expect(found).toEqual([
-    'docs/setup.md:7: the link "images/gone.png" does not resolve to a file or folder in the repository',
+    'docs/setup.md:7: the target "images/gone.png" is not a tracked file or a folder containing one',
   ]);
 });
 
@@ -394,6 +518,166 @@ test("a screenshot that is not a PNG is refused", () => {
 test("a screenshot file that does not exist is refused", () => {
   const found = check(drop("docs/images/review-desktop.png"));
   expect(found).toEqual(
-    expect.arrayContaining(["docs/site.json:25: the screenshot docs/images/review-desktop.png does not exist"]),
+    expect.arrayContaining(["docs/site.json:25: the screenshot docs/images/review-desktop.png is not a tracked file"]),
   );
+});
+
+test("inline, reference and HTML images resolve queries and require alt text and a regular PNG target", () => {
+  const found = check((files) => {
+    files["docs/usage.md"] = [
+      "# Using",
+      "",
+      "Lead.",
+      "",
+      "![Review](images/review-desktop.png?v=1)",
+      "",
+      '<img src="images/review-desktop.png?v=2" alt="Review">',
+      "",
+      "![Review][Shot]",
+      "",
+      "![ ][folder]",
+      "",
+      "![Wrong file][other]",
+      "",
+      "[shot]: images/review-desktop.png?v=3",
+      "[folder]: images/folder.png",
+      "[other]: setup.md",
+    ].join("\n");
+    files["docs/images/folder.png/child"] = "";
+  });
+  expect(found).toEqual([
+    "docs/usage.md:11: an image needs alt text",
+    'docs/usage.md:11: the image "images/folder.png" must be a .png file in docs/images/',
+    'docs/usage.md:13: the image "setup.md" must be a .png file in docs/images/',
+  ]);
+});
+
+test("disallowed raw tags dropped by the fragment parser are still refused", () => {
+  for (const tag of ["</div>", "<body>", "<!DOCTYPE html>"]) {
+    const found = check(page("docs/usage.md", (text) => `${text}\n<p>\n${tag}\n</p>\n`));
+    expect(found).toContain("docs/usage.md:7: raw HTML contains a disallowed tag");
+  }
+});
+
+test("a link to a symlink is not a tracked file target", () => {
+  const root = fixture(edit("docs/setup.md", "(usage.md)", "(alias.md)"));
+  symlinkSync("usage.md", join(root, "docs/alias.md"));
+  expect(checkDocs(root, fixtureFiles(root))).toEqual([
+    'docs/setup.md:3: the target "alias.md" is not a tracked file or a folder containing one',
+  ]);
+});
+
+test("a tracked target replaced by a symlink in the working tree cannot be read through the index", () => {
+  const root = fixture((files) => {
+    edit("docs/setup.md", "(usage.md)", "(assets/note.md#note)")(files);
+    files["docs/assets/note.md"] = "# Note\n";
+    files["docs/other/note.md"] = "# Note\n";
+  });
+  const files = fixtureFiles(root);
+  const assets = join(root, "docs/assets");
+  rmSync(assets, { recursive: true });
+  symlinkSync("other", assets, "dir");
+  expect(checkDocs(root, files)).toEqual([
+    'docs/setup.md:3: the target "assets/note.md#note" is not a tracked file or a folder containing one',
+  ]);
+});
+
+test("a file outside the tracked set cannot satisfy a link", () => {
+  const root = fixture(edit("docs/setup.md", "(usage.md)", "(local.md)"));
+  const files = fixtureFiles(root);
+  writeFileSync(join(root, "docs/local.md"), "# Local\n");
+  expect(checkDocs(root, files)).toEqual([
+    'docs/setup.md:3: the target "local.md" is not a tracked file or a folder containing one',
+  ]);
+});
+
+test("non-Markdown fragments must name existing lines in a file and folders cannot have fragments", () => {
+  const found = check((files) => {
+    files["docs/sample.txt"] = "one\r\ntwo\r\n";
+    files["docs/usage.md"] = [
+      "# Using",
+      "",
+      "Lead.",
+      "",
+      "[a](sample.txt#L1) [b](sample.txt#L1-L2) [c](setup/)",
+      "",
+      "[d](sample.txt#L3)",
+      "[e](sample.txt#L2-L1)",
+      "[f](sample.txt#L0)",
+      "[g](sample.txt#title)",
+      "[h](setup/#L1)",
+      "[i](setup/#)",
+    ].join("\n");
+  });
+  expect(found).toEqual([
+    ...["L3", "L2-L1", "L0", "title"].map(
+      (fragment, i) =>
+        `docs/usage.md:${7 + i}: the link "sample.txt#${fragment}" needs a valid line fragment in docs/sample.txt`,
+    ),
+    'docs/usage.md:11: the link "setup/#L1" cannot have a fragment on a folder',
+    'docs/usage.md:12: the link "setup/#" cannot have a fragment on a folder',
+  ]);
+});
+
+test("heading anchors omit inline images, reference images and raw tags", () => {
+  const found = check(
+    page("docs/usage.md", (text) =>
+      [
+        text,
+        "## Read![A](images/review-desktop.png)![B][shot]<img src='images/review-desktop.png' alt='C'> it",
+        "",
+        "[here](#read-it)",
+        "",
+        "[shot]: images/review-desktop.png",
+      ].join("\n"),
+    ),
+  );
+  expect(found).toEqual([]);
+});
+
+test("only canonical paths to public pages can be listed in the manifest", () => {
+  for (const path of ["./setup.md", "setup//a.md", "setup\\a.md", "notes.md", "setup/nested/b.md"]) {
+    const found = check((files) => {
+      files["docs/notes.md"] = "# Notes\n\nLead.\n";
+      files["docs/setup/nested/b.md"] = "# Notes\n\nLead.\n";
+      withManifest((value) => value.pages.push({ id: "extra", path, title: "Notes", description: "Notes." }))(files);
+    });
+    expect(found).toEqual([`docs/site.json:24: "${path}" is not a canonical public page path`]);
+  }
+});
+
+test("a description must be a single sentence", () => {
+  for (const description of ["First. Second.", "First! Second.", "First? Second."]) {
+    expect(
+      check(
+        withManifest((value) => {
+          value.pages[0] = { ...value.pages[0], description };
+        }),
+      ),
+    ).toEqual(['docs/site.json:8: "description" must be one sentence']);
+  }
+});
+
+test("the first PNG chunk must have the 13-byte IHDR length", () => {
+  const header = png(100, 50);
+  header.writeUInt32BE(12, 8);
+  expect(check(put("docs/images/review-desktop.png", header))).toEqual([
+    "docs/site.json:25: docs/images/review-desktop.png is not a PNG file (IHDR length must be 13)",
+  ]);
+});
+
+test("a file at docs/setup is reported without enumerating it as a folder", () => {
+  const found = check((files) => {
+    delete files["docs/setup/a.md"];
+    files["docs/setup"] = "";
+  });
+  expect(found).toContain("docs/setup:1: is not a folder");
+});
+
+test("the written contract leaves one shell command per line to authors and reviewers", () => {
+  const root = fixture(edit("docs/setup/a.md", "recense stop", "recense stop && recense start"));
+  expect(checkDocs(root, fixtureFiles(root))).toEqual([]);
+  const rules = readFileSync(join(repo, ".claude/rules/public-docs.md"), "utf8").replace(/\s+/g, " ");
+  expect(rules).toContain("The other rules below are for authors and reviewers.");
+  expect(rules).toContain("Only tracked files count:");
 });
