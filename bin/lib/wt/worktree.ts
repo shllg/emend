@@ -914,7 +914,7 @@ export function gc(repo: Repo, prune: boolean, releaseClaim = releaseOrphanedCla
       }
     }
   }
-  // 4. Findings whose claiming worktree has gone. Re-check ownership and the directory under the findings lock.
+  // 4. Findings whose claiming worktree has gone. Re-check ownership, the directory and its worktree lock.
   const warnings: string[] = [];
   let claimed: ReturnType<typeof listFindings>;
   try {
@@ -932,7 +932,14 @@ export function gc(repo: Repo, prune: boolean, releaseClaim = releaseOrphanedCla
       continue;
     }
     if (!prune) continue;
-    if (releaseClaim(repo, finding.id, finding.claim)) item.state = "released";
+    let locked = false;
+    const released = releaseClaim(repo, finding.id, finding.claim, (path) => {
+      const worktree = resolve(path);
+      locked = listGitWorktrees(repo).some((w) => w.locked && w.path === worktree);
+      return locked;
+    });
+    if (released) item.state = "released";
+    else if (locked) item.state = "locked";
     else {
       item.state = "kept";
       item.why = "claim changed";

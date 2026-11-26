@@ -21,6 +21,7 @@ import {
   branchName,
   type Exit,
   hcAddress,
+  isFixerBranch,
   issueNumber,
   parseFlags,
   readFileBytes,
@@ -781,10 +782,10 @@ function spawnTask(o: SpawnOptions, clock: SpawnClock): number | { ids: string[]
   if (o.issue !== undefined) throw new WtError(2, "Give either --issue or --findings.");
   if (o.slug === undefined) throw new WtError(2, "--findings requires --slug.");
   if (o.mode !== "github") throw new WtError(2, "A fixer uses the github mode.");
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(o.slug)) throw new WtError(2, "Invalid fixer slug.");
   const date = (clock.date?.() ?? new Date()).toISOString().slice(0, 10).replaceAll("-", "");
-  const branch = branchName(`${BRANCH_PREFIX}fix-${date}-${o.slug}`);
-  return { ids: checkedFindingIds(o.findings), slug: o.slug, branch };
+  const branch = `${BRANCH_PREFIX}fix-${date}-${o.slug}`;
+  if (!isFixerBranch(branch)) throw new WtError(2, "Invalid fixer slug.");
+  return { ids: checkedFindingIds(o.findings), slug: o.slug, branch: branchName(branch) };
 }
 
 function pickFindings(repo: Repo, ids: string[]): BundleFinding[] {
@@ -1004,14 +1005,19 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
       claimFindings(repo, ids, { branch, worktree: wt.path });
     } catch (e) {
       const wtBin = quote(join(repo.mainRoot, "bin", "wt"));
+      const refused = e instanceof Error && e.message.endsWith("Nothing was changed.");
       const lines = [
         e instanceof WtError ? e.message : "Claiming findings failed.",
-        `A failed write can leave some of these findings claimed: ${ids.join(", ")}.`,
+        refused
+          ? "The findings were not claimed by this run."
+          : `A failed write can leave some of these findings claimed: ${ids.join(", ")}.`,
         ...ids.map((id) => `Check each with: ${wtBin} findings show ${id}`),
-        "Include only ids claimed by this branch in the release command.",
-        `Release any claimed by ${branch} with: ${wtBin} findings release ${ids.join(" ")}`,
-        existsReport(repo, branch, wt.path),
       ];
+      if (!refused) {
+        lines.push("Include only ids claimed by this branch in the release command.");
+        lines.push(`Release any claimed by ${branch} with: ${releaseCommand(wt.path, wtBin, ids)}`);
+      }
+      lines.push(existsReport(repo, branch, wt.path));
       throw new WtError(e instanceof WtError ? e.code : 1, lines.join("\n"));
     }
   }
@@ -1151,6 +1157,10 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
   return result(state);
 }
 
+function releaseCommand(path: string, quotedWt: string, ids: string[]): string {
+  return `cd ${quote(path)} && ${quotedWt} findings release ${ids.map(quote).join(" ")}`;
+}
+
 /** What exists after setup and the owner's cleanup commands. Never run automatically. */
 function existsReport(repo: Repo, branch: string, path: string, claims?: string[]): string {
   const wt = quote(join(repo.mainRoot, "bin", "wt"));
@@ -1159,7 +1169,7 @@ function existsReport(repo: Repo, branch: string, path: string, claims?: string[
     `Optional teardown: ${wt} cleanup ${branch}`,
   ];
   if (claims) {
-    const release = `${wt} findings release ${claims.join(" ")}`;
+    const release = releaseCommand(path, wt, claims);
     lines.push(`Findings ${claims.join(", ")} stay claimed by ${branch}. Release them with: ${release}`);
   }
   lines.push("This does not end the herdr workspace or terminal.");

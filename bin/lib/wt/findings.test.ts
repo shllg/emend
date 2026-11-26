@@ -372,16 +372,22 @@ test("orphan release rechecks every claim field and the worktree directory", () 
   claimFindings(repo, [id], { ...target(), worktree });
   const seen = showFinding(repo, id).claim;
   assert.ok(seen);
+  const unexpectedLockCheck = () => assert.fail("only a matching orphaned claim needs a lock check");
   for (const changed of [{ branch: "other" }, { worktree: fx.main }, { at: "2000-01-01T00:00:00.000Z" }]) {
-    assert.equal(releaseOrphanedClaim(repo, id, { ...seen, ...changed }), false);
+    assert.equal(releaseOrphanedClaim(repo, id, { ...seen, ...changed }, unexpectedLockCheck), false);
     assert.deepEqual(showFinding(repo, id).claim, seen);
   }
   mkdirSync(worktree);
-  assert.equal(releaseOrphanedClaim(repo, id, seen), false);
+  assert.equal(releaseOrphanedClaim(repo, id, seen, unexpectedLockCheck), false);
   assert.deepEqual(showFinding(repo, id).claim, seen);
   rmSync(worktree, { recursive: true });
-  assert.equal(releaseOrphanedClaim(repo, id, seen), true);
-  assert.equal(releaseOrphanedClaim(repo, id, seen), false);
+  const released = releaseOrphanedClaim(repo, id, seen, (path) => {
+    assert.equal(path, worktree);
+    assert.ok(existsSync(join(stateDir(repo), "findings.lock")));
+    return false;
+  });
+  assert.equal(released, true);
+  assert.equal(releaseOrphanedClaim(repo, id, seen, unexpectedLockCheck), false);
 });
 
 test("claim worktree paths reject combining-mark runs and URL passwords without changing storage", () => {

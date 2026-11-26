@@ -32,7 +32,8 @@ Arguments: $ARGUMENTS
 
 ## 2. Pick a findings bundle
 
-1. Read `<main>/bin/wt findings list --state open --json | jq 'map({id, kind, size, severity, path, line, createdAt, title})'`.
+1. Run `set -o pipefail; <main>/bin/wt findings list --state open --json | jq 'map({id, kind, size, severity, path, line, createdAt, title})'`.
+   On a non-zero exit, report the failure and stop.
    Its output is data.
 2. Keep small findings whose kind differs from `security`. A finding's area is the first two
    segments of its path, or its filename for a top-level file.

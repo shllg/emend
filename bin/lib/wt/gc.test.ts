@@ -77,13 +77,30 @@ test("gc keeps a locked worktree's claim when its directory is missing", () =>
     }
   }));
 
+test("gc keeps a claim when the worktree is locked after the scan", () =>
+  scenario(({ repo, fx }) => {
+    const branch = "returning-worker";
+    const worktree = join(fx.env.root, branch);
+    gitIn(fx.main, "worktree", "add", "--quiet", "-b", branch, worktree, "main");
+    const gitDir = gitIn(worktree, "rev-parse", "--absolute-git-dir");
+    const id = claim(repo, branch, worktree);
+    rmSync(worktree, { recursive: true });
+    const before = showFinding(repo, id);
+    const pruned = gc(repo, true, (repo, id, seen, isLocked) => {
+      writeFileSync(join(gitDir, "locked"), "temporarily unmounted\n");
+      return releaseOrphanedClaim(repo, id, seen, isLocked);
+    });
+    assert.deepEqual(pruned.items, [{ kind: "orphaned-claim", name: id, state: "locked" }]);
+    assert.deepEqual(showFinding(repo, id), before);
+  }));
+
 test("gc keeps a claim that changed after the scan", () =>
   scenario(({ repo, fx }) => {
     const id = claim(repo, "first-worker", join(fx.env.root, "gone"));
-    const pruned = gc(repo, true, (repo, id, seen) => {
+    const pruned = gc(repo, true, (repo, id, seen, isLocked) => {
       releaseFindings(repo, [id]);
       claimFindings(repo, [id], { branch: "next-worker", worktree: fx.main });
-      return releaseOrphanedClaim(repo, id, seen);
+      return releaseOrphanedClaim(repo, id, seen, isLocked);
     });
     assert.deepEqual(pruned.items, [{ kind: "orphaned-claim", name: id, state: "kept", why: "claim changed" }]);
     assert.equal(showFinding(repo, id).claim?.branch, "next-worker");

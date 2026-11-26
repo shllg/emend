@@ -34,6 +34,7 @@ local `main` as one signed commit. The owner pushes `main` later.
 1. Run `git status --short` and `git symbolic-ref --quiet --short HEAD`. The branch is not `main`, the
    session runs in a worktree under `<main>/.claude/worktrees/`, and the tree is clean. When
    `.wt/worktree.json` names an issue, stop: issue branches land only through a PR (`/e-pr`).
+   If `.wt/worktree.json` has `findings`, stop. A findings bundle lands only through a PR. Use `/e-pr`.
    `git ls-files -- .wt` must print nothing: the review folder holds local feedback files.
 2. `pnpm verify` must be green at exactly this HEAD. Run it unless a green run on this HEAD is on record.
 3. Get the commit: `git rev-parse HEAD`.

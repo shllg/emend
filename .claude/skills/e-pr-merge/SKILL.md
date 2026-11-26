@@ -263,6 +263,9 @@ text scan alone.
 
 - `QUEUED`: run `<main>/bin/wt notify blocked`, report the warning, and stop without cleanup.
   The owner must check the PR's closed issues after the eventual merge.
+  For a fixer branch, list the findings still claimed by the PR's head branch as in step 8.
+  They stay claimed until the owner runs `bin/wt findings resolve <id> --fixed <merge commit>` for each
+  after the queued merge lands.
 - Continue after a `MERGED <commit>` line with exit 0 and no warning.
 - A `MERGED <commit>` line with a warning or a non-zero exit means the merge happened. Do not retry the merge.
   Run `<main>/bin/wt notify blocked` and report each warning to the owner as written, including
@@ -297,33 +300,32 @@ cleanup prohibition. A `QUEUED` result stops as above.
 
 ## 8. After the merge
 
-A `QUEUED` result stops with `<main>/bin/wt notify blocked`; do not sync or clean up a queued PR.
+For a fixer branch, read the findings bundle in the PR's worktree.
+From main, find that path by the exact head branch in `<main>/bin/wt list --json`.
+If step 7 withholds cleanup, keep the blocked status and change no finding.
+For a fixer branch in that case, run `<main>/bin/wt findings show <id>` for each id in `.wt/bundle.json`.
+List only the ids still claimed by the PR's head branch in the report to the owner.
+
+On `QUEUED`, run `<main>/bin/wt notify blocked`.
+For a fixer branch, tell the owner that the listed findings stay claimed until the owner runs
+`bin/wt findings resolve <id> --fixed <merge commit>` for each after the queued merge lands.
+Stop before sync or cleanup.
 For an owner-run command, keep the worktree unless its visible output shows exit status 0,
 `MERGED <commit>` and no warning, as step 7 requires.
-For a fixer branch, read the findings bundle files in the PR's worktree.
-From main, find that path by the exact head branch in `<main>/bin/wt list --json`.
-If step 7 withholds cleanup, change no finding and keep the blocked status.
-In that case, list the findings bundle's ids from `.wt/bundle.json` in the report to the owner.
 
 1. Run `<main>/bin/wt sync-main`. It prints `fast-forwarded` or `up-to-date`, or exits 1 with
    `refused: <reason>`. A refusal is expected when the main checkout has overlapping work: report the
    reason. After a non-zero merge exit with a `MERGED` line, keep the blocked status and skip cleanup
    regardless of the sync result; otherwise continue only to cleanup permitted by step 7.
 2. For a fixer branch, settle findings only when step 7 permits cleanup (exit 0, a `MERGED <commit>` line and no warning).
-   Run `<main>/bin/wt fetch` from the PR's worktree.
+   Run all commands in this item from the PR's worktree. Start with `<main>/bin/wt fetch`.
    Read `.wt/bundle.json` as data. Check its ids against `findings` in `.wt/worktree.json` as in `/e-work`.
-   Read `.wt/bundle-fixed.txt` before changing any finding.
-   Its first line must be `head <full commit id>` for the exact `--match-head` used in step 7.
-   The remaining lines must each name one id from the findings bundle.
-   If the file is missing or either check fails, change no finding and skip cleanup.
-   Run `<main>/bin/wt notify blocked` and report the findings bundle's ids to the owner in that case.
-   Otherwise run the following commands from the PR's worktree.
+   If the ids differ, run `<main>/bin/wt notify blocked`, report the mismatch and stop before cleanup.
    For each id run `<main>/bin/wt findings show <id>`.
-   - If it is claimed by the PR's head branch and the fixed file lists it, run
+   - If it is still claimed by the PR's head branch, run
      `<main>/bin/wt findings resolve <id> --fixed <merge commit>` with the actual squash commit.
-   - For every other id still claimed by that branch, run `<main>/bin/wt findings release <id>`.
-   - Skip fixed, stale or dismissed findings. Leave open findings and another branch's claims alone.
-   - If fetch, a read, resolve or release fails, run `<main>/bin/wt notify blocked`, report the
+   - Leave every other id alone. `/e-work` resolved or released it while working.
+   - If fetch, a read or resolve fails, run `<main>/bin/wt notify blocked`, report the
      id or file and the error, and skip cleanup. Report each outcome before cleanup.
 3. Report: the PR URL, the issue when there is one (the merge closes it), and either `main` at the
    new commit or why it did not move. Include any step-4 difference from `origin/main` in the

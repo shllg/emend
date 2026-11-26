@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
 import {
   addFinding,
   claimFindings,
   type FindingInput,
+  findingsDir,
   listFindings,
   releaseFindings,
   showFinding,
@@ -307,7 +308,7 @@ test("spawn --findings refuses a taken finding or branch", () =>
     }),
   ));
 
-test("spawn --findings reports how to check and release claims before writing the brief", () =>
+test("spawn --findings reports a refused claim without a release command", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
@@ -318,12 +319,10 @@ test("spawn --findings reports how to check and release claims before writing th
         await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
           assert.ok(e instanceof WtError);
           const wt = join(repo.mainRoot, "bin/wt");
-          assert.ok(e.message.includes(`A failed write can leave some of these findings claimed: ${ids.join(", ")}.`));
+          assert.match(e.message, /findings were not claimed by this run/);
           for (const id of ids) assert.ok(e.message.includes(`Check each with: ${wt} findings show ${id}`));
-          const release = `${wt} findings release ${ids.join(" ")}`;
-          assert.ok(e.message.includes(`Release any claimed by ${FIXER_BRANCH} with: ${release}`));
           assert.match(e.message, /Optional teardown:/);
-          assert.doesNotMatch(e.message, /findings were not claimed/);
+          assert.doesNotMatch(e.message, /findings release|stay claimed|failed write/);
           return true;
         });
       } finally {
@@ -336,6 +335,28 @@ test("spawn --findings reports how to check and release claims before writing th
     }),
   ));
 
+test("spawn --findings scopes the release command to its worktree after an uncertain claim failure", () =>
+  scenario({}, ({ env, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
+      setBeforeWorktreeAddHookForTests(() => rmSync(join(findingsDir(repo), `${id}.json`)));
+      try {
+        await assert.rejects(spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
+          assert.ok(e instanceof WtError);
+          assert.match(e.message, /Unknown finding\./);
+          const wt = join(repo.mainRoot, "bin/wt");
+          assert.ok(e.message.includes(`Check each with: ${wt} findings show ${id}`));
+          const release = `cd ${join(repo.worktreesDir, FIXER_BRANCH)} && ${wt} findings release ${id}`;
+          assert.ok(e.message.includes(`Release any claimed by ${FIXER_BRANCH} with: ${release}`));
+          return true;
+        });
+      } finally {
+        setBeforeWorktreeAddHookForTests(null);
+      }
+    }),
+  ));
+
 test("spawn --findings keeps claims after a workspace failure", () =>
   scenario({}, ({ env, repo }) =>
     inHerdr(async () => {
@@ -344,7 +365,8 @@ test("spawn --findings keeps claims after a workspace failure", () =>
       await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
         assert.ok(e instanceof WtError);
         assert.match(e.message, /Optional teardown:/);
-        const release = `${repo.mainRoot}/bin/wt findings release ${ids.join(" ")}`;
+        const path = join(repo.worktreesDir, FIXER_BRANCH);
+        const release = `cd ${path} && ${repo.mainRoot}/bin/wt findings release ${ids.join(" ")}`;
         const notice = `Findings ${ids.join(", ")} stay claimed by ${FIXER_BRANCH}. Release them with: ${release}`;
         assert.ok(e.message.includes(notice));
         return true;

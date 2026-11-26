@@ -990,7 +990,7 @@ test("land refuses issue branches before creating a commit, even without closing
 test("land refuses fixer branches without findings metadata", () =>
   scenario(({ env, fx, repo }) => {
     const wt = join(env.root, "unregistered-fixer");
-    gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-fix-20260103-readme", wt, "main");
+    gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-fix-20261126-bin-lib", wt, "main");
     const main = gitIn(fx.main, "rev-parse", "main");
     const head = commitFile(wt, "a.txt", "a\n");
     assert.throws(() => land(repo, wt, "fix: a", "", head), {
@@ -999,6 +999,16 @@ test("land refuses fixer branches without findings metadata", () =>
     });
     assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
     assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+  }));
+
+test("land accepts an ordinary branch starting with recense-fix-", () =>
+  scenario(({ env, fx, repo }) => {
+    const branch = "recense-fix-login-typo";
+    const wt = worktree(repo, branch);
+    const head = commitFile(wt, "a.txt", "a\n");
+    installFakeRecense(env, head, [approvedReview(branch, head)]);
+    const { commit } = land(resolveRepo(wt), wt, "fix: login typo", "", head);
+    assert.equal(gitIn(fx.main, "rev-parse", "main"), commit);
   }));
 
 for (const [subject, body, message] of [

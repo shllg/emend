@@ -558,14 +558,19 @@ function reopened(finding: Finding): Finding {
   return { ...finding, state: "open" };
 }
 
-export function releaseOrphanedClaim(repo: Repo, id: string, seen: NonNullable<Finding["claim"]>): boolean {
+export function releaseOrphanedClaim(
+  repo: Repo,
+  id: string,
+  seen: NonNullable<Finding["claim"]>,
+  isLocked: (worktree: string) => boolean,
+): boolean {
   findingId(id);
   return mutate(repo, () => {
     const finding = readFindingIfPresent(repo, id);
     const claim = finding?.claim;
     if (finding?.state !== "claimed" || !claim) return false;
     if (claim.branch !== seen.branch || claim.worktree !== seen.worktree || claim.at !== seen.at) return false;
-    if (!withOrphaned(finding).orphaned) return false;
+    if (!withOrphaned(finding).orphaned || isLocked(claim.worktree)) return false;
     writeFindings(repo, [reopened(finding)]);
     return true;
   });

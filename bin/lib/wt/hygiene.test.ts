@@ -104,6 +104,13 @@ test("every lifecycle skill exists with a matching name and a description", () =
   }
 });
 
+test("e-work and e-pr use the same private security dismissal reason", () => {
+  for (const name of ["e-work", "e-pr"]) {
+    const skill = readFileSync(join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
+    assert.ok(skill.includes("needs a private security report"), name);
+  }
+});
+
 test("the merge skill checks the approved review for late feedback before restarting the gates", () => {
   const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
   const readiness = skill.slice(skill.indexOf("## 2. Readiness"), skill.indexOf("## 3. The approval"));

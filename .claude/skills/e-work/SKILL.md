@@ -69,6 +69,8 @@ stop.
 Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not restate it here.
 
 1. For a fixer run, first re-check each finding on the worktree's base from local main.
+   Only `bin/wt spawn` claims findings. After spawn, this branch's set of claims can only shrink.
+   Settle findings as you work. Run the following commands from this worktree.
 
    - If a finding turns out to be a security problem, follow the `private` rule in `.claude/rules/review-rounds.md`.
      Run `<main>/bin/wt findings resolve <id> --dismissed "needs a private security report"`.
@@ -77,15 +79,15 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
      Keep its id, title and reason out of all PR text, commits, Follow-ups and issues.
    - Resolve each finding that no longer holds with `<main>/bin/wt findings resolve <id> --stale`.
    - Use `not fixed` only when the fix needs a large change or goes outside the findings bundle's area.
-     List its id and reason under "Follow-ups". The merge releases its claim.
+     Run `<main>/bin/wt findings release <id>` right away. List its id and reason under "Follow-ups".
+   - Fix every other finding and keep it claimed by this branch. Add a test where behaviour changes.
 
    Plan from the remaining findings, the issue's sections, or the description. Read the rule files
    `AGENTS.md` names for the paths you touch. Stay inside the task's scope: a gap or a new idea goes
    into the PR body as a follow-up, never into the change.
-   **Done when for a fixer run.** Resolve stale and private findings as above.
-   Fix every remaining finding that still holds and needs a small change within the findings bundle's area.
-   Add a test where behaviour changes.
-   Use `not fixed` only for a large change or a change outside that area. Give its reason under "Follow-ups".
+   **Done when for a fixer run.** Each finding is fixed by the change and still claimed by this branch,
+   or settled as above (stale, dismissed for a private report, or released with a reason under "Follow-ups").
+   Each behaviour change has a test.
 2. Codex writes the code through `codex-agent`, as `AGENTS.md` says. If Codex cannot run, a Sonnet
    sub-agent writes, and your report says so and why. Commit the checked build as in step 3.
    When the diff from the base to the build commit touches `apps/web/src/`, `apps/web/public/` or
@@ -167,16 +169,18 @@ Commit each logical change as it passes its checks. Do not ask.
 ## 4. Before closing
 
 With an issue, run `<main>/bin/wt issue check` again before step 5; any exit but 0 stops the work
-as in step 1. For a findings bundle, skip the issue check. Write `.wt/bundle-fixed.txt`.
-Its first line is `head <full commit id>` from `git rev-parse HEAD`.
-List only the finding ids fixed by the change at that head, one per line after the head.
-If it fixes none, write only the head line.
+as in step 1. For a findings bundle, skip the issue check.
 
 For a fixer run, if `git rev-list --count main..HEAD` prints `0`, open no PR.
 For each id in `.wt/bundle.json`, read `<main>/bin/wt findings show <id>`.
 Release each finding still claimed by this branch with `<main>/bin/wt findings release <id>`.
 Report each finding's outcome. Run `<main>/bin/wt notify blocked`.
 Tell the owner to remove the worktree with `<main>/bin/wt cleanup <branch>`. End the loop as in step 6.
+
+For a fixer run with commits, run `<main>/bin/wt findings show <id>` for each id in `.wt/bundle.json`.
+Each finding fixed by this change must still be claimed by this branch.
+Each settled finding must be stale, dismissed or open.
+If a read fails or any finding falls outside those outcomes, run `<main>/bin/wt notify blocked` and stop.
 
 `pnpm verify` must be green at exactly this content, and the tree must be clean. An issue PR
 closes its issue on merge.
