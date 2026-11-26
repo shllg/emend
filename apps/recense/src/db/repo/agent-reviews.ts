@@ -127,6 +127,7 @@ export async function listAgentReviews(
         title: reviews.title,
         branch: reviews.branch,
         state: reviews.state,
+        movedToUrl: reviews.movedToUrl,
         updatedAt: reviews.updatedAt,
         newestId: newest.id,
         newestSeq: newest.seq,
@@ -172,7 +173,8 @@ export async function listAgentReviews(
   );
   const diffs = new Map<string, AgentReviewDiff | null>();
   if (query.diff !== "0") {
-    for (const id of new Set(rows.flatMap((row) => [row.newestId, row.approvedId]))) {
+    const revisionIds = rows.flatMap((row) => (row.movedToUrl === null ? [row.newestId, row.approvedId] : []));
+    for (const id of new Set(revisionIds)) {
       if (id === null) continue;
       if (diffs.size) await yieldToLoop("agent-review-diff");
       if (signal?.aborted) break;
@@ -188,7 +190,7 @@ export async function listAgentReviews(
       branch: row.branch,
       state: row.state,
       turn: row.state !== "open" || row.newestId === null ? null : row.newestSent ? "agent" : "reviewer",
-      answerWaiting: Boolean(row.answerWaiting),
+      answerWaiting: row.movedToUrl === null ? Boolean(row.answerWaiting) : null,
       newest:
         row.newestId === null ? null : { revision: row.newestSeq, head: row.newestHead, diff: diffs.get(row.newestId) },
       approved:

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, onTestFinished, test } from "vitest";
-import { pacing } from "../../server/pacing.ts";
+import { expectPaced, observePacingTurns, unitsOf } from "../../server/pacing-test-support.ts";
 import { revisionDiff } from "./agent-reviews.ts";
 
 type Row = Parameters<typeof revisionDiff>[0][number];
@@ -105,27 +105,15 @@ test("a raster with conflicting text and image blobs contributes unexpected", as
 });
 
 test("the digest processes at most 500 diff rows between yields", async () => {
-  const seen = new Set<number>();
+  const log = observePacingTurns();
+  onTestFinished(log.restore);
   const rows = Array.from({ length: 1200 }, (_, i) => ({
     ...row({ path: `file-${i}`, status: "added" }),
     get newBlob() {
-      seen.add(i);
+      log.record("diff-row");
       return newHash;
     },
   }));
-  const checkpoints: number[] = [];
-  const previousProbe = pacing.probe;
-  onTestFinished(() => {
-    pacing.probe = previousProbe;
-  });
-  pacing.probe = (phase) => {
-    if (phase === "agent-review-diff") checkpoints.push(seen.size);
-  };
   expect((await revisionDiff(rows))?.files).toBe(rows.length);
-  expect(seen.size).toBe(rows.length);
-  let previous = 0;
-  for (const count of [...checkpoints, seen.size]) {
-    expect(count - previous).toBeLessThanOrEqual(500);
-    previous = count;
-  }
+  expect(expectPaced(log.events, "agent-review-diff", unitsOf("diff-row"), 500)).toBe(rows.length);
 });

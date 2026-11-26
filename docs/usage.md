@@ -246,6 +246,8 @@ otherwise, or `null` for an approved or retired review or one without a revision
 `answerWaiting` is true while a Send still awaits delivery confirmation and has not been set aside.
 An approval of an older revision counts only while a delivery holds it with a live lease.
 An older server or hub that omits `diff` or `answerWaiting` gives you `null` for that field.
+A local copy of a review moved to a hub reports `null` for both fields because its Sends and
+deliveries now live on the hub.
 
 To check which commit an approval covers, run `recense ls --json --head <sha>` with the full commit
 id (40 or 64 lowercase hex characters). It lists only reviews whose approved or newest revision has
@@ -254,8 +256,15 @@ that head. The publisher supplies the head and branch. To rely on an approval, r
 `branch`. Require `approved.diff.digest` to equal the digest of your change from its merge base
 to `<sha>`, using the rule in [docs/api.md](api.md). A match means the revision held exactly those
 file versions, without proving the reviewer opened each one or checking file modes. Also require
-`answerWaiting` to be `false`.
-An item with `newest.head` equal to `<sha>` and `approved: null` still awaits approval.
+`answerWaiting` to be `false`. A Send after approval does not revoke the approval.
+If your agent already confirmed the approval, confirming the later Send leaves the item approved with
+`answerWaiting: false`. The list cannot tell you whether there was a later Send in this case.
+Check your agent's record of the answers it took through `wait` or `take`.
+Do not merge while any feedback it took is still unhandled.
+When your agent acts on feedback, it publishes a new revision. That clears the approval.
+
+An item with `newest.head` equal to `<sha>` and `approved: null` means the commit is published
+but has no approval on this review.
 Listing reads only, takes no comments and changes nothing.
 
 `recense status` shows whether this machine is `local` or `attached`, the server or hub address,

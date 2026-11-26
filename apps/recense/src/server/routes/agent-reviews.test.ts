@@ -1,7 +1,7 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, Hash, randomUUID } from "node:crypto";
 import { AgentReviewList, LEASE_SECONDS, LIMITS, PublishResponse } from "@recense/contract";
-import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { and, eq } from "drizzle-orm";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Db } from "../../db/client.ts";
 import { listAgentReviews } from "../../db/repo/agent-reviews.ts";
 import {
@@ -21,7 +21,7 @@ import {
 import { createToken, hashSecret } from "../auth/tokens.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
 import { pacing } from "../pacing.ts";
-import { observePacing } from "../pacing-test-support.ts";
+import { expectPaced, observePacing, type PacingEvent, unitsOf } from "../pacing-test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
@@ -245,6 +245,42 @@ async function items(query = "", who: "agent" | "stranger" | "otherAgent" = "age
   return AgentReviewList.parse(await response.json()).items;
 }
 
+const readsFiles = (event: PacingEvent) => event.kind === "statement" && /\bfiles\b/i.test(event.sql);
+
+test("the local copy of a review moved to a hub reports null for answerWaiting and both revision diffs", async () => {
+  await approve(f.reviewId, 1);
+  await f.revision(2);
+  await f.send({ revision: 2, kind: "go", instruction: "Synthetic feedback" });
+  await f.db.query((q) =>
+    q
+      .update(reviews)
+      .set({ movedToUrl: "https://example.com/r/synthetic" })
+      .where(and(eq(reviews.ownerId, f.ownerId), eq(reviews.id, f.reviewId))),
+  );
+  const local = await publishAs("agent", "d", shaA);
+  await approve(local.reviewId, 1);
+  const log = observePacing(f.deps);
+  try {
+    const response = await f.request("/agent/reviews", "GET", undefined, "agent");
+    expect(response.status).toBe(200);
+    const list = (await response.json()) as AgentReviewList;
+    expect(list.items.find((item) => item.id === f.reviewId)).toMatchObject({
+      state: "approved",
+      answerWaiting: null,
+      newest: { revision: 2, diff: null },
+      approved: { revision: 1, diff: null },
+    });
+    expect(list.items.find((item) => item.id === local.reviewId)).toMatchObject({
+      answerWaiting: true,
+      newest: { diff: emptyDiff },
+      approved: { diff: emptyDiff },
+    });
+    expect(log.events.filter(readsFiles)).toHaveLength(1);
+  } finally {
+    log.restore();
+  }
+});
+
 test("a revision containing only a doc reports the empty diff", async () => {
   await seedFiles(f.revisionId, [{ path: "plan.md", role: "doc", newBlob: newHash }]);
   await approve(f.reviewId, 1);
@@ -340,7 +376,7 @@ test("the turn follows a live Send on the newest revision and clears on approval
   expect(sent.status).toBe(201);
   expect(await current()).toMatchObject({ state: "open", turn: "agent" });
   await publishAs("agent", "d", shaB);
-  expect(await current()).toMatchObject({ newest: { revision: 2 }, turn: "reviewer" });
+  expect(await current()).toMatchObject({ newest: { revision: 2 }, turn: "reviewer", answerWaiting: true });
   await approve(first.reviewId, 2);
   expect(await current()).toMatchObject({ state: "approved", turn: null });
 });
@@ -481,25 +517,28 @@ test("an unconfirmed older approval stops waiting when its lease expires", async
   expect((await items())[0]?.answerWaiting).toBe(false);
 });
 
-test("the list yields between revision file queries and skips both queries with diff=0", async () => {
+test("the list yields between revision file queries and skips them with diff=0", async () => {
   await seedFiles(f.revisionId, [{ role: "diff", path: "old", status: "deleted", oldBlob: oldHash }]);
   await approve(f.reviewId, 1);
   await seedFiles(await f.revision(2), [{ role: "diff", path: "new", status: "added", newBlob: newHash }]);
+  await publishAs("agent", "d", shaA);
   const log = observePacing(f.deps);
-  const digestWork = () =>
-    log.events.flatMap((event) => {
-      if (event.kind === "statement" && /\bfiles\b/i.test(event.sql)) return ["files"];
-      if (event.kind === "yield" && event.phase === "agent-review-diff") return ["yield"];
-      return [];
-    });
   try {
-    expect(await items()).toMatchObject([{ newest: { diff: { files: 1 } }, approved: { diff: { files: 1 } } }]);
-    expect(digestWork()).toEqual(["files", "yield", "files"]);
+    expect((await items()).find((row) => row.id === f.reviewId)).toMatchObject({
+      newest: { diff: { files: 1 } },
+      approved: { diff: { files: 1 } },
+    });
+    expect(expectPaced(log.events, "agent-review-diff", (event) => Number(readsFiles(event)), 1)).toBe(3);
     log.events.length = 0;
     const response = await f.request("/agent/reviews?diff=0", "GET", undefined, "agent");
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ items: [{ newest: { diff: null }, approved: { diff: null } }] });
-    expect(digestWork()).toEqual([]);
+    const skipped = (await response.json()) as AgentReviewList;
+    expect(skipped.items.find((row) => row.id === f.reviewId)).toMatchObject({
+      newest: { diff: null },
+      approved: { diff: null },
+    });
+    expect(log.events.filter(readsFiles)).toHaveLength(0);
+    expect(log.events).not.toContainEqual({ kind: "yield", phase: "agent-review-diff" });
   } finally {
     log.restore();
   }
@@ -523,29 +562,39 @@ test.each([false, true])("a large revision yields during digest work and stops o
       ),
     );
   }
-  const previousProbe = pacing.probe;
+  const log = observePacing(f.deps);
+  const update = Hash.prototype.update;
+  const hashSpy = vi.spyOn(Hash.prototype, "update").mockImplementation(function (this: Hash, data, encoding) {
+    // Only revisionDiff hashes buffers here, one per side line. Token lookup hashes a string.
+    if (Buffer.isBuffer(data)) log.record("hashed-line");
+    return update.call(this, data, encoding);
+  });
   const controller = new AbortController();
-  let yields = 0;
-  pacing.probe = (phase) => {
-    if (phase !== "agent-review-diff") return;
-    yields++;
-    if (abort) controller.abort();
-  };
+  if (abort) {
+    const record = pacing.probe;
+    pacing.probe = (phase) => {
+      record?.(phase);
+      if (phase === "agent-review-diff") setImmediate(() => controller.abort());
+    };
+  }
   try {
     const response = await f.request("/agent/reviews", "GET", undefined, "agent", controller.signal);
     expect(response.status).toBe(200);
     const [item] = AgentReviewList.parse(await response.json()).items;
     if (abort) {
       expect(item?.newest?.diff).toBeNull();
-      expect(yields).toBe(1);
+      expect(log.events.filter((event) => event.kind === "yield" && event.phase === "agent-review-diff")).toHaveLength(
+        1,
+      );
+      expect(log.events.filter(unitsOf("hashed-line"))).toHaveLength(0);
     } else {
       const lines = Array.from({ length: total }, (_, i) => `file-${String(i).padStart(4, "0")}.bin\tnew\tbinary\n`);
       expect(item?.newest?.diff).toEqual({ files: total, digest: digest(lines.join("")) });
-      // Each pass yields twice, once at 500 rows or lines and again at 1000.
-      expect(yields).toBe(4);
+      expect(expectPaced(log.events, "agent-review-diff", unitsOf("hashed-line"), 500)).toBe(total);
     }
   } finally {
-    pacing.probe = previousProbe;
+    hashSpy.mockRestore();
+    log.restore();
   }
 });
 

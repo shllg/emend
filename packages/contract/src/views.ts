@@ -107,9 +107,10 @@ export type AgentReviewTurn = z.infer<typeof AgentReviewTurn>;
  * revision, else `reviewer`. It is null when approved, settled or without a revision.
  * `answerWaiting` says whether a Send awaits confirmation and has not been set aside.
  * An older revision's approval counts only while its delivery lease is live.
- * Each revision's `diff` summarizes its code diff, including an empty one, unless the query
- * requests `diff=0`. The null defaults for `turn`, `answerWaiting`
- * and `diff` let clients read lists from older servers or hubs that omit these fields.
+ * Each revision's `diff` summarizes its code diff, including an empty one. A `diff=0` query
+ * skips that summary. A local copy moved to a hub reports null for both `answerWaiting` and `diff`.
+ * The null defaults for `turn`, `answerWaiting` and `diff` let clients read lists from older
+ * servers or hubs that omit these fields.
  */
 export const AgentReviewItem = z.object({
   id: z.uuid(),

@@ -1699,10 +1699,18 @@ Sort the complete lines by their UTF-8 bytes and concatenate them without separa
 lowercase hex SHA-256 of those bytes. With zero lines the digest is
 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
 
-To compute the expected digest from a commit, use the SHA-256 of each side's bytes as its value. Enumerate the sides
-with `git diff-tree -r --no-renames <base> <head>`, since a rename contributes its two paths
-separately. For a committed regular file or symlink, hash the git blob's bytes. For an image side,
-these are the image's bytes. For a submodule (git mode `160000`), publish stores the UTF-8 text
+To compute the expected digest from a commit, use the SHA-256 of each side's bytes as its value.
+Enumerate the sides with `git diff-tree -r -z --no-renames <base> <head>`. A rename contributes
+its two paths separately. Decode every NUL-delimited path as strict UTF-8, preserving any leading
+BOM. If decoding fails or any path fails `FilePath`, the commit cannot match.
+`FilePath` requires a well-formed relative path of at most 4096 UTF-16 code units, with at most
+255 per segment. It rejects drive prefixes, backslashes, control characters (including tabs and
+line feeds), and certain invisible and bidirectional formatting characters. It rejects empty,
+`.` and `..` segments, and segments equal to `.git` or `git~1` after ignoring case and trimming
+trailing dots and spaces.
+
+For a committed regular file or symlink, hash the git blob's bytes. For an image side, these
+are the image's bytes. For a submodule (git mode `160000`), publish stores the UTF-8 text
 `Subproject commit <oid>` followed by a line feed, where `<oid>` is the submodule's commit id.
 Hash that text including the line feed. The markers `unexpected`, `binary` and `oversized`
 cannot equal the 64-character hex SHA-256 of any side's bytes.
@@ -1714,8 +1722,9 @@ An approval of an older revision counts only while a delivery holds it with `con
 and `lease_until >= now`. Take releases expired deliveries and sets unclaimed older approvals aside.
 It is false when no such Send exists. A snoozed or retired review's stop notice does not count.
 For both `answerWaiting` and `diff`, null means the server did not report a value. The schema
-defaults each to null when an older server or hub omits it. If the revision disappears before
-the server reads its files, the server returns `diff: null`.
+defaults each to null when an older server or hub omits it. A local copy of a review moved to a
+hub reports null for both because its Sends and deliveries now live on the hub. If the revision
+disappears before the server reads its files, the server returns `diff: null`.
 
 The query is `AgentReviewQuery = { head?: commit, key?: sha256, diff?: "0" }`.
 `?head=<sha>` keeps only reviews whose approved or newest revision's head equals `<sha>`. The match
@@ -1734,15 +1743,22 @@ the cap. A malformed or repeated `key` is `400 invalid_request`. Capabilities li
 whole list, so a client checks that feature before it relies on the filter.
 
 `?diff=0` returns null for every `newest.diff` and `approved.diff` and skips reading file rows
-for the digest. A repeated `diff` or any value other than `0` is `400 invalid_request`. Older
-servers ignore this parameter and compute the diffs as usual.
+for the digest. A repeated `diff` or any value other than `0` is `400 invalid_request`. A server
+that predates the `diff` field ignores `diff=0` and omits `diff`, which clients parse as `null`.
 
 `head` and `branch` are the values the publisher sent. The server stores both unverified.
 A caller that gates on approval must require a non-null `approved`, `approved.head === sha`, the expected `branch`, and
 `approved.revision === newest.revision` (an import can carry an older approval). It must also
 require a non-null `approved.diff` whose `digest` equals the digest it computes by the rule above
 from its own merge base to `sha`, and `answerWaiting === false`. If either field is null, the
-server did not say and the gate refuses. The server computes the digest from the blob hashes stored
+server did not say and the gate refuses. A Send after approval does not revoke the approval.
+If the agent already confirmed the approval, confirming the later Send leaves the item approved with
+`answerWaiting: false`. The list cannot tell whether there was a later Send in this case.
+The gate must also check its own agent's `wait` or `take` results.
+It must not merge while feedback the agent took is still unhandled.
+When the agent acts on feedback, it publishes a new revision. That clears the approval.
+
+The server computes the digest from the blob hashes stored
 with the revision and checks each blob's hash on upload. A match means the revision stored exactly
 those sides and offered them to the reviewer. It does not prove the reviewer read each one.
 An image side appears as a picture, lockfiles start collapsed, and a side represented by a flag
@@ -1750,7 +1766,7 @@ shows no content. Recense neither stores nor shows file modes or types. A mode-o
 contributes two lines with the same value, and a regular file and a symlink with the same path and
 bytes give the same lines. The publisher still chooses `base`, and a base that
 yields different sides yields a different digest. With `newest.head === sha` and `approved: null`,
-the commit awaits approval.
+the commit is published but has no approval on this review.
 
 This stays on the agent `publish` scope. The list reports the same instance's published branch,
 head and revision number, plus the approval pointer the agent learns through `wait`. The diff
