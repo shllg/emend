@@ -122,6 +122,7 @@ test("e-work reads each claim before its first resolve in build item 1", () => {
 test("e-work records a security finding before dismissing the original", () => {
   const bullet = /^ {3}- [^\n]*security problem.*(?:\n {5}.*)*/m.exec(fixerBuildItem());
   assert.ok(bullet, "missing security bullet");
+  assert.match(bullet[0], /Use the `path` and `line` of the problem at this worktree's `HEAD`/);
   const add = bullet[0].indexOf("<main>/bin/wt findings add --file");
   const dismiss = bullet[0].indexOf("--dismissed");
   assert.ok(add >= 0 && add < dismiss);

@@ -77,9 +77,11 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
 
    - If a finding turns out to be a security problem, follow the `private` rule in `.claude/rules/review-rounds.md`.
      Use the Write tool to create a JSON file under `<top>/.wt/`, where `<top>` is this worktree's root.
-     Copy `title`, `detail`, `path`, `line`, `severity`, `size` and `source` from `findings show`.
+     Copy `title`, `detail`, `severity`, `size` and `source` from `findings show`.
+     Use the `path` and `line` of the problem at this worktree's `HEAD`.
      Include `rule` when present. Set `kind` to `security`.
      Run `<main>/bin/wt findings add --file <file>` from this worktree.
+     If it refuses the path or line, correct the JSON file and retry once.
      Exit 0 or 3 means the security finding is recorded.
      On any other exit, name the failure in the private report and continue with the dismissal.
      Run `<main>/bin/wt findings resolve <id> --dismissed "needs a private security report"`.

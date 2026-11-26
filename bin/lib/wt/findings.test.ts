@@ -603,11 +603,12 @@ test("a linked worktree can resolve its claim as fixed only with a commit on ori
   const id = addFinding(repo, input()).id;
   claimFindings(repo, [id], { branch, worktree });
   const claimed = showFinding(repo, id);
-  const commit = commitFile(worktree, "fix.md", "local fix\n");
-  const resolveFixed = () =>
+  const base = gitIn(worktree, "rev-parse", "HEAD");
+  const localFix = commitFile(worktree, "fix.md", "local fix\n");
+  const resolveFixed = (commit: string) =>
     runWt(join(fx.main, "bin/wt"), ["findings", "resolve", id, "--fixed", commit], { cwd: worktree });
 
-  const local = await resolveFixed();
+  const local = await resolveFixed(localFix);
   assert.equal(local.code, 1, local.stderr);
   assert.equal(
     local.stderr.trim(),
@@ -615,19 +616,30 @@ test("a linked worktree can resolve its claim as fixed only with a commit on ori
   );
   assert.deepEqual(showFinding(repo, id), claimed);
 
+  const contained = await resolveFixed(base);
+  assert.equal(contained.code, 1, contained.stderr);
+  assert.equal(
+    contained.stderr.trim(),
+    "A worktree may resolve a finding as fixed only with its merge commit, which its own branch does not contain. Nothing was changed.",
+  );
+  assert.deepEqual(showFinding(repo, id), claimed);
+
   gitIn(fx.main, "update-ref", "-d", "refs/remotes/origin/main");
-  const missing = await resolveFixed();
+  const missing = await resolveFixed(localFix);
   assert.equal(missing.code, 2, missing.stderr);
   assert.deepEqual(showFinding(repo, id), claimed);
 
-  commitFile(worktree, "later.md", "later change\n");
-  gitIn(worktree, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  gitIn(fx.main, "merge", "--squash", branch);
+  gitIn(fx.main, "commit", "--quiet", "-m", "squash the fix");
+  const mergeCommit = gitIn(fx.main, "rev-parse", "HEAD");
+  commitFile(fx.main, "later.md", "later change\n");
+  gitIn(fx.main, "push", "--quiet", "origin", "main");
   gitIn(fx.main, "fetch", "--quiet", "origin");
-  const merged = await resolveFixed();
+  const merged = await resolveFixed(mergeCommit);
   assert.equal(merged.code, 0, merged.stderr);
   const fixed = showFinding(repo, id);
   assert.equal(fixed.state, "fixed");
-  assert.equal(fixed.resolution?.commit, commit);
+  assert.equal(fixed.resolution?.commit, mergeCommit);
   assert.equal(fixed.claim, undefined);
 });
 
