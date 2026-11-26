@@ -6,7 +6,13 @@ import { reconnectReviewEvents } from "../../lib/event-stream.ts";
 import { getHandoffNotice } from "../../lib/handoff-notices.ts";
 import { shortDate } from "../../lib/time.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
-import { HANDOFF_CLOSE_MS, HANDOFF_REFETCH_MS, HANDOFF_WAIT_MS, type SendAgent } from "./HandOver.tsx";
+import {
+  HANDOFF_ANNOUNCE_MS,
+  HANDOFF_CLOSE_MS,
+  HANDOFF_REFETCH_MS,
+  HANDOFF_WAIT_MS,
+  type SendAgent,
+} from "./HandOver.tsx";
 import type { ReviewLifecycle } from "./ReviewActions.tsx";
 import { SendBar } from "./SendBar.tsx";
 
@@ -341,9 +347,33 @@ test("the phone puts the longer text in the Send sheet, not in the bar", () => {
 
 const sentNotice = () => screen.getByRole("region", { name: "Sent" });
 
+test("the status line starts empty, then receives its text so a screen reader announces it", async () => {
+  mount({ agent: idle });
+  await send();
+  const region = sentNotice().querySelector<HTMLElement>("p[role=status]") as HTMLElement;
+  expect(region.textContent).toBe("");
+  await settle(HANDOFF_ANNOUNCE_MS);
+  expect(region.textContent).toBe(pickedUp);
+  expect(sentNotice().contains(region)).toBe(true);
+});
+
+test("a pick-up that removes the focused resume command moves focus to Close", async () => {
+  const { update } = mount({ agent: idle });
+  await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
+  const copy = within(sentNotice()).getByRole("button", { name: "Copy" });
+  act(() => copy.focus());
+  expect(document.activeElement).toBe(copy);
+  update({ agent: { ...idle, pickedUpAt: "2026-03-05T12:00:00.000Z" } });
+  await settle();
+  expect(within(sentNotice()).queryByRole("button", { name: "Copy" })).toBeNull();
+  expect(document.activeElement).toBe(within(sentNotice()).getByRole("button", { name: "Close" }));
+});
+
 test("with an agent waiting, the notice waits, then confirms the pick-up and closes by itself", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   const notice = sentNotice();
   expect(notice.textContent).toContain("Waiting for the agent to pick this up…");
   expect(screen.getByText("Waiting for the agent to pick this up…").closest('[role="status"]')).toBeTruthy();
@@ -359,6 +389,7 @@ test("with an agent waiting, the notice waits, then confirms the pick-up and clo
 test("with no agent waiting, the notice shows the fallback at once and asks the server once", async () => {
   mount({ agent: idle });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   const notice = sentNotice();
   expect(notice.textContent).toContain(pickedUp);
   expect(notice.textContent).toContain(command);
@@ -389,6 +420,7 @@ test("after 15 seconds without a pick-up the notice refetches once, then shows t
 test("a late pick-up switches the open notice and then closes it", async () => {
   const { update } = mount({ agent: idle });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   expect(screen.getByText(pickedUp)).toBeTruthy();
   update({ agent: { ...idle, pickedUpAt: "2026-03-05T12:00:00.000Z" } });
   expect(screen.getByText("The agent picked up your feedback.")).toBeTruthy();
@@ -445,6 +477,7 @@ test.each([
 ])("the $layout Sent notice occupies the first row of the Send bar", async ({ phone }) => {
   mount({ agent: idle, phone });
   await send(phone);
+  await settle(HANDOFF_ANNOUNCE_MS);
   expect(screen.queryByRole("alertdialog")).toBeNull();
   expect(screen.queryByRole("dialog")).toBeNull();
   const bar = screen.getByRole("region", { name: "Send and approve" });
@@ -541,6 +574,7 @@ test("the fallback shows at 15 seconds even when the refetch never settles", asy
 test("a pick-up is latched: later data never switches the notice back", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: { ...waiting, pickedUpAt: pickedAt } });
   expect(screen.getByText(pickedText)).toBeTruthy();
   // The agent publishes: the revision is newer, pickedUpAt is cleared, a Send is pending again.
@@ -553,6 +587,7 @@ test("a pick-up is latched: later data never switches the notice back", async ()
 test("a newer revision with nothing pending counts as picked up", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: nextRevision(false) });
   expect(screen.getByText(pickedText)).toBeTruthy();
 });
@@ -560,6 +595,7 @@ test("a newer revision with nothing pending counts as picked up", async () => {
 test("a newer revision with the Send still pending does not count as picked up", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: nextRevision(true) });
   expect(screen.queryByText(pickedText)).toBeNull();
   expect(screen.getByText("Waiting for the agent to pick this up…")).toBeTruthy();
@@ -568,6 +604,7 @@ test("a newer revision with the Send still pending does not count as picked up",
 test("the review changing revision while the notice is open leaves it waiting", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: nextRevision(true), revision: 4, newestRevision: 4 });
   expect(sentNotice()).toBeTruthy();
   expect(screen.getByText("Waiting for the agent to pick this up…")).toBeTruthy();
@@ -582,7 +619,7 @@ test("a refetch that lands before the Send response opens the notice already pic
   // The baseline was read at click time: this snapshot differs from it.
   update({ agent: { ...waiting, pickedUpAt: pickedAt } });
   await act(async () => pending.resolve(new Response(null, { status: 201 })));
-  await settle();
+  await settle(HANDOFF_ANNOUNCE_MS);
   expect(sentNotice()).toBeTruthy();
   expect(screen.getByText(pickedText)).toBeTruthy();
 });

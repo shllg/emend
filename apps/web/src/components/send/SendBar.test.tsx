@@ -629,7 +629,7 @@ test.each([
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(instructions.value).toBe(""));
-    expect(screen.getByText(sentText)).toBeTruthy();
+    expect(await screen.findByText(sentText)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(fetchMock).toHaveBeenLastCalledWith(
       `/api/v1/reviews/${reviewId}/sends`,
@@ -707,7 +707,7 @@ test.each([
     await waitFor(() => expect(instructions.disabled).toBe(false));
     await waitFor(() => expect(document.activeElement).toBe(movedFocus ? keepFocus : instructions));
     if (outcome === "success") {
-      expect(screen.getByText(sentText)).toBeTruthy();
+      expect(await screen.findByText(sentText)).toBeTruthy();
       expect(instructions.value).toBe("");
     } else {
       expect(screen.getByRole("alert").textContent).toBe("Synthetic failure");

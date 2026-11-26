@@ -13,7 +13,7 @@ import { type InboxData, inboxQuery, reviewQuery, revisionQuery } from "../../ap
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
 import { formatThreadCounts, threadCounts } from "../status/ThreadStateBadge.tsx";
 import { ToastProvider } from "../ui/Toast.tsx";
-import { HANDOFF_REFETCH_MS, HANDOFF_WAIT_MS } from "./HandOver.tsx";
+import { HANDOFF_ANNOUNCE_MS, HANDOFF_REFETCH_MS, HANDOFF_WAIT_MS } from "./HandOver.tsx";
 import { SendBar } from "./SendBar.tsx";
 
 // No live stream reopens here, as with no subscription.
@@ -402,7 +402,7 @@ test("a network error says the server cannot be reached", async () => {
   await mount();
   mode = "network";
   fireEvent.click(button("Send"));
-  await settle();
+  await settle(HANDOFF_ANNOUNCE_MS);
   expect(screen.getByText(lostText)).toBeTruthy();
 });
 

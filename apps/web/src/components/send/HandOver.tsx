@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
 import {
   closeHandoffNotice,
@@ -24,6 +24,8 @@ export interface SendAgent {
 
 /** How long the notice waits for a pick-up before it asks the server again. */
 export const HANDOFF_WAIT_MS = 15_000;
+/** How long the notice's status line stays empty after it mounts, so a screen reader sees the text arrive. */
+export const HANDOFF_ANNOUNCE_MS = 100;
 const TOO_SLOW = new Error("The review refetch did not finish in time.");
 /** How long the notice's one refetch may take before it counts as a lost connection. */
 export const HANDOFF_REFETCH_MS = 3_000;
@@ -228,13 +230,38 @@ export function SentNotice({
     return () => document.removeEventListener("selectionchange", onSelection);
   }, [held, hold]);
 
+  // A live region announces text that arrives after it exists, not text it was inserted with.
+  // A return to a notice sent a while ago shows its text at once; only a fresh one is announced.
+  const [announced, setAnnounced] = useState(() => performance.now() - sentAt >= HANDOFF_ANNOUNCE_MS);
+  useEffect(() => {
+    if (announced) return;
+    const timer = window.setTimeout(() => setAnnounced(true), HANDOFF_ANNOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [announced]);
+  // When a pick-up removes the focused resume command, focus moves to Close instead of falling to <body>.
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const focusWithin = useRef(false);
+  const showsCommand = !pickedUp && fallback;
+  useLayoutEffect(() => {
+    if (showsCommand || !focusWithin.current) return;
+    const active = document.activeElement;
+    if (!active || active === document.body || !notice.current?.contains(active))
+      closeButton.current?.focus({ preventScroll: true });
+  }, [showsCommand]);
+
   return (
     <section
       aria-label="Sent"
       ref={notice}
-      className="space-y-2 rounded-lg border border-line-1 bg-raised p-3 shadow-3"
+      className="flex max-h-[min(40dvh,max(5rem,calc(100dvh-22rem)))] flex-col border-b border-line-1 bg-sunken px-4 py-2 max-md:py-1"
       onPointerDownCapture={hold}
-      onFocusCapture={hold}
+      onFocusCapture={() => {
+        focusWithin.current = true;
+        hold();
+      }}
+      onBlurCapture={(event) => {
+        if (event.relatedTarget) focusWithin.current = false;
+      }}
       onKeyDownCapture={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -243,22 +270,26 @@ export function SentNotice({
         } else hold();
       }}
     >
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex shrink-0 items-center justify-between gap-3">
         <h2 className="m-0 text-fg-1 [font:var(--type-h3)]">Sent</h2>
-        <Button variant="ghost" size={phone ? "lg" : "sm"} onClick={close}>
+        <Button ref={closeButton} variant="ghost" size={phone ? "lg" : "sm"} onClick={close}>
           Close
         </Button>
       </div>
-      <p role="status" className="m-0 text-fg-2 [font:var(--type-body)]">
-        {pickedUp
-          ? "The agent picked up your feedback."
-          : fallback
-            ? lost
-              ? "recense cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below."
-              : "No agent has picked this up yet. recense keeps it until one does."
-            : "Waiting for the agent to pick this up…"}
-      </p>
-      {!pickedUp && fallback && <ResumeCommand reviewId={reviewId} buttonSize={phone ? "lg" : "sm"} />}
+      <div className="min-h-0 space-y-2 overflow-y-auto pb-1">
+        <p role="status" className="m-0 min-h-lh text-fg-2 [font:var(--type-body)]">
+          {!announced
+            ? ""
+            : pickedUp
+              ? "The agent picked up your feedback."
+              : fallback
+                ? lost
+                  ? "recense cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below."
+                  : "No agent has picked this up yet. recense keeps it until one does."
+                : "Waiting for the agent to pick this up…"}
+        </p>
+        {showsCommand && <ResumeCommand reviewId={reviewId} buttonSize={phone ? "lg" : "sm"} />}
+      </div>
     </section>
   );
 }
