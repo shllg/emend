@@ -64,11 +64,49 @@ Its `example` shows a concrete before/after case.
 Give every topic above Low risk (`skim`) an Example of at most six lines.
 Keep examples grounded in the actual change: use its real input and real output.
 Write a before/after case in one paragraph, with lines starting `Before:` and `After:`.
-recense shows those lines as aligned rows.
-A line without `Before:` or `After:` at its start continues the row above it.
+A short qualifier may sit before the colon, as in `After, on a second conflict:`.
+recense shows those lines as aligned rows, in the Example only.
+A line that does not start with such a label continues the row above it.
 Put any other note in its own paragraph.
 For two or more cases, you can use a table: `Input | Before | After`.
 A document that explains a change or a proposal gives the same why and a grounded example.
+
+### Callers and workflows
+
+This applies to a review topic that changes code.
+Before you write its Example, trace the change to the unchanged code and workflows that reach it.
+Look for its callers, the code that reads its output, and the user workflows that pass through it.
+Name each one that behaves differently, also when the change meant it to.
+Show each in the Example as its own rows, with the caller in each label:
+`Before, import form:` and `After, import form:`.
+Name the caller in a few words, and keep a label under 50 characters.
+A label ends at its first colon, so a name such as `src/a.ts:12` splits it.
+For three or more, use a table: `Caller | Before | After`.
+The Example keeps its six lines, so show the callers that matter most there.
+In `body`, list each remaining caller that changes as one item: what it did before and what it does now.
+Callers that behave the same go under Checked as one item, with the kind that shows how you know.
+
+Name every effect outside the stated goal, even one that looks harmless.
+Put it in a topic, never only under Context or Not checked.
+Use the topic that owns the changed code, or its own topic when the reader decides on it separately.
+
+Say what a search covered, because an empty search proves only that its scope has no match.
+Write "none found in a search of `src/` and `test/` for `parseDate(`", never "no callers".
+Name what a search cannot see under Not checked, such as names built at runtime or other
+repositories.
+
+In this example, `parseDate` now refuses an empty string. Before, it returned today's date.
+A search of `src/` for `parseDate(` finds three callers, and two of them change:
+
+```markdown
+Before, import form: a blank date saves as today.
+After, import form: a blank date shows "Date is required" and saves nothing.
+Before, nightly report: rows without a date count under today.
+After, nightly report: the run stops at the first row without a date.
+```
+
+The nightly report's stop lies outside the goal, so the `parseDate` topic names it.
+`checked` holds the third caller, Read: "`orderSummary` checks the date before it calls `parseDate`."
 
 ## State diagrams
 
@@ -260,6 +298,11 @@ A choice the reviewer must make goes into `needsYou`.
 - **Look yourself:** at most three spots, each with why no test settles it.
   "`src/retry.ts`, where the loop counts attempts: the tests fake the clock" is one spot.
 
+Anywhere in the writeup, a fix you call required names the contract that breaks and the steps that break it.
+"`saveOrder` promises one row per order, and two clicks within a second write two" is one.
+A check you propose names its setup and what passing looks like.
+"Import a file with a blank date; it passes when the form shows the error and saves no row" is one.
+
 ### Checked and Not checked
 
 `checked` holds the proof: at most five items, strongest first. Write it as a list of
@@ -325,7 +368,7 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
 - Topic "User pages keep loading after the loader rename": Low. The undo is a revert.
 - **Biggest risk:** a call the type checker cannot see, such as a lookup by string, still asks
   for `fetchUser`, and that page fails to load.
-- `checked`, Ran: `rg fetchUser` finds it only in the changelog.
+- `checked`, Ran: `git grep fetchUser` over every tracked file finds it only in the changelog.
 - `notChecked`: plugins outside this repository; one that calls `fetchUser` breaks on upgrade.
 
 **Medium.** A change caps request retries at three.
@@ -374,6 +417,7 @@ This section applies to a code review whose manifest names its intent review in 
 `writeup.deviations` shows as "Deviations from the approved intent".
 
 - One item per departure from the approved intent: what the intent said, what the code does, and why.
+- An effect outside the approved goal counts as a departure, such as a caller that now behaves differently.
 - Name the topic that holds the deviation.
 - A deviation the reviewer must accept also goes into `needsYou` as a `confirm-drift` item.
 - When the code follows the intent, write "None." It is never empty.

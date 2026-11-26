@@ -476,6 +476,53 @@ test("the writing reference asks for a state diagram in a topic that changes a s
   );
 });
 
+test("the writing reference traces a change to the callers and workflows it affects", () => {
+  const reference = read(writingReference);
+  const section = (heading: string, next: string) =>
+    (reference.split(`${heading}\n`)[1]?.split(`\n${next}`)[0] ?? "").replace(/\s+/g, " ");
+  expect(section("## Why and Example", "## ")).toContain("### Callers and workflows");
+  expect(section("## Why and Example", "## ")).toContain(
+    "recense shows those lines as aligned rows, in the Example only.",
+  );
+  expect(section("## Why and Example", "## ")).toContain(
+    "A line that does not start with such a label continues the row above it.",
+  );
+  const callers = section("### Callers and workflows", "## ");
+  for (const rule of [
+    "This applies to a review topic that changes code.",
+    "trace the change to the unchanged code and workflows that reach it.",
+    "Name each one that behaves differently, also when the change meant it to.",
+    "For three or more, use a table: `Caller | Before | After`.",
+    "Name the caller in a few words, and keep a label under 50 characters.",
+    "A label ends at its first colon, so a name such as `src/a.ts:12` splits it.",
+    "The Example keeps its six lines, so show the callers that matter most there.",
+    "In `body`, list each remaining caller that changes as one item: what it did before and what it does now.",
+    "Callers that behave the same go under Checked as one item, with the kind that shows how you know.",
+    "Name every effect outside the stated goal, even one that looks harmless.",
+    "Put it in a topic, never only under Context or Not checked.",
+    "Use the topic that owns the changed code, or its own topic when the reader decides on it separately.",
+    'Write "none found in a search of `src/` and `test/` for `parseDate(`", never "no callers".',
+    "Name what a search cannot see under Not checked, such as names built at runtime or other repositories.",
+    "Before, import form:",
+    "After, nightly report:",
+    "so the `parseDate` topic names it.",
+  ]) {
+    expect(callers).toContain(rule);
+  }
+  const whereToLook = section("### Where to look", "### ");
+  expect(whereToLook).toContain("a fix you call required names the contract that breaks and the steps that break it.");
+  expect(whereToLook).toContain("A check you propose names its setup and what passing looks like.");
+  expect(section("### Deviations", "## ")).toContain(
+    "An effect outside the approved goal counts as a departure, such as a caller that now behaves differently.",
+  );
+  expect(section("### Worked examples", "## ")).toContain(
+    "`git grep fetchUser` over every tracked file finds it only in the changelog.",
+  );
+  expect(read("plugin/skills/recense-review/SKILL.md").replace(/\s+/g, " ")).toContain(
+    "A topic that changes code names the callers and workflows that behave differently, as the writing reference says.",
+  );
+});
+
 test("the writing reference draws change graphs with a legend and names the diagram types that render", () => {
   const section = (read(writingReference).split("## Change graphs\n")[1]?.split("\n## ")[0] ?? "").replace(/\s+/g, " ");
   for (const rule of [
