@@ -616,18 +616,6 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution,
             2,
             "Could not check the fixed commit against origin/main. Run bin/wt fetch first. Nothing was changed.",
           );
-        const branchAncestry = run(
-          "git",
-          [...GIT_BASE, "merge-base", "--is-ancestor", detail.commit, "HEAD"],
-          gitOptions(repo),
-        );
-        if (branchAncestry.code === 0)
-          throw new WtError(
-            1,
-            "A worktree may resolve a finding as fixed only with its merge commit, which its own branch does not contain. Nothing was changed.",
-          );
-        if (branchAncestry.code !== 1)
-          throw new WtError(2, "Could not check the fixed commit against this worktree's branch. Nothing was changed.");
       }
     }
     delete finding.claim;
