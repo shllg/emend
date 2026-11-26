@@ -255,6 +255,11 @@ export function SentNotice({
     };
   }, []);
   const showsCommand = !pickedUp && fallback;
+  // A pick-up changes the text, not the height: the reading pane above never shifts for it.
+  const [heldHeight, setHeldHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (!pickedUp && notice.current) setHeldHeight(notice.current.getBoundingClientRect().height);
+  });
   useLayoutEffect(() => {
     if (showsCommand || !removedCommandHadFocus.current) return;
     removedCommandHadFocus.current = false;
@@ -266,7 +271,8 @@ export function SentNotice({
     <section
       aria-label="Sent"
       ref={notice}
-      className="flex max-h-[min(40dvh,max(5rem,calc(100dvh-22rem)))] flex-col border-b border-line-1 bg-sunken px-4 py-2 max-md:py-1"
+      style={pickedUp && heldHeight !== null ? { height: heldHeight } : undefined}
+      className="flex max-h-[min(40dvh,max(7rem,calc(100dvh-22rem)))] flex-col border-b border-line-1 bg-sunken px-4 py-2 max-md:py-1"
       onPointerDownCapture={hold}
       onFocusCapture={hold}
       onKeyDownCapture={(event) => {
