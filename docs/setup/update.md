@@ -94,12 +94,12 @@ mise config get), since they can show secrets from [env]; if a dotfiles tool man
 or link you would change (a symlink into a dotfiles repository, stow, chezmoi, home-manager
 or similar), change its source and tell me how to apply it; never run recense pair, attach,
 detach, config or devices yourself, give me the command instead; never run claude plugin
-commands or mise upgrade yourself, give them to me for my own terminal; never pass --host or
-any flag this page does not name; never retry a command through another program (for example
-script) to get a terminal; never list the devices on my tailnet; outside your sandbox run only
-recense service install (no new flags), recense service status, recense stop and recense skills
-install, and no other command; run no process listing yourself, ask me to run pgrep in my own
-terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
+commands or a mise command that installs recense yourself, give them to me for my own terminal;
+never pass --host or any flag this page does not name; never retry a command through another
+program (for example script) to get a terminal; never list the devices on my tailnet; outside your
+sandbox run only recense service install (no new flags), recense service status, recense stop and
+recense skills install, and no other command; run no process listing yourself, ask me to run pgrep
+in my own terminal (Linux: pgrep -af '[r]ecense.mjs serve'; macOS: pgrep -lf '[r]ecense.mjs serve').
 Update recense on this machine. Follow
 https://github.com/shllg/recense/blob/release/docs/setup/update.md step by step. First ask me which
 parts I set up: the service, the agent skills, the Claude Code plugin, a hub, attached machines.
@@ -211,9 +211,10 @@ if you link there) prints `... already linked` for each skill you linked.
 ```text
 Rules: never run recense update yourself; give it to me to run in my own terminal; show me
 each change and wait for my yes; never read secrets (tokens, .env files, credential stores)
-or recense's state folder; never open mise's config files and never run a mise command that
-prints environment values (such as mise env, mise set, mise doctor or mise config get), since
-they can show secrets from [env]; never run mise upgrade or claude plugin commands yourself.
+or recense's state folder; never open mise's config files and never run a mise
+command that prints environment values (such as mise env, mise set, mise doctor or
+mise config get), since they can show secrets from [env]; never run a mise command
+that installs recense or claude plugin commands yourself.
 Run recense --version and show me the result. Then update the package. If mise manages it, give me
 cd ~ && mise upgrade npm:@shllg/recense to run in my own terminal, since a postinstall line in my
 mise config would run inside it. If I want mise to finish each update, point me to the postinstall
@@ -371,9 +372,11 @@ restoration is needed before changing anything. Keep the quotes,
    `install --global --prefix <prefix> --ignore-scripts @shllg/recense@<old>`; pnpm uses
    `add --global --ignore-scripts --ignore-pnpmfile @shllg/recense@<old>`; mise uses
    `use --global npm:@shllg/recense@<old>`.
-   With a mise `postinstall` line, that `mise use` runs the line when it
-   installs the old version again: it moves the service and the skill links
-   to the old version and updates the Claude Code plugin to the newest release.
+   With a mise `postinstall` line, that `mise use` runs the line when it installs the old version
+   again: it moves the service and the skill links to the old version and updates the Claude Code
+   plugin to the newest release. That `mise use` runs without `RECENSE_HOME`, so if you set it, the
+   line's `recense service install` points the service at the default state folder, and can create
+   that folder, until step 4 reinstalls the service with your `RECENSE_HOME`.
    Without a service, restore first, then run the printed Node.js and restored old entry with
    `stop`. It waits until the server process exits or removes its discovery record after database
    cleanup, even when the listener has already closed.
