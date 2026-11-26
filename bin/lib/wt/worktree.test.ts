@@ -568,9 +568,13 @@ test("the removed run subcommand is unknown and help does not list it", () =>
     assert.equal(bad.code, 2);
     const help = await runWt(wt, ["help"], { cwd: fx.main });
     assert.doesNotMatch(help.stdout, /run view/);
-    assert.doesNotMatch(help.stdout, /--brief|--task|--slug|\btasks?\b|reserv/i);
+    assert.doesNotMatch(help.stdout, /--brief|--task|\btasks?\b|reserv/i);
+    const slugLines = help.stdout.split("\n").filter((line) => line.includes("--slug"));
+    assert.equal(slugLines.length, 1);
+    for (const line of slugLines) assert.match(line, /^ *spawn --findings /);
     assert.match(help.stdout, /issues \[--json\]/);
     assert.match(help.stdout, /spawn --issue <n>/);
+    assert.match(help.stdout, /spawn --findings <id,id> --slug <slug>/);
   }));
 
 test("the removed tasks command and setup --task are refused", () =>
