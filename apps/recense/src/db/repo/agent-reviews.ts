@@ -14,6 +14,8 @@ type DiffRow = Pick<typeof files.$inferSelect, "path" | "oldPath" | "status" | "
   newImageFlag: typeof diffImages.$inferSelect.flag;
 };
 
+const LINE_END = Buffer.from("\n");
+
 export async function revisionDiff(rows: readonly DiffRow[]): Promise<AgentReviewDiff> {
   const lines: Buffer[] = [];
   let processed = 0;
@@ -21,8 +23,8 @@ export async function revisionDiff(rows: readonly DiffRow[]): Promise<AgentRevie
     const old = row.oldImageBlob ?? row.oldImageFlag ?? row.oldBlob ?? (row.status !== "added" ? row.flag : null);
     const next = row.newImageBlob ?? row.newImageFlag ?? row.newBlob ?? (row.status !== "deleted" ? row.flag : null);
     // Keeping each side at its own path makes a rename equivalent to a deletion and an addition.
-    if (old !== null) lines.push(Buffer.from(`${row.oldPath ?? row.path}\told\t${old}\n`));
-    if (next !== null) lines.push(Buffer.from(`${row.path}\tnew\t${next}\n`));
+    if (old !== null) lines.push(Buffer.concat([Buffer.from(`${row.oldPath ?? row.path}\told\t${old}`), LINE_END]));
+    if (next !== null) lines.push(Buffer.concat([Buffer.from(`${row.path}\tnew\t${next}`), LINE_END]));
     if (++processed % 500 === 0) await yieldToLoop("agent-review-diff");
   }
   const hash = createHash("sha256");
@@ -101,14 +103,7 @@ export async function listAgentReviews(
         newestSeq: newest.seq,
         newestHead: newest.head,
         newestSent: sql<boolean>`exists (select 1 from ${sends} s where s.owner_id = ${reviews.ownerId} and s.review_id = ${reviews.id} and s.revision_id = ${newest.id} and s.set_aside_at is null)`,
-        answerWaiting: sql<number>`exists (
-          select 1 from ${sends} s
-          left join ${deliveries} d on d.owner_id = s.owner_id and d.review_id = s.review_id and d.id = s.delivery_id
-          where s.owner_id = ${reviews.ownerId} and s.review_id = ${reviews.id}
-            and s.kind in ('go', 'approve') and s.set_aside_at is null
-            and (s.kind = 'go' or s.delivery_id is not null or s.revision_id = ${newest.id})
-            and (s.delivery_id is null or d.confirmed_at is null)
-        )`,
+        answerWaiting: sql<number>`exists (select 1 from ${sends} s left join ${deliveries} d on d.owner_id = s.owner_id and d.review_id = s.review_id and d.id = s.delivery_id where s.owner_id = ${reviews.ownerId} and s.review_id = ${reviews.id} and s.kind in ('go', 'approve') and s.set_aside_at is null and (s.kind = 'go' or s.delivery_id is not null or s.revision_id = ${newest.id}) and (s.delivery_id is null or d.confirmed_at is null))`,
         approvedId: approved.id,
         approvedSeq: approved.seq,
         approvedHead: approved.head,
