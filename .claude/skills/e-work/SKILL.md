@@ -63,7 +63,56 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    `AGENTS.md` names for the paths you touch. Stay inside the issue's scope: a gap or a new idea goes
    into the PR body as a follow-up, never into the change.
 2. Codex writes the code through `codex-agent`, as `AGENTS.md` says. If Codex cannot run, a Sonnet
-   sub-agent writes, and your report says so and why.
+   sub-agent writes, and your report says so and why. Commit the checked build as in step 3.
+   When the diff from the base to the build commit touches `apps/web/src/`, `apps/web/public/` or
+   `apps/web/index.html`, run the following from the worktree root.
+
+   - Run `mktemp -d` once and resolve the build commit once with
+     `git rev-parse --verify <build>^{commit}`. Write the printed path and full commit id literally
+     in place of `<temp>` and `<full-id>` in each later command. Bash calls share no variables.
+   - Copy the checker from that commit and take the snapshot before dispatch. The snapshot covers
+     the ignored files, the git settings and the main checkout. Keep its printed sha256 for
+     `<digest>`. Resolve any error or blocker before dispatch.
+
+     ```sh
+     git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <temp>/check-ui-scope.mts
+     node <temp>/check-ui-scope.mts --snapshot <temp>/ignored.json
+     ```
+
+   - Dispatch `recense-ui-finisher` (`model: "sonnet"`) with the task file, the base and the build
+     commit. Give it a clean tree and a built app.
+   - When it returns, run the check. For every check, make a new file with
+     `mktemp --suffix=.mts <temp>/check-XXXXXXXX`. Use its printed path for `<fresh>`. Extract
+     the checker again and run it from the worktree root with the literal digest from the snapshot.
+
+     ```sh
+     git --no-replace-objects show <full-id>:scripts/check-ui-scope.ts > <fresh> &&
+       node <fresh> --since <full-id> --snapshot <temp>/ignored.json --snapshot-sha256 <digest>
+     ```
+
+   - Report every printed line as a blocker. For `head moved`, `index flag`, `ignored changed`,
+     `ignored removed`, `git changed`, `main changed`, `nested repository`, `gitlink` or
+     `undecodable name`, stop for the owner. While any stop-for-owner line is printed, run no
+     cleanup at all. For any such line or any exit other than 0 or 1, run
+     `<main>/bin/wt notify blocked`, name the line and wait for the owner. A merge on main by the
+     work loop also moves the main checkout's HEAD. The owner decides how to proceed.
+     For other findings, delete then restore from the lists. Never put a printed path on a command
+     line.
+
+     ```sh
+     xargs -0 -r rm -f -- < <temp>/delete.nul
+     test ! -s <temp>/restore.nul || git --no-replace-objects --literal-pathspecs -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null restore --source=<full-id> --staged --worktree --pathspec-from-file=<temp>/restore.nul --pathspec-file-nul
+     ```
+
+     Run the check again after cleanup. Continue only at exit 0.
+   - Run `node scripts/ui-demo.ts stop`. If `.wt/ui-demo.json` still exists, run
+     `<main>/bin/wt notify blocked` and wait for the owner. Then run the check again.
+     Continue only at exit 0.
+   - Remove `node_modules/.vitest-cache`, `.tsbuild`, `apps/*/.tsbuild` and `packages/*/.tsbuild`,
+     then run `pnpm verify`. Clearing the Vitest cache and TypeScript build folders keeps
+     verification from reading entries the pass left there.
+   - Stage the finish and run the check once more right before the commit. Continue only at exit 0.
+     Commit the finish separately, then remove the temp folder.
 3. Run `pnpm verify`. Fix failures at the root cause. Headless browser checks run Chromium directly
    (`chromium --headless=new …`).
    Before each review round, with the change committed and `pnpm verify` green at that commit,
@@ -72,11 +121,12 @@ Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not re
    (`origin/main...HEAD` for a full round, the fix commits for a check round), the task file
    `.wt/issue.md` (or the description), `.wt/bundle-diff.json`, `.wt/bundle-reason.md` when it
    exists, and, for a check round, `.wt/review-findings.json`. See "Bundle growth" in
-   `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Fixes go to
-   Codex. Review in rounds as
-   `.claude/rules/review-rounds.md` says: commit first, round 1 over the whole change, then at most
-   two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each manager JSON
-   to `.wt/review-findings.json` as the rule says.
+   `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Route its `ui` fixes
+   to `recense-ui-finisher` (`model: "sonnet"`) and its `code` fixes to Codex. For each finisher
+   pass, follow step 2 from a clean tree using the pass's starting commit as the build commit.
+   Follow `.claude/rules/review-rounds.md`. Commit first, run round 1 over the whole change, then
+   run at most two check rounds over the fixes. Log each round in `.wt/review-log.md`. Append each
+   manager JSON to `.wt/review-findings.json` as the rule says.
 5. Apply the sync rule in `AGENTS.md`: check the change against the sibling project and add the
    `Sync:` trailer it asks for. `pnpm check:sync` holds the rule.
 
