@@ -13,10 +13,10 @@ paths:
 
 `docs/setup.md`, every `docs/setup/*.md` and `docs/usage.md` are public pages. The website copies
 them and the images from the newest `vX.Y.Z` tag on the release branch. It owns its navigation,
-URLs, layout and prompts. `test/docs-contract.test.ts` checks the manifest, the page set, the H1 and
-lead, heading slugs, links and fragments, fence info strings, the `$` prompt in `sh` fences, prompt
-markers, raw HTML, images and screenshot sizes. Run it after any change here. The other rules below
-are for authors and reviewers.
+URLs, layout and prompts. `test/docs-contract.test.ts` checks the manifest, the page set, front
+matter, the H1 and lead, heading slugs, links and fragments, fence info strings, the `$` prompt in
+`sh` fences, prompt markers, raw HTML, images and screenshot sizes. Run it after any change here.
+The other rules below are for authors and reviewers.
 
 ## Manifest `docs/site.json`
 

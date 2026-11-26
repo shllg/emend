@@ -187,9 +187,12 @@ function pngSize(path: string): { width: number; height: number } | string {
   return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
 }
 
-function publicPages(tracked: ReadonlySet<string>): Set<string> {
+export type TrackedKind = "file" | "link";
+type TrackedEntries = ReadonlyMap<string, TrackedKind>;
+
+function publicPages(tracked: TrackedEntries): Set<string> {
   const pages = new Set(["docs/setup.md", "docs/usage.md"]);
-  for (const path of tracked) if (SETUP_PAGE.test(path)) pages.add(path);
+  for (const path of tracked.keys()) if (SETUP_PAGE.test(path)) pages.add(path);
   return pages;
 }
 
@@ -202,9 +205,9 @@ function isDirectory(root: string, dir: string): boolean {
   );
 }
 
-function isTrackedFile(root: string, tracked: ReadonlySet<string>, path: string): boolean {
+function isTrackedFile(root: string, tracked: TrackedEntries, path: string): boolean {
   return (
-    tracked.has(path) &&
+    tracked.get(path) === "file" &&
     isDirectory(root, posix.dirname(path)) &&
     lstatSync(join(root, path), { throwIfNoEntry: false })?.isFile() === true
   );
@@ -213,7 +216,7 @@ function isTrackedFile(root: string, tracked: ReadonlySet<string>, path: string)
 type PromptFence = { file: string; line: number; text: string };
 type Section = { file: string; depth: number; title: string };
 
-export function publicPromptFences(root: string, tracked: ReadonlySet<string>, section?: Section): PromptFence[] {
+export function publicPromptFences(root: string, tracked: TrackedEntries, section?: Section): PromptFence[] {
   const prompts: PromptFence[] = [];
   for (const file of publicPages(tracked)) {
     if ((section && section.file !== file) || !isTrackedFile(root, tracked, file)) continue;
@@ -232,7 +235,7 @@ export function publicPromptFences(root: string, tracked: ReadonlySet<string>, s
   return prompts;
 }
 
-export function checkDocs(root: string, tracked: ReadonlySet<string>): string[] {
+export function checkDocs(root: string, tracked: TrackedEntries): string[] {
   const violations: Violation[] = [];
   const seen = new Set<string>();
   const add = (file: string, line: number, message: string) => {
@@ -387,9 +390,11 @@ export function checkDocs(root: string, tracked: ReadonlySet<string>): string[] 
 
   // Rule 2: the page set.
   if (tracked.has("docs/setup")) add("docs/setup", 1, "is not a folder");
-  for (const file of expected)
+  for (const file of expected) {
+    if (tracked.get(file) === "link") add(file, 1, "a public page must be a tracked regular file");
     if (!paths.has(file.slice("docs/".length)))
       manifestViolation("pages", `${file} is a public page but is not listed`);
+  }
   for (const { path, index } of listed)
     if (!isTrackedFile(root, tracked, `docs/${path}`))
       manifestViolation(`pages.${index}.path`, `the listed page docs/${path} is not a tracked file`);
@@ -401,7 +406,8 @@ export function checkDocs(root: string, tracked: ReadonlySet<string>): string[] 
     return cache.get(rel) ?? null;
   };
   const folders = new Set<string>();
-  for (const path of tracked) {
+  for (const [path, kind] of tracked) {
+    if (kind === "link" && path.startsWith("docs/images/")) add(path, 1, "an image must be a tracked regular file");
     let dir = posix.dirname(path);
     while (!folders.has(dir)) {
       folders.add(dir);
@@ -414,7 +420,9 @@ export function checkDocs(root: string, tracked: ReadonlySet<string>): string[] 
     const scheme = SCHEME.exec(url)?.[0].toLowerCase();
     if (scheme || url.startsWith("//")) {
       if (image) add(file, line, `the image "${url}" must have a relative path`);
-      else if (scheme && !["http:", "https:", "mailto:"].includes(scheme))
+      else if (!scheme)
+        add(file, line, `the link "${url}" needs an explicit http:, https: or mailto: scheme, or a relative path`);
+      else if (!["http:", "https:", "mailto:"].includes(scheme))
         add(file, line, `the link "${url}" has a disallowed URL scheme`);
       return;
     }
@@ -480,8 +488,12 @@ export function checkDocs(root: string, tracked: ReadonlySet<string>): string[] 
       else if (target.rel.endsWith(".md")) {
         if (target.fragment && !pageAt(target.rel)?.anchors.has(target.fragment))
           add(file, line, `the link "${url}" has no matching heading anchor in ${target.rel}`);
-      } else if (!validLineFragment(join(root, target.rel), target.fragment))
-        add(file, line, `the link "${url}" needs a valid line fragment in ${target.rel}`);
+      } else {
+        const text = readTextFile(join(root, target.rel));
+        if (text === undefined) add(file, line, `a line fragment needs a text file: "${url}"`);
+        else if (!validLineFragment(text, target.fragment))
+          add(file, line, `the link "${url}" needs a valid line fragment in ${target.rel}`);
+      }
     };
     const checkImage = (line: number, alt: string | null | undefined, src: string | undefined) => {
       if (alt === null || alt === undefined || alt.trim() === "") add(file, line, "an image needs alt text");
@@ -567,13 +579,22 @@ export function checkDocs(root: string, tracked: ReadonlySet<string>): string[] 
   return finish();
 }
 
-function validLineFragment(path: string, fragment: string): boolean {
+function readTextFile(path: string): string | undefined {
+  const bytes = readFileSync(path);
+  if (bytes.subarray(0, 8000).includes(0)) return undefined;
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+function validLineFragment(text: string, fragment: string): boolean {
   const range = /^L(\d+)(?:-L(\d+))?$/.exec(fragment);
   if (!range) return false;
   const start = Number(range[1]);
   const end = Number(range[2] ?? start);
   if (start < 1 || end < start) return false;
-  const text = readFileSync(path, "utf8");
   const lines = text.split(/\r\n|\n|\r/);
   const count = lines.at(-1) === "" ? lines.length - 1 : lines.length;
   return end <= count;

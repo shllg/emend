@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "vitest";
 import { integrations } from "../apps/web/src/lib/integrations.ts";
 import { themeSkillPrompt, UNRELEASED_VERSION } from "../apps/web/src/lib/theme-skill.ts";
-import { checkDocs, publicPromptFences } from "./docs-contract.ts";
+import { checkDocs, publicPromptFences, type TrackedKind } from "./docs-contract.ts";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const fence = "```";
@@ -103,14 +103,15 @@ function fixture(change: (files: Files) => void = () => {}): string {
   return root;
 }
 
-function fixtureFiles(root: string): Set<string> {
-  const tracked = new Set<string>();
+function fixtureFiles(root: string): Map<string, TrackedKind> {
+  const tracked = new Map<string, TrackedKind>();
   function walk(dir: string) {
     for (const name of readdirSync(join(root, dir))) {
       const path = dir ? `${dir}/${name}` : name;
       const stat = lstatSync(join(root, path));
       if (stat.isDirectory()) walk(path);
-      else if (stat.isFile()) tracked.add(path);
+      else if (stat.isFile()) tracked.set(path, "file");
+      else if (stat.isSymbolicLink()) tracked.set(path, "link");
     }
   }
   walk("");
@@ -145,12 +146,12 @@ const index = execFileSync("git", ["ls-files", "-s", "-z"], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "inherit"],
 });
-const tracked = new Set(
-  index
-    .split("\0")
-    .filter((record) => /^(100644|100755) /.test(record))
-    .map((record) => record.slice(record.indexOf("\t") + 1)),
-);
+const tracked = new Map<string, TrackedKind>();
+for (const record of index.split("\0")) {
+  if (!record) continue;
+  const path = record.slice(record.indexOf("\t") + 1);
+  tracked.set(path, /^(100644|100755) /.test(record) ? "file" : "link");
+}
 
 test("the repository's public docs follow the contract", () => {
   const violations = checkDocs(repo, tracked);
@@ -160,7 +161,7 @@ test("the repository's public docs follow the contract", () => {
 const themePrefix = themeSkillPrompt(UNRELEASED_VERSION);
 const themes = { file: "docs/usage.md", depth: 3, title: "Themes" };
 
-function unknownPrompts(root: string, files: ReadonlySet<string>): string[] {
+function unknownPrompts(root: string, files: ReadonlyMap<string, TrackedKind>): string[] {
   return publicPromptFences(root, files)
     .filter(
       ({ text }) =>
@@ -326,6 +327,15 @@ test("a public page that the manifest does not list is reported", () => {
   expect(found).toEqual(["docs/site.json:3: docs/setup/b.md is a public page but is not listed"]);
 });
 
+test("a symlinked setup page is reported and still required in the manifest", () => {
+  const root = fixture();
+  symlinkSync("a.md", join(root, "docs/setup/alias.md"));
+  expect(checkDocs(root, fixtureFiles(root))).toEqual([
+    "docs/setup/alias.md:1: a public page must be a tracked regular file",
+    "docs/site.json:3: docs/setup/alias.md is a public page but is not listed",
+  ]);
+});
+
 test("a listed page that does not exist is reported at its manifest entry", () => {
   const found = check(drop("docs/usage.md"));
   expect(found).toEqual(
@@ -420,6 +430,16 @@ test("only HTTP, HTTPS and mailto schemes are accepted on links and definitions"
     'docs/usage.md:5: the link "javascript:example" has a disallowed URL scheme',
     'docs/usage.md:7: the link "DATA:example" has a disallowed URL scheme',
     'docs/usage.md:9: the link "vbscript:example" has a disallowed URL scheme',
+  ]);
+});
+
+test("protocol-relative links and definitions require an explicit scheme", () => {
+  const found = check(
+    page("docs/usage.md", (text) => `${text}\n[page](//example.com/page)\n\n[ref]: //example.com/ref\n`),
+  );
+  expect(found).toEqual([
+    'docs/usage.md:7: the link "//example.com/page" needs an explicit http:, https: or mailto: scheme, or a relative path',
+    'docs/usage.md:9: the link "//example.com/ref" needs an explicit http:, https: or mailto: scheme, or a relative path',
   ]);
 });
 
@@ -567,6 +587,14 @@ test("a link to a symlink is not a tracked file target", () => {
   ]);
 });
 
+test("a symlink under docs/images is reported even when no page uses it", () => {
+  const root = fixture();
+  symlinkSync("review-desktop.png", join(root, "docs/images/alias.png"));
+  expect(checkDocs(root, fixtureFiles(root))).toEqual([
+    "docs/images/alias.png:1: an image must be a tracked regular file",
+  ]);
+});
+
 test("a tracked target replaced by a symlink in the working tree cannot be read through the index", () => {
   const root = fixture((files) => {
     edit("docs/setup.md", "(usage.md)", "(assets/note.md#note)")(files);
@@ -616,6 +644,27 @@ test("non-Markdown fragments must name existing lines in a file and folders cann
     ),
     'docs/usage.md:11: the link "setup/#L1" cannot have a fragment on a folder',
     'docs/usage.md:12: the link "setup/#" cannot have a fragment on a folder',
+  ]);
+});
+
+test("line fragments require text and reject PNG, NUL and invalid UTF-8 targets", () => {
+  const found = check((files) => {
+    files["docs/nul.txt"] = "one\0two\n";
+    files["docs/invalid.txt"] = Buffer.concat([Buffer.alloc(8000, 0x61), Buffer.from([0xff])]);
+    files["docs/usage.md"] = [
+      "# Using",
+      "",
+      "Lead.",
+      "",
+      "[PNG](images/review-desktop.png#L1)",
+      "[NUL](nul.txt#L1)",
+      "[Invalid UTF-8](invalid.txt#L1)",
+    ].join("\n");
+  });
+  expect(found).toEqual([
+    'docs/usage.md:5: a line fragment needs a text file: "images/review-desktop.png#L1"',
+    'docs/usage.md:6: a line fragment needs a text file: "nul.txt#L1"',
+    'docs/usage.md:7: a line fragment needs a text file: "invalid.txt#L1"',
   ]);
 });
 
@@ -672,6 +721,19 @@ test("a file at docs/setup is reported without enumerating it as a folder", () =
     files["docs/setup"] = "";
   });
   expect(found).toContain("docs/setup:1: is not a folder");
+});
+
+test("a symlink at docs/setup is reported as not a folder", () => {
+  const root = fixture(drop("docs/setup/a.md"));
+  symlinkSync("images", join(root, "docs/setup"), "dir");
+  expect(checkDocs(root, fixtureFiles(root))).toContain("docs/setup:1: is not a folder");
+});
+
+test("the written contract lists front matter among the enforced checks", () => {
+  const found = check(page("docs/usage.md", (text) => `+++\ntitle = "Using"\n+++\n${text}`));
+  expect(found).toContain("docs/usage.md:1: a public page has no front matter");
+  const rules = readFileSync(join(repo, ".claude/rules/public-docs.md"), "utf8").replace(/\s+/g, " ");
+  expect(rules).toContain("checks the manifest, the page set, front matter,");
 });
 
 test("the written contract leaves one shell command per line to authors and reviewers", () => {
