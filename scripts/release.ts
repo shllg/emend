@@ -28,6 +28,8 @@ export const SHIPPED_PATHS = [
   "docs/setup/",
   "docs/skills/",
   "docs/usage.md",
+  "docs/site.json",
+  "docs/images/",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",

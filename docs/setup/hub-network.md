@@ -13,7 +13,7 @@ it ([attach.md](attach.md)) so their agents publish there.
 
 ## Set it up with an agent
 
-```text
+```text prompt
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the
 change and wait for my yes; never open the proxy's configuration files, certificate keys or data
@@ -112,7 +112,7 @@ limit, any client can fill the hub's disk. The 32 MiB cap allows recense's large
 On Linux, Caddy and nginx come from your distribution's packages. On macOS, both are available
 through Homebrew. Changing a system proxy usually needs `sudo`. Run those commands yourself.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores, private keys) or recense's state
 folder; never read the proxy's certificate keys or its data folder; never open the proxy's
 configuration files yourself; work only from the recense site block I paste with credentials
@@ -187,7 +187,7 @@ remove the proxy's recense site. recense cannot remove your proxy's route. Point
 `127.0.0.1:3636`, never `localhost`: it can resolve to `::1`, where recense does not listen and
 another local user could. Run the hub on a machine you alone use.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; outside your sandbox run only recense service install --public-url
 <my address>, recense service status and recense service uninstall, and no other command; never pass
@@ -256,7 +256,7 @@ separated by tabs. `--revoke <id>` prints `Revoked <name>.` and signs that devic
 You run `recense pair` and `recense devices` yourself: they print one-time secrets and manage who
 may review.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never run
 recense pair, attach, detach, config or devices yourself, give me the command instead.
 Walk me through pairing my phone. Tell me to run recense pair myself in a terminal on this machine,
@@ -280,7 +280,7 @@ machines. Node.js reads it when it starts. It applies to every Node.js program s
 so do not set it for unrelated programs. The hub itself does not need it: recense never contacts its
 own address, and its CLI talks to `127.0.0.1`.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never run
 recense pair, attach, detach, config or devices yourself, give me the command instead.
 Help me attach another machine to this hub: follow

@@ -5,6 +5,7 @@ const globalSetup = fileURLToPath(new URL("./test/global-setup.ts", import.meta.
 const isolationTest = fileURLToPath(new URL("./test/state-isolation.test.ts", import.meta.url));
 const launcherTest = fileURLToPath(new URL("./test/launcher.test.ts", import.meta.url));
 const skillsTest = fileURLToPath(new URL("./test/skills.test.ts", import.meta.url));
+const docsContractTest = fileURLToPath(new URL("./test/docs-contract.test.ts", import.meta.url));
 // nodejs/node#66366: remove once the Node 24 backport ships.
 const execArgv = process.versions.node.split(".")[0] === "24" ? ["--no-wasm-code-gc"] : [];
 
@@ -38,7 +39,11 @@ export default defineConfig({
           root,
           environment: "node",
           globalSetup,
-          include: ["src/**/*.test.ts", isolationTest, ...(root === "apps/recense" ? [launcherTest, skillsTest] : [])],
+          include: [
+            "src/**/*.test.ts",
+            isolationTest,
+            ...(root === "apps/recense" ? [launcherTest, skillsTest, docsContractTest] : []),
+          ],
           exclude: [...configDefaults.exclude, "**/*.bench.test.ts"],
         },
       })),

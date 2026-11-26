@@ -10,7 +10,7 @@ it ([attach.md](attach.md)) so their agents publish there.
 
 ## Set it up with an agent
 
-```text
+```text prompt
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the
 change and wait for my yes; never read secrets (tokens, .env files, credential stores) or recense's
@@ -59,7 +59,7 @@ You should see one Tailscale address. If the command is not found on macOS, use 
 command instead: `/Applications/Tailscale.app/Contents/MacOS/Tailscale ip -4`. Also check in the
 Tailscale app that it is signed in. If it prints an error, sign in to Tailscale first.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never
 list the devices on my tailnet.
 Check that Tailscale runs on this machine: run tailscale ip -4 and show me the output. On macOS, if
@@ -150,7 +150,7 @@ On Linux, the unit is `~/.config/systemd/user/recense.service` and the log is
 `journalctl --user -u recense`. On macOS, the agent is
 `~/Library/LaunchAgents/dev.recense.server.plist` and the log is `~/Library/Logs/recense.log`.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; never list the devices on my tailnet; outside your sandbox run only
 recense service install --tailscale, recense service status and recense service uninstall, and no other
@@ -205,7 +205,7 @@ separated by tabs. `--revoke <id>` prints `Revoked <name>.` and signs that devic
 You run `recense pair` and `recense devices` yourself: they print one-time secrets and manage who
 may review.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never run
 recense pair, attach, detach, config or devices yourself, give me the command instead.
 Walk me through pairing my phone. Tell me to run recense pair myself in a terminal on this machine,
@@ -219,7 +219,7 @@ because it has its own storage; on another phone install the app from the browse
 To make the agents on your other machines publish to the hub, follow [attach.md](attach.md). The
 agent side of each machine is on [agents.md](agents.md).
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never run
 recense pair, attach, detach, config or devices yourself, give me the command instead.
 Help me attach another machine to this hub: follow

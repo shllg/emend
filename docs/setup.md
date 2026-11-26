@@ -32,7 +32,7 @@ A hub behind your own address and HTTPS proxy is on [hub-network.md](setup/hub-n
 
 ## The whole setup in one prompt
 
-```text
+```text prompt
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the
 change and wait for my yes; before you change the proxy's configuration, show me the change and wait

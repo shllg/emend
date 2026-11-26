@@ -7,7 +7,7 @@ pages: [hub-tailscale.md](hub-tailscale.md) and [attach.md](attach.md). Both sta
 
 ## Set it up with an agent
 
-```text
+```text prompt
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show
 me the change and wait for my yes; never read secrets (tokens, .env files, credential stores) or
@@ -96,7 +96,7 @@ apply it as the tool says.
 Open a new terminal afterwards and run the two version commands again. You should see Node.js
 24.18 or newer and git 2.44 or newer.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env
 files, credential stores) or recense's state folder; never open mise's config files and
 never run a mise command that prints environment values (such as mise env, mise set,
@@ -171,7 +171,7 @@ With mise, run `recense --version` once more from another folder, such as your h
 should print the same version. If it says `recense: command not found` there, recense went into a
 project's config: see the `-g` paragraph above.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; never open mise's config files and never run a mise command that
 prints environment values (such as mise env, mise set, mise doctor or mise config get), since they
@@ -231,7 +231,7 @@ Step 4 changes that.
 
 You run this step yourself: the sign-in link is yours, and an agent does not run `recense config`.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never
 run recense pair, attach, detach, config or devices yourself, give me the command instead.
 Tell me to run recense in my own terminal and open the sign-in link it prints. Do not run recense
@@ -297,7 +297,7 @@ recense service uninstall
 
 You should see `recense: service uninstalled`.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; outside your sandbox run only recense service install and recense
 service status, since they need the service manager, 127.0.0.1 and recense's state folder; never
@@ -320,7 +320,7 @@ Your agents need the review skills. [agents.md](agents.md) covers the plugin, `r
 and the MCP server for Claude Code and Codex. Do that page now. Skip this step if you do not use
 agents with recense yet.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; never open ~/.claude/settings.json whole; if a dotfiles tool
 manages a file or link you would change (a symlink into a dotfiles repository, stow, chezmoi,
@@ -343,7 +343,7 @@ recense config add docRoots <folder>
 recense refuses the filesystem root, your home folder, any folder that holds your home folder, and
 recense's own state folder. A subfolder of your home folder is fine.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never
 run recense pair, attach, detach, config or devices yourself, give me the command instead.
 I want my agents to publish docs from folders outside their repositories. Ask me which folders,

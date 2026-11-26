@@ -166,6 +166,7 @@ Codex reads only this file. Open the matching rule file before you edit these pa
 | `apps/recense/src/db/`, `apps/recense/drizzle/`, `apps/recense/drizzle.config.ts` | `.claude/rules/db.md` |
 | `apps/recense/src/cli.ts`, `apps/recense/src/cli/`, `apps/recense/bin/` | `.claude/rules/cli.md`, `.claude/rules/cli-runtime.md` |
 | `apps/recense/src/cli/commands/look.ts`, `packages/core/src/html-look*.ts` | `.claude/rules/cli-look.md` |
+| `docs/setup.md`, `docs/setup/`, `docs/usage.md`, `docs/site.json`, `docs/images/` | `.claude/rules/public-docs.md` |
 | `sync/`, a path in `sync/manifest.json`, review wording, topics, modes, outcomes | "Sync with hunk-review-skill" below |
 
 ## Sync with hunk-review-skill

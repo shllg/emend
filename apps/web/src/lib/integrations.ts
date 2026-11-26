@@ -6,7 +6,7 @@ export type Integration = {
   summary: string;
   agents: readonly IntegrationAgent[];
   prompt: string;
-  /** Names the `##` section of docs/usage.md whose one ```text block must equal `prompt`. */
+  /** Names the `##` section of docs/usage.md whose one ```text prompt block must equal `prompt`. */
   docsHeading: string;
 };
 

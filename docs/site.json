@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "pages": [
+    {
+      "id": "setup",
+      "path": "setup.md",
+      "title": "Set up recense",
+      "description": "Choose which recense setups you need, from one machine to a hub with attached machines and agents, and let your agent set each one up with you."
+    },
+    {
+      "id": "local",
+      "path": "setup/local.md",
+      "title": "Set up recense on one machine",
+      "description": "Install the recense command, run a review server only this machine reaches, and add the review skills for your agents."
+    },
+    {
+      "id": "hub-tailscale",
+      "path": "setup/hub-tailscale.md",
+      "title": "Set up your own recense hub on Tailscale",
+      "description": "Run a recense hub on your own tailnet and pair your phone to it, to review agent work from your phone or other machines."
+    },
+    {
+      "id": "hub-network",
+      "path": "setup/hub-network.md",
+      "title": "Set up your own recense hub behind your own address",
+      "description": "Run a recense hub behind your own name and HTTPS reverse proxy, and pair your phone to it, instead of using Tailscale."
+    },
+    {
+      "id": "attach",
+      "path": "setup/attach.md",
+      "title": "Attach more of your machines to your hub",
+      "description": "Attach other machines to your hub, so their agents publish to one inbox and the feedback you send from any device reaches them."
+    },
+    {
+      "id": "agents",
+      "path": "setup/agents.md",
+      "title": "Set up your agents for recense",
+      "description": "Set up Claude Code, Codex or another coding agent with the review skills and optionally the MCP server, to publish and wait for your feedback."
+    },
+    {
+      "id": "development",
+      "path": "setup/development.md",
+      "title": "Develop recense from a checkout",
+      "description": "Install recense from a checkout of its source with pnpm install:local, and avoid running a build that agents can change."
+    },
+    {
+      "id": "update",
+      "path": "setup/update.md",
+      "title": "Update recense",
+      "description": "Update the package, server, agent skills, Claude Code plugin and phone app when a new recense version is out."
+    },
+    {
+      "id": "troubleshooting",
+      "path": "setup/troubleshooting.md",
+      "title": "Troubleshooting recense setup",
+      "description": "Find the error line recense prints during setup or update, why it happens, and how to fix it."
+    },
+    {
+      "id": "usage",
+      "path": "usage.md",
+      "title": "Using recense",
+      "description": "Configure the recense command and publish a doc for review in day-to-day use."
+    }
+  ],
+  "screenshots": [
+    {
+      "file": "images/review-desktop.png",
+      "view": "review",
+      "device": "desktop",
+      "theme": "dark",
+      "width": 3200,
+      "height": 2000
+    },
+    {
+      "file": "images/review-phone.png",
+      "view": "review",
+      "device": "phone",
+      "theme": "dark",
+      "width": 1170,
+      "height": 2532
+    },
+    {
+      "file": "images/inbox-phone.png",
+      "view": "inbox",
+      "device": "phone",
+      "theme": "dark",
+      "width": 1170,
+      "height": 2532
+    }
+  ]
+}
