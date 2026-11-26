@@ -487,12 +487,18 @@ test("the writing reference traces a change to the callers and workflows it affe
     "trace the change to the unchanged code and workflows that reach it.",
     "Name each one that behaves differently, also when the change meant it to.",
     "For three or more, use a table: `Caller | Before | After`.",
-    "A caller that behaves the same goes under Checked, with the kind that shows how you know.",
+    "Name the caller in a few words, and keep a label under 50 characters.",
+    "A label ends at its first colon, so a name such as `src/a.ts:12` splits it.",
+    "The Example keeps its six lines, so show the callers that matter most and name the rest in `body`.",
+    "Callers that behave the same go under Checked as one item, with the kind that shows how you know.",
     "Name every effect outside the stated goal, even one that looks harmless.",
-    "Put it in the topic that owns the changed code.",
-    'never "no callers".',
+    "Put it in a topic, never only under Context or Not checked.",
+    "Use the topic that owns the changed code, or its own topic when the reader decides on it separately.",
+    'Write "none found in a search of `src/` and `test/` for `parseDate(`", never "no callers".',
+    "Name what a search cannot see under Not checked, such as names built at runtime or other repositories.",
     "Before, import form:",
     "After, nightly report:",
+    "so the `parseDate` topic names it.",
   ]) {
     expect(callers).toContain(rule);
   }
