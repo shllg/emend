@@ -4270,7 +4270,7 @@ test("a confirmed live event refetches the review and the Sent notice shows the 
   fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), { target: { value: "Carry on" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   const notice = within(await screen.findByRole("region", { name: "Sent" }));
-  expect(notice.getByRole("status").textContent).toBe("Waiting for the agent to pick this up…");
+  expect((await notice.findByText("Waiting for the agent to pick this up…")).getAttribute("role")).toBe("status");
   pickedUpAt = "2026-03-05T12:00:00.000Z";
   act(() => {
     Events.opened[0]?.emit("confirmed", {
