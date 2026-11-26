@@ -1164,14 +1164,14 @@ function releaseCommand(path: string, quotedWt: string, ids: string[]): string {
 /** What exists after setup and the owner's cleanup commands. Never run automatically. */
 function existsReport(repo: Repo, branch: string, path: string, claims?: string[]): string {
   const wt = quote(join(repo.mainRoot, "bin", "wt"));
-  const lines = [
-    `Branch ${branch} and its worktree ${path} exist. No automatic cleanup was performed.`,
-    `Optional teardown: ${wt} cleanup ${branch}`,
-  ];
+  const lines = [`Branch ${branch} and its worktree ${path} exist. No automatic cleanup was performed.`];
   if (claims) {
     const release = releaseCommand(path, wt, claims);
-    lines.push(`Findings ${claims.join(", ")} stay claimed by ${branch}. Release them with: ${release}`);
+    lines.push(
+      `Findings ${claims.join(", ")} stay claimed by ${branch}. Release them before any teardown with: ${release}`,
+    );
   }
+  lines.push(`Optional teardown: ${wt} cleanup ${branch}`);
   lines.push("This does not end the herdr workspace or terminal.");
   return lines.join("\n");
 }

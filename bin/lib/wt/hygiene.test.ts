@@ -111,6 +111,21 @@ test("e-work and e-pr use the same private security dismissal reason", () => {
   }
 });
 
+test("e-work and e-pr count released findings as not fixed unless stale or dismissed", () => {
+  const rule = "A finding this branch no longer holds, other than a stale or dismissed one, is not fixed.";
+  for (const name of ["e-work", "e-pr"]) {
+    const skill = readFileSync(join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
+    assert.ok(skill.includes(rule), name);
+    assert.doesNotMatch(skill, /stale, dismissed or open|For any other state or claim/, name);
+  }
+});
+
+test("e-pr omits every dismissed finding from PR text", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-pr/SKILL.md"), "utf8");
+  assert.ok(skill.includes("Omit every dismissed finding from all PR text."));
+  assert.doesNotMatch(skill, /Use `stale` or `dismissed`/);
+});
+
 test("the merge skill checks the approved review for late feedback before restarting the gates", () => {
   const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
   const readiness = skill.slice(skill.indexOf("## 2. Readiness"), skill.indexOf("## 3. The approval"));

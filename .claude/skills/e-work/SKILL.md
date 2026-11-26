@@ -178,9 +178,11 @@ Report each finding's outcome. Run `<main>/bin/wt notify blocked`.
 Tell the owner to remove the worktree with `<main>/bin/wt cleanup <branch>`. End the loop as in step 6.
 
 For a fixer run with commits, run `<main>/bin/wt findings show <id>` for each id in `.wt/bundle.json`.
-Each finding fixed by this change must still be claimed by this branch.
-Each settled finding must be stale, dismissed or open.
-If a read fails or any finding falls outside those outcomes, run `<main>/bin/wt notify blocked` and stop.
+A finding still claimed by this branch is fixed by this change.
+A stale or dismissed finding is settled.
+A finding this branch no longer holds, other than a stale or dismissed one, is not fixed.
+Keep its id and reason under "Follow-ups".
+If a read fails, run `<main>/bin/wt notify blocked` and stop.
 
 `pnpm verify` must be green at exactly this content, and the tree must be clean. An issue PR
 closes its issue on merge.

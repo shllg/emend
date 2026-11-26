@@ -364,11 +364,11 @@ test("spawn --findings keeps claims after a workspace failure", () =>
       installFake(env, "herdr", herdrRules(FIXER_AGENT, [{ match: ["worktree", "open"], code: 1 }]));
       await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
         assert.ok(e instanceof WtError);
-        assert.match(e.message, /Optional teardown:/);
         const path = join(repo.worktreesDir, FIXER_BRANCH);
         const release = `cd ${path} && ${repo.mainRoot}/bin/wt findings release ${ids.join(" ")}`;
-        const notice = `Findings ${ids.join(", ")} stay claimed by ${FIXER_BRANCH}. Release them with: ${release}`;
-        assert.ok(e.message.includes(notice));
+        const notice = `Findings ${ids.join(", ")} stay claimed by ${FIXER_BRANCH}. Release them before any teardown with: ${release}`;
+        const releaseIndex = e.message.indexOf(notice);
+        assert.ok(releaseIndex >= 0 && releaseIndex < e.message.indexOf("Optional teardown:"));
         return true;
       });
       for (const id of ids) {

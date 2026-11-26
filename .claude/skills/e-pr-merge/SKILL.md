@@ -263,9 +263,7 @@ text scan alone.
 
 - `QUEUED`: run `<main>/bin/wt notify blocked`, report the warning, and stop without cleanup.
   The owner must check the PR's closed issues after the eventual merge.
-  For a fixer branch, list the findings still claimed by the PR's head branch as in step 8.
-  They stay claimed until the owner runs `bin/wt findings resolve <id> --fixed <merge commit>` for each
-  after the queued merge lands.
+  For a fixer branch, also follow step 8's `QUEUED` paragraph.
 - Continue after a `MERGED <commit>` line with exit 0 and no warning.
 - A `MERGED <commit>` line with a warning or a non-zero exit means the merge happened. Do not retry the merge.
   Run `<main>/bin/wt notify blocked` and report each warning to the owner as written, including
@@ -307,8 +305,11 @@ For a fixer branch in that case, run `<main>/bin/wt findings show <id>` for each
 List only the ids still claimed by the PR's head branch in the report to the owner.
 
 On `QUEUED`, run `<main>/bin/wt notify blocked`.
-For a fixer branch, tell the owner that the listed findings stay claimed until the owner runs
-`bin/wt findings resolve <id> --fixed <merge commit>` for each after the queued merge lands.
+For a fixer branch, list only the findings still claimed by the PR's head branch, as above.
+Tell the owner those findings stay claimed until the queued merge lands.
+After it lands, the owner runs `<main>/bin/wt fetch` once in the main checkout.
+There the owner runs `<main>/bin/wt findings resolve <id> --fixed <merge commit>` for each listed id.
+Use the actual squash commit.
 Stop before sync or cleanup.
 For an owner-run command, keep the worktree unless its visible output shows exit status 0,
 `MERGED <commit>` and no warning, as step 7 requires.
