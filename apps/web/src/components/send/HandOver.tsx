@@ -180,26 +180,33 @@ export function SentNotice({
       } catch {
         reopened = false;
       }
-      if (reopened || !stillPending()) return;
+      if (!stillPending()) return;
+      if (reopened) {
+        markHandoffNotice(reviewId, id, { lost: false });
+        return;
+      }
       // Join a refetch already running (the Send's own) instead of cancelling and restarting it.
       const options = { cancelRefetch: false };
       void client.invalidateQueries({ queryKey: ["inbox"] }, options).catch(() => undefined);
       let slow: number | undefined;
+      let connectionLost = false;
       try {
         // Only the review decides "cannot reach": a slow inbox says nothing about the server.
         await Promise.race([
-          client.invalidateQueries({ queryKey: ["review", reviewId] }, { ...options, throwOnError: true }),
+          client.invalidateQueries(
+            { queryKey: ["review", reviewId], refetchType: "all" },
+            { ...options, throwOnError: true },
+          ),
           new Promise<never>((_, reject) => {
             slow = window.setTimeout(() => reject(TOO_SLOW), HANDOFF_REFETCH_MS);
           }),
         ]);
       } catch (error) {
         // A network failure or a fetch still unfinished counts; an HTTP error means the server answered.
-        if ((error === TOO_SLOW || error instanceof TypeError) && stillPending()) {
-          markHandoffNotice(reviewId, id, { lost: true });
-        }
+        connectionLost = error === TOO_SLOW || error instanceof TypeError;
       }
       window.clearTimeout(slow);
+      if (stillPending()) markHandoffNotice(reviewId, id, { lost: connectionLost });
     };
     // A StrictMode cleanup or an immediate unmount can cancel the ask before it starts.
     queueMicrotask(() => void ask());
@@ -238,15 +245,21 @@ export function SentNotice({
     const timer = window.setTimeout(() => setAnnounced(true), HANDOFF_ANNOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [announced]);
-  // When a pick-up removes the focused resume command, focus moves to Close instead of falling to <body>.
   const closeButton = useRef<HTMLButtonElement>(null);
-  const focusWithin = useRef(false);
+  const removedCommandHadFocus = useRef(false);
+  const commandRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    // Ref cleanup runs while the command and its focused control are still in the document.
+    return () => {
+      removedCommandHadFocus.current = node.contains(document.activeElement);
+    };
+  }, []);
   const showsCommand = !pickedUp && fallback;
   useLayoutEffect(() => {
-    if (showsCommand || !focusWithin.current) return;
+    if (showsCommand || !removedCommandHadFocus.current) return;
+    removedCommandHadFocus.current = false;
     const active = document.activeElement;
-    if (!active || active === document.body || !notice.current?.contains(active))
-      closeButton.current?.focus({ preventScroll: true });
+    if (!active || active === document.body) closeButton.current?.focus({ preventScroll: true });
   }, [showsCommand]);
 
   return (
@@ -255,13 +268,7 @@ export function SentNotice({
       ref={notice}
       className="flex max-h-[min(40dvh,max(5rem,calc(100dvh-22rem)))] flex-col border-b border-line-1 bg-sunken px-4 py-2 max-md:py-1"
       onPointerDownCapture={hold}
-      onFocusCapture={() => {
-        focusWithin.current = true;
-        hold();
-      }}
-      onBlurCapture={(event) => {
-        if (event.relatedTarget) focusWithin.current = false;
-      }}
+      onFocusCapture={hold}
       onKeyDownCapture={(event) => {
         if (event.key === "Escape") {
           event.preventDefault();
@@ -288,7 +295,11 @@ export function SentNotice({
                   : "No agent has picked this up yet. recense keeps it until one does."
                 : "Waiting for the agent to pick this up…"}
         </p>
-        {showsCommand && <ResumeCommand reviewId={reviewId} buttonSize={phone ? "lg" : "sm"} />}
+        {showsCommand && (
+          <div ref={commandRef}>
+            <ResumeCommand reviewId={reviewId} buttonSize={phone ? "lg" : "sm"} />
+          </div>
+        )}
       </div>
     </section>
   );

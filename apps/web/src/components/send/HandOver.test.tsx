@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { ApiError } from "../../api/client.ts";
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
 import { getHandoffNotice } from "../../lib/handoff-notices.ts";
 import { shortDate } from "../../lib/time.ts";
@@ -370,6 +371,28 @@ test("a pick-up that removes the focused resume command moves focus to Close", a
   expect(document.activeElement).toBe(within(sentNotice()).getByRole("button", { name: "Close" }));
 });
 
+test.each([
+  ["the instructions field", () => screen.getByRole("textbox", { name: "Instructions" })],
+  ["the page body", () => document.body],
+  ["the Send button", () => screen.getByRole("button", { name: "Send" })],
+] as const)("a pick-up leaves focus on %s after the reader leaves Copy", async (_name, destination) => {
+  const { update } = mount({ agent: idle });
+  await send();
+  const copy = within(sentNotice()).getByRole("button", { name: "Copy" });
+  act(() => copy.focus());
+  expect(document.activeElement).toBe(copy);
+  const target = destination();
+  act(() => {
+    // Leaving Copy can blur it without a related target before the reader focuses anything else.
+    copy.blur();
+    if (target !== document.body) target.focus();
+  });
+  expect(document.activeElement).toBe(target);
+  update({ agent: { ...idle, pickedUpAt: pickedAt } });
+  expect(within(sentNotice()).queryByRole("button", { name: "Copy" })).toBeNull();
+  expect(document.activeElement).toBe(target);
+});
+
 test("with an agent waiting, the notice waits, then confirms the pick-up and closes by itself", async () => {
   const { update } = mount({ agent: waiting });
   await send();
@@ -540,22 +563,19 @@ const nextRevision = (pendingSend: boolean): SendAgent => ({ ...waiting, pending
 
 /** A registered review query: its fetch answers, never settles or fails, by `probe.mode`. */
 const probe: { mode: "ok" | "hang" | "fail" } = { mode: "ok" };
-function Probe() {
-  useQuery({
-    queryKey: ["review", reviewId],
-    queryFn: () =>
-      probe.mode === "hang"
-        ? new Promise<never>(() => {})
-        : probe.mode === "fail"
-          ? Promise.reject(new TypeError("Failed to fetch"))
-          : Promise.resolve(null),
-  });
+function fetchProbeReview(): Promise<null> {
+  if (probe.mode === "hang") return new Promise<never>(() => {});
+  if (probe.mode === "fail") return Promise.reject(new TypeError("Failed to fetch"));
+  return Promise.resolve(null);
+}
+function Probe({ queryFn }: { queryFn: typeof fetchProbeReview }) {
+  useQuery({ queryKey: ["review", reviewId], queryFn });
   return null;
 }
-function mountProbe() {
-  render(
+function mountProbe(queryFn = fetchProbeReview) {
+  return render(
     <QueryClientProvider client={client}>
-      <Probe />
+      <Probe queryFn={queryFn} />
     </QueryClientProvider>,
   );
 }
@@ -932,6 +952,58 @@ test("a fallback refetch that times out while the reader is away records the fai
   expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
   mount({ agent: waiting });
   expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+});
+
+async function leaveBeforeFirstReviewRefetch() {
+  const fetchReview = vi.fn<typeof fetchProbeReview>().mockResolvedValue(null);
+  const observer = mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await send();
+  const reconnect = Promise.withResolvers<boolean>();
+  vi.mocked(reconnectReviewEvents).mockReturnValueOnce(reconnect.promise);
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  first.unmount();
+  observer.unmount();
+  expect(
+    client
+      .getQueryCache()
+      .find({ queryKey: ["review", reviewId] })
+      ?.getObserversCount(),
+  ).toBe(0);
+  fetchReview.mockClear();
+  return { fetchReview, reconnect };
+}
+
+test("a review that answers the first ask while unobserved shows the plain fallback without asking again", async () => {
+  const { fetchReview, reconnect } = await leaveBeforeFirstReviewRefetch();
+  await act(async () => reconnect.resolve(false));
+  expect(fetchReview).toHaveBeenCalledOnce();
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
+  invalidate.mockClear();
+  mount({ agent: waiting });
+  await settle(HANDOFF_WAIT_MS);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  expect(reviewRefetches()).toBe(0);
+  expect(fetchReview).toHaveBeenCalledOnce();
+});
+
+test("a network failure while away shows the warning on return until the retry receives an HTTP error", async () => {
+  const { fetchReview, reconnect } = await leaveBeforeFirstReviewRefetch();
+  fetchReview.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  await act(async () => reconnect.resolve(false));
+  expect(fetchReview).toHaveBeenCalledOnce();
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+
+  fetchReview.mockRejectedValueOnce(new ApiError(500, "internal_error", "Internal server error"));
+  mount({ agent: waiting });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(fetchReview).toHaveBeenCalledTimes(2);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  expect(getHandoffNotice(reviewId)?.lost).toBe(false);
 });
 
 test("a Send answered by the server opens the notice and frees the button while the refetch never settles", async () => {
