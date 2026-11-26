@@ -18,6 +18,12 @@ export interface ServerReadyOptions extends ServerWaitOptions {
   publicOrigin?: boolean;
 }
 
+export interface ServerReady {
+  url: string;
+  pid: number;
+  publicUrl?: string;
+}
+
 interface ServerStopOptions extends ServerWaitOptions {
   beforeProbe?: (record: ServerRecord) => Promise<void>;
   messages?: (reference: string) => {
@@ -105,27 +111,25 @@ export async function requestServerStop(stateDir: string, opts: ServerStopOption
   throw new CliError(messages.notStopped);
 }
 
-async function publicOriginReady(stateDir: string): Promise<boolean> {
+async function readyPublicOrigin(stateDir: string): Promise<string | undefined> {
   try {
     const record: unknown = JSON.parse(
       (await readRegular(join(stateDir, "server-url.json"), LIMITS.publicJsonBytes)).toString(),
     );
     if (!record || typeof record !== "object" || !("baseUrl" in record) || typeof record.baseUrl !== "string")
-      return false;
-    if (!/^https:\/\/[^/?#\\\s]+\/?$/.test(record.baseUrl)) return false;
+      return undefined;
+    if (!/^https:\/\/[^/?#\\\s]+\/?$/.test(record.baseUrl)) return undefined;
     const url = new URL(record.baseUrl);
-    return !url.username && !url.password && !record.baseUrl.includes("@");
+    if (url.username || url.password || record.baseUrl.includes("@")) return undefined;
+    return url.origin;
   } catch (error) {
     const mapped = stateAccessError(stateDir, error);
     if (mapped instanceof StateFolderWriteError) throw mapped;
-    return false;
+    return undefined;
   }
 }
 
-export async function waitForServer(
-  stateDir: string,
-  opts: ServerReadyOptions = {},
-): Promise<{ url: string; pid: number } | null> {
+export async function waitForServer(stateDir: string, opts: ServerReadyOptions = {}): Promise<ServerReady | null> {
   const now = opts.now ?? (() => performance.now());
   const sleep = opts.sleep ?? delay;
   const deadline = now() + (opts.timeoutMs ?? 15000);
@@ -134,12 +138,12 @@ export async function waitForServer(
     const record = await serverRecord(stateDir);
     if (record && (mainPid === undefined || record.pid === mainPid) && now() < deadline) {
       const result = await probeServer(record, Math.min(200, deadline - now()));
-      if (
-        result.kind === "verified" &&
-        result.capabilities &&
-        (!opts.publicOrigin || (await publicOriginReady(stateDir)))
-      )
-        return { url: record.url, pid: record.pid };
+      if (result.kind === "verified" && result.capabilities) {
+        const server = { url: record.url, pid: record.pid };
+        if (!opts.publicOrigin) return server;
+        const publicUrl = await readyPublicOrigin(stateDir);
+        if (publicUrl !== undefined) return { ...server, publicUrl };
+      }
     }
     await sleep(Math.min(200, Math.max(0, deadline - now())));
   }

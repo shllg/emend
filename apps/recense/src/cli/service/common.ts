@@ -1,15 +1,18 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import { isIP } from "node:net";
 import { dirname, isAbsolute, join } from "node:path";
 import type { Io } from "../../main.ts";
 import type { HolderProbe } from "../../state/legacy.ts";
+import { parseServeArgs } from "../commands/serve.ts";
 import { escapeReference } from "../escape.ts";
 import { findExecutable } from "../executable.ts";
 import { CliError } from "../http.ts";
 import type { CliRuntime } from "../runtime.ts";
 import { runtimeInRepository } from "../runtime-repository.ts";
-import type { ServerReadyOptions } from "./takeover.ts";
+import { readAttachment } from "../target.ts";
+import type { ServerReady, ServerReadyOptions } from "./takeover.ts";
 
 export interface ServiceResult {
   code: number | string;
@@ -33,7 +36,7 @@ export interface ServiceOptions extends Partial<CliRuntime> {
   /** Tests answer which processes hold the old database; the default asks the system. */
   holders?: HolderProbe;
   stopLocalServer?: () => Promise<string | undefined>;
-  waitForServer?: (options: ServerReadyOptions) => Promise<{ url: string; pid: number } | null>;
+  waitForServer?: (options: ServerReadyOptions) => Promise<ServerReady | null>;
 }
 export type ServiceAction = "install" | "uninstall" | "status";
 export type ServiceTool = (args: string[], failure?: "throw" | "report" | "ignore") => Promise<ServiceResult>;
@@ -46,7 +49,7 @@ export interface ServiceContext extends CliRuntime {
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   stopLocalServer: () => Promise<string | undefined>;
-  waitForServer: (options: ServerReadyOptions) => Promise<{ url: string; pid: number } | null>;
+  waitForServer: (options: ServerReadyOptions) => Promise<ServerReady | null>;
 }
 export const unsupportedService =
   "recense service supports systemd on Linux and launchd on macOS; run recense serve yourself.";
@@ -151,6 +154,21 @@ export async function servicePending(stateDir: string) {
 
 export function clearServicePending(stateDir: string) {
   return removeIfPresent(join(stateDir, "service.pending"));
+}
+
+export async function printServiceInstalled(io: Io, stateDir: string, server: ServerReady, flags: string[]) {
+  const { host } = parseServeArgs(flags);
+  const loopback = host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
+  io.stdout("recense: service installed\n");
+  io.stdout(`recense: the service starts at login and serves ${escapeReference(server.publicUrl ?? server.url)}\n`);
+  if (!loopback)
+    io.stdout(`recense: the service listens on ${escapeReference(host)}, so other machines can reach it\n`);
+  const attachment = await readAttachment(stateDir).catch(() => null);
+  io.stdout(
+    attachment
+      ? "This machine publishes to a hub; to pair a browser, run recense pair in your own terminal on the hub.\n"
+      : "To sign a browser in, run recense in your own terminal.\n",
+  );
 }
 
 export function serviceStatus(io: Io, path: string, running: boolean) {

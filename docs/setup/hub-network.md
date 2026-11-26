@@ -136,8 +136,10 @@ recense service install --public-url https://recense.example.com
 recense service status
 ```
 
-You should see `recense: service installed`, then `recense: service running (<path>)`. The service
-log holds `recense: serving https://recense.example.com`.
+You should see `recense: service installed`, then
+`recense: the service starts at login and serves https://recense.example.com`.
+`recense service status` prints `recense: service running (<path>)`. The service log holds
+`recense: serving https://recense.example.com`.
 
 The server still listens on `127.0.0.1:3636`. The address only names where your devices reach it.
 Pairing links, the QR code and review links use it, and recense accepts requests for that name.

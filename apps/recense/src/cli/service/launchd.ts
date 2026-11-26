@@ -4,6 +4,7 @@ import { escapeReference } from "../escape.ts";
 import { CliError } from "../http.ts";
 import {
   clearServicePending,
+  printServiceInstalled,
   readOwnedService,
   type ServiceAction,
   type ServiceContext,
@@ -160,7 +161,7 @@ export async function launchdService(action: ServiceAction, context: ServiceCont
         : `the recense service runs, but this command could not confirm its server; see ${log}, or run recense service install again in your own terminal if an agent sandbox runs this command.`,
     );
   }
-  io.stdout("recense: service installed\n");
+  await printServiceInstalled(io, stateDir, found, flags);
 }
 
 async function waitForBootout(launchctl: ServiceTool, target: string, context: ServiceContext) {

@@ -78,7 +78,8 @@ recense service status
 With `--tailscale`, recense serves the hub on your tailnet through Tailscale Serve on HTTPS port 443, or on the port you choose (below). The
 server itself keeps listening on `127.0.0.1:3636`; Tailscale Serve forwards the HTTPS requests to
 it. Only devices on your tailnet reach the address. You should see `recense: service installed`,
-then `recense: service running (<path>)`. The service log then holds
+then `recense: the service starts at login and serves https://<hub>.<tailnet>.ts.net`.
+`recense service status` prints `recense: service running (<path>)`. The service log then holds
 `recense: serving https://<hub>.<tailnet>.ts.net`.
 
 If a server already runs, the command asks it to stop first. See

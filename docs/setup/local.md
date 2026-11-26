@@ -241,16 +241,26 @@ set openBrowser true to run myself.
 
 ## 4. Keep the server running (recommended on a laptop you use daily)
 
-`recense service install` runs the server as a service that starts at login: a systemd user unit on
-Linux, a launchd agent on macOS. Without it, run `recense` again after every reboot or login.
+`recense service install` adds a user service that starts the server at every login. On Linux this
+is a systemd user unit. On macOS it is a launchd agent. `recense service uninstall` removes it
+(see below). The service serves `http://127.0.0.1:3636`, which only this machine reaches.
+Without it, run `recense` again after every reboot or login.
 
 ```sh
 recense service install
 recense service status
 ```
 
-You should see `recense: service installed`, then `recense: service running (<path>)`. The `<path>` is
-the service file: the systemd unit on Linux, the LaunchAgent plist on macOS.
+```text
+recense: service installed
+recense: the service starts at login and serves http://127.0.0.1:3636
+To sign a browser in, run recense in your own terminal.
+recense: service running (<path>)
+```
+
+The last line comes from `recense service status`. The `<path>` is the service file, either the
+systemd unit on Linux or the LaunchAgent plist on macOS. If you have not signed a browser in yet,
+run `recense` as step 3 says.
 
 If a server already runs, the command asks it to stop so the service can take over, and prints
 `recense: stopped the recense server at <url>, so the service can take over`. This covers a server
@@ -300,6 +310,8 @@ for my system and to end that server, then run install again. If install prints 
 enable-linger line, give it to me to run. If install fails, show me the log (journalctl --user -u
 recense on Linux, ~/Library/Logs/recense.log on macOS) and diagnose it with
 https://github.com/shllg/recense/blob/release/docs/setup/troubleshooting.md.
+Do not run recense yourself, and if I have not signed a browser in yet, tell me to run recense in
+my own terminal.
 ```
 
 ## 5. Give your agents the skills
