@@ -244,6 +244,7 @@ and a digest of their old and new sides. A review of docs or a plan alone has ze
 `turn` is `agent` after a Send on the newest revision that has not been set aside, `reviewer`
 otherwise, or `null` for an approved or retired review or one without a revision.
 `answerWaiting` is true while a Send still awaits delivery confirmation and has not been set aside.
+An approval of an older revision counts only if a delivery already holds it.
 An older server or hub that omits `diff` or `answerWaiting` gives you `null` for that field.
 
 To check which commit an approval covers, run `recense ls --json --head <sha>` with the full commit
@@ -251,7 +252,9 @@ id (40 or 64 lowercase hex characters). It lists only reviews whose approved or 
 that head. The publisher supplies the head and branch. To rely on an approval, require
 `approved.head` equal to `<sha>`, `approved.revision` equal to `newest.revision` and the expected
 `branch`. Require `approved.diff.digest` to equal the digest of your change from its merge base
-to `<sha>`, using the rule in [docs/api.md](api.md). Also require `answerWaiting` to be `false`.
+to `<sha>`, using the rule in [docs/api.md](api.md). A match means the revision held exactly those
+file versions, without proving the reviewer opened each one or checking file modes. Also require
+`answerWaiting` to be `false`.
 An item with `newest.head` equal to `<sha>` and `approved: null` still awaits approval.
 Listing reads only, takes no comments and changes nothing.
 

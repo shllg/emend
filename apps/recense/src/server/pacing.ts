@@ -1,6 +1,7 @@
 import { setImmediate } from "node:timers/promises";
 
 export type PacingPhase =
+  | "agent-review-diff"
   | "publish-counts"
   | "publish-files"
   | "publish-placements"

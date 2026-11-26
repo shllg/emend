@@ -114,11 +114,26 @@ test("a published change has the same listed digest as git without rename detect
   await writeFile(join(root, "delete.txt"), "discarded\n");
   await writeFile(join(root, "edit.txt"), "original\n");
   await writeFile(join(root, "old.txt"), "moves intact\n");
+  // Two synthetic 1x1 PNG files: one red pixel, then one blue pixel.
+  await writeFile(
+    join(root, "logo.png"),
+    Buffer.from(
+      "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c49444154789c63f8cfc0000003010100c9fe92ef0000000049454e44ae426082",
+      "hex",
+    ),
+  );
   const base = await commit();
   await rm(join(root, "delete.txt"));
   await writeFile(join(root, "edit.txt"), "edited\n");
   await rename(join(root, "old.txt"), join(root, "moved.txt"));
   await writeFile(join(root, "added.txt"), "added\n");
+  await writeFile(
+    join(root, "logo.png"),
+    Buffer.from(
+      "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c49444154789c636060f80f00010301000889c2ec0000000049454e44ae426082",
+      "hex",
+    ),
+  );
   const head = await commit();
   const prepared = await prepare(base, head);
   expect(prepared.code, prepared.stderr).toBe(0);
@@ -148,7 +163,7 @@ test("a published change has the same listed digest as git without rename detect
     .digest("hex");
   const listed = await command("ls", "--json", "--head", head);
   expect(listed.code, listed.stderr).toBe(0);
-  expect(JSON.parse(listed.stdout).items).toMatchObject([{ newest: { head, diff: { files: 4, digest } } }]);
+  expect(JSON.parse(listed.stdout).items).toMatchObject([{ newest: { head, diff: { files: 5, digest } } }]);
 });
 
 test("prepares a committed branch in listing order and resolves the same files as a handwritten manifest", async () => {

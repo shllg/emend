@@ -1679,23 +1679,34 @@ the review's address on this server. The list carries no comment bodies,
 writeup text, doc content, tokens or other ids. A reviewer session receives `403 forbidden`.
 
 `diff` is `{ files, digest }` for that revision. `files` counts the owner's file rows for the
-revision with role `diff` (zero for docs or a plan alone). For each such row, write one line per
-side as `<sidePath>\t<side>\t<value>\n`, with literal tabs and a final newline. Include the
-`old` side unless status is `added`, and the `new` side unless status is `deleted`. All other
-statuses, including null, contribute both sides. Use `oldPath` for the old side when present
-and `path` otherwise. The new side always uses `path`. The value is the stored `old_blob` or
-`new_blob` hash for that side. If null, use the row's flag (`binary` or `oversized`), or the
-literal `missing` if the flag is also null. Sort the complete lines by their UTF-8 bytes and
-concatenate them without separators. `digest` is the lowercase hex SHA-256 of those bytes. With
-zero rows the text is empty and the digest is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
-A rename contributes its old and new paths separately, so rename detection does not affect the
-digest. A caller can reproduce the lines from `git diff-tree -r --no-renames <base> <head>` and
-the SHA-256 of each blob's bytes. File modes are outside the digest. A mode-only change contributes
-two lines with the same value.
+revision with role `diff` (zero for docs or a plan alone). For each row, consider the `old` and
+`new` sides independently, in this order of precedence.
+
+1. If a `diff_images` row exists for the side, use its `blob` hash or, when null, its `oversized` flag.
+2. Otherwise, use the side's `old_blob` or `new_blob` hash whenever present, regardless of status.
+3. Otherwise, use the file's flag (`binary` or `oversized`) if present and the status includes that
+   side. `added` includes only new, `deleted` only old, and every other status (including null) includes both.
+4. Otherwise, omit the line for that side.
+
+Write each included line as `<sidePath>\t<side>\t<value>\n`, with literal tabs and a final newline.
+The old side uses `oldPath` when present and `path` otherwise. The new side uses `path`. Sort the
+complete lines by their UTF-8 bytes and concatenate them without separators. `digest` is the
+lowercase hex SHA-256 of those bytes. With zero lines the digest is
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+A side with content contributes the SHA-256 of its stored bytes. Callers can enumerate the sides
+with `git diff-tree -r --no-renames <base> <head>`, since a rename contributes its two paths
+separately. For a committed regular file or symlink, hash the git blob's bytes. For an image side,
+these are the image's bytes. For a submodule (git mode `160000`), publish stores the UTF-8 text
+`Subproject commit <oid>` followed by a line feed, where `<oid>` is the submodule's commit id.
+Hash that text including the line feed. A side stored with only a flag contributes the flag name
+and cannot match a digest computed from that side's bytes.
 
 `answerWaiting` is true while the review holds a Send (`go` or `approve`) with `set_aside_at`
 null whose delivery is unconfirmed. This includes a null `delivery_id` and a delivery whose
-`confirmed_at` is null, whether its lease is live or expired. It is false when no such Send
+`confirmed_at` is null, whether its lease is live or expired. An approval for an older revision
+counts only if a delivery already holds it, because take sets an unclaimed older approval aside.
+It is false when no such Send
 exists. A snoozed or retired review's stop notice does not count. For both `answerWaiting` and
 `diff`, null means the server did not report the field. The schema defaults each to null when
 an older server or hub omits it. If the revision disappears before the server reads its files,
@@ -1723,9 +1734,12 @@ A caller that gates on approval must require a non-null `approved`, `approved.he
 require a non-null `approved.diff` whose `digest` equals the digest it computes by the rule above
 from its own merge base to `sha`, and `answerWaiting === false`. If either field is null, the
 server did not say and the gate refuses. The server computes the digest from the blob hashes stored
-with the revision and checks each blob's hash on upload, so a match means the revision showed
-exactly those sides. A flagged side represented by `binary` or `oversized` showed no content and cannot match
-a digest computed from that side's bytes. The publisher still chooses `base`, and a base that
+with the revision and checks each blob's hash on upload. A match means the revision stored exactly
+those sides and offered them to the reviewer. It does not prove the reviewer read each one.
+An image side appears as a picture, lockfiles start collapsed, and a side represented by a flag
+shows no content. Recense neither stores nor shows file modes or types. A mode-only change
+contributes two lines with the same value, and a regular file and a symlink with the same path and
+bytes give the same lines. The publisher still chooses `base`, and a base that
 yields different sides yields a different digest. With `newest.head === sha` and `approved: null`,
 the commit awaits approval.
 

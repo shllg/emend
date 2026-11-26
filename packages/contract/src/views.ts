@@ -105,7 +105,8 @@ export type AgentReviewTurn = z.infer<typeof AgentReviewTurn>;
  * `approved` is null while no revision is approved, else the approved revision.
  * On an open review, `turn` is `agent` when a Send that is not set aside was made on the newest
  * revision, else `reviewer`. It is null when approved, settled or without a revision.
- * `answerWaiting` says whether a Send is neither set aside nor confirmed. Each revision's `diff`
+ * `answerWaiting` says whether a Send awaits confirmation, excluding set-aside Sends and
+ * unclaimed approvals of older revisions. Each revision's `diff`
  * summarizes its code diff, including an empty one. The null defaults for `turn`, `answerWaiting`
  * and `diff` let clients read lists from older servers or hubs that omit these fields.
  */

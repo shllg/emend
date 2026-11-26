@@ -20,6 +20,7 @@ import {
 } from "../../db/schema.ts";
 import { createToken, hashSecret } from "../auth/tokens.ts";
 import { error, mailboxFixture } from "../mailbox/test-support.ts";
+import { observePacing } from "../pacing-test-support.ts";
 
 let f: Awaited<ReturnType<typeof mailboxFixture>>;
 beforeEach(async () => {
@@ -294,7 +295,7 @@ test("the digest hashes one sorted line for each side shown in the revision's di
     `added\tnew\t${newHash}\nbefore\told\t${oldHash}\nbinary\tnew\tbinary\nbinary\told\tbinary\n` +
     `deleted\told\t${oldHash}\nedit\tnew\t${newHash}\nedit\told\t${oldHash}\n` +
     `large\tnew\toversized\nlarge\told\t${oldHash}\nmode\tnew\t${oldHash}\nmode\told\t${oldHash}\n` +
-    `partial\tnew\t${newHash}\npartial\told\tmissing\nrenamed\tnew\t${newHash}\n`;
+    `partial\tnew\t${newHash}\nrenamed\tnew\t${newHash}\n`;
   expect((await items())[0]?.newest?.diff).toEqual({ files: 8, digest: digest(expected) });
 });
 
@@ -438,9 +439,61 @@ test("an approval of an older revision keeps its own head and diff while a newer
       {
         approved: { revision: 1, head: shaA, diff: { files: 1, digest: digest(`old\told\t${oldHash}\n`) } },
         newest: { revision: 2, head: shaB, diff: { files: 1, digest: digest(`new\tnew\t${newHash}\n`) } },
-        answerWaiting: true,
+        // The approval is unclaimed and its revision is not the newest, so take would set it aside.
+        answerWaiting: false,
       },
     ]);
+  }
+});
+
+test("a delivery that holds an approval of an older revision still counts as a waiting answer", async () => {
+  await approve(f.reviewId, 1);
+  await f.revision(2);
+  const claimed = await f.db.read((q) => q.select().from(sends).where(eq(sends.reviewId, f.reviewId)).get());
+  expect(claimed?.deliveryId).toBeNull();
+  const deliveryId = randomUUID();
+  await f.db.query(async (q) => {
+    await q.insert(deliveries).values({
+      id: deliveryId,
+      ownerId: f.ownerId,
+      reviewId: f.reviewId,
+      leaseUntil: f.deps.now() + 120_000,
+    });
+    await q.update(sends).set({ deliveryId }).where(eq(sends.reviewId, f.reviewId));
+  });
+  expect((await items())[0]?.answerWaiting).toBe(true);
+  await f.db.query((q) => q.update(deliveries).set({ confirmedAt: f.deps.now() }).where(eq(deliveries.id, deliveryId)));
+  expect((await items())[0]?.answerWaiting).toBe(false);
+});
+
+test("a revision of more than 1000 diff rows yields between chunks of at most 500 rows", async () => {
+  const total = 1200;
+  for (let start = 0; start < total; start += 200) {
+    await f.db.query((q) =>
+      q.insert(files).values(
+        Array.from({ length: 200 }, (_, i) => ({
+          ownerId: f.ownerId,
+          revisionId: f.revisionId,
+          path: `file-${String(start + i).padStart(4, "0")}.bin`,
+          role: "diff" as const,
+          status: "added" as const,
+          flag: "binary" as const,
+          ord: start + i,
+          mediaType: "application/octet-stream",
+        })),
+      ),
+    );
+  }
+  const log = observePacing(f.deps);
+  try {
+    const [item] = await items();
+    const lines = Array.from({ length: total }, (_, i) => `file-${String(i).padStart(4, "0")}.bin\tnew\tbinary\n`);
+    expect(item?.newest?.diff).toEqual({ files: total, digest: digest(lines.join("")) });
+    // Each added row makes one line, so the row loop and the hash loop yield at 500 and 1000 each.
+    const phases = log.events.filter((event) => event.kind === "yield" && event.phase === "agent-review-diff");
+    expect(phases).toHaveLength(4);
+  } finally {
+    log.restore();
   }
 });
 
