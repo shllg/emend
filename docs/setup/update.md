@@ -76,9 +76,11 @@ the other options of the recense entry in mise's config. A `postinstall` line
 skills again and updates the Claude Code plugin, and the notes then show the links in
 `~/.agents/skills` on the new version. `recense update` does not pass `CLAUDE_CONFIG_DIR` on,
 so inside it the line updates the plugin only in Claude Code's default config folder.
-The line runs while mise installs, before `recense update` checks the new package, so when the
-update then stops with an error, the service and the skill links can already be on the new
-version; the restore steps it prints ([Undo](#undo)) move them back.
+The line runs while mise installs, before `recense update` checks the new package,
+so when the update then stops with an error, the service and the skill links
+can already be on the new version. The restore steps it prints ([Undo](#undo))
+move the service back; then run `recense skills install` from your home folder
+(with `--dir <folder>` if you link there) to move the links back.
 
 The other steps still apply unless a mise `postinstall` line did them, and the notes name them.
 Update the hub first, link the skills again (step 4), update the
@@ -378,11 +380,14 @@ restoration is needed before changing anything. Keep the quotes,
    `install --global --prefix <prefix> --ignore-scripts @shllg/recense@<old>`; pnpm uses
    `add --global --ignore-scripts --ignore-pnpmfile @shllg/recense@<old>`; mise uses
    `use --global npm:@shllg/recense@<old>`.
-   With a mise `postinstall` line, that `mise use` runs the line when it installs the old version
-   again: it moves the service and the skill links to the old version and updates the Claude Code
-   plugin to the newest release. That `mise use` runs without `RECENSE_HOME`, so if you set it, the
-   line's `recense service install` points the service at the default state folder, and can create
-   that folder, until step 4 reinstalls the service with your `RECENSE_HOME`.
+   With a mise `postinstall` line, that `mise use` runs the line only when it has to install the old
+   version again; while mise still keeps that version (24 hours, or longer while something uses it),
+   it runs nothing. When the line runs, it moves the service and the skill links to the old version
+   and updates the Claude Code plugin to the newest release. It then runs without `RECENSE_HOME`, so
+   if you set it, the line's `recense service install` points the service at the default state
+   folder, and can create that folder, until step 4 reinstalls the service with your `RECENSE_HOME`.
+   The list has no step for the skill links: if you linked them, run `recense skills install` from
+   your home folder afterwards (with `--dir <folder>` if you link there).
    Without a service, restore first, then run the printed Node.js and restored old entry with
    `stop`. It waits until the server process exits or removes its discovery record after database
    cleanup, even when the listener has already closed.

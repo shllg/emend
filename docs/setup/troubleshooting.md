@@ -613,9 +613,8 @@ Fix:
   [local.md](local.md#2-install-recense) says, or add `allow_low_downloads = true` to the
   recense entry under `[tools]` in `~/.config/mise/config.toml`.
 - For the 24-hour hold, add `"npm:@shllg/recense"` to `minimum_release_age_excludes` under
-  `[settings]` in the same file. Or keep the hold, which gives a broken release time to be found
-  and withdrawn, and run the update again after the `eligible` date mise printed: mise installs
-  nothing by itself.
+  `[settings]` in the same file. Or keep the hold, which gives a broken release time to be
+  found and withdrawn, and run the update again after the `eligible` date mise printed.
 
 ## The skills links are broken after an update
 
