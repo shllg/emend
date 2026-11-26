@@ -81,7 +81,8 @@ Show each in the Example as its own rows, with the caller in each label:
 Name the caller in a few words, and keep a label under 50 characters.
 A label ends at its first colon, so a name such as `src/a.ts:12` splits it.
 For three or more, use a table: `Caller | Before | After`.
-The Example keeps its six lines, so show the callers that matter most and name the rest in `body`.
+The Example keeps its six lines, so show the callers that matter most there.
+In `body`, give each other changed caller its own Before and After.
 Callers that behave the same go under Checked as one item, with the kind that shows how you know.
 
 Name every effect outside the stated goal, even one that looks harmless.
