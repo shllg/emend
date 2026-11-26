@@ -104,6 +104,10 @@ content, or after a review round in step 7, bring them up to date. When either i
 The bundle lines follow `/e-pr`'s rule. Their `.wt/bundle-diff.json` must have `head` equal to
 the PR head. Run `pnpm bundle:diff --json <top>/.wt/bundle-diff.json` first when it does not.
 
+For a fixer run, check the first line of `.wt/bundle-fixed.txt` against the current PR head.
+After a fix commit or rebase, re-check which findings the change at that head fixes.
+Rewrite the file as in `/e-work` step 4 before using its ids in the Summary.
+
 ## 4. Fetch the whole feedback surface
 
 Run `<main>/bin/wt fetch`, then read
@@ -322,6 +326,8 @@ for CI and threads; back here, the list above picks the next round.
 ## 8. Hand-off in recense
 
 1. Check once more: tree clean, `git rev-parse HEAD` equals `headRefOid`, CI green.
+   For a fixer hand-off, the first line of `.wt/bundle-fixed.txt` must be `head <full PR head commit>`.
+   If it differs, re-check the findings and rewrite the file as in step 3.
 2. Make the review folder: `<top>/.wt/review`, where `<top>` is `git rev-parse --show-toplevel`.
    Create it with `mkdir -p -m 700 <top>/.wt/review`, written out literally. It is per worktree
    and gitignored, and only this worktree's session writes it.
@@ -331,6 +337,10 @@ for CI and threads; back here, the list above picks the next round.
    and each reason from `.wt/bundle-reason.md`. Tell it to list the summary under `checked`.
    When a route is over 5 KB, tell it to name that growth and its reason as the **Biggest risk**
    in `whereToLook`.
+   For a fixer run, give it the fixed ids from `.wt/bundle-fixed.txt`.
+   Have it list those ids in the local hand-off writeup so the owner approves them with the head.
+   If the list is empty, have it say so.
+   Include private findings in that local writeup as `/e-work` directs.
    It returns the review id, the revision, the URL, the literal review folder, the directory it
    published from and the wait command.
 4. A subagent cannot wait, so this session waits. The subagent set `decisions` to `null`. If this
@@ -348,6 +358,8 @@ rebase cannot wait (a conflict, or CI red only because `main` moved), stop the w
 stop the loop.
 
 ## 9. Act on the answer
+
+For every new fixer revision, follow steps 8.1 and 8.3 for the fixed ids and the local hand-off writeup.
 
 - `go`: handle it with `recense-feedback`. Fixes go back through steps 1 to 7 (commit, push, CI,
   threads, and one `owner-check` round over these fixes in step 7). Then publish the next revision

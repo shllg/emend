@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
@@ -61,6 +61,20 @@ test("gc reports orphaned claims and releases them only with --prune", () =>
     assert.equal(released.state, "open");
     assert.equal(Object.hasOwn(released, "claim"), false);
     assert.equal(showFinding(repo, live).state, "claimed");
+  }));
+
+test("gc keeps a locked worktree's claim when its directory is missing", () =>
+  scenario(({ repo, fx }) => {
+    const branch = "locked-worker";
+    const wt = setup(repo, { branch, busy: new Set() });
+    const id = claim(repo, branch, wt.path);
+    gitIn(fx.main, "worktree", "lock", wt.path);
+    rmSync(wt.path, { recursive: true });
+    const before = showFinding(repo, id);
+    for (const prune of [false, true]) {
+      assert.equal(find(gc(repo, prune).items, "orphaned-claim", id)?.state, "locked");
+      assert.deepEqual(showFinding(repo, id), before);
+    }
   }));
 
 test("gc keeps a claim that changed after the scan", () =>

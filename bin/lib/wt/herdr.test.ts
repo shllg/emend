@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
@@ -13,6 +14,7 @@ import {
 import {
   agentName,
   closeWorkspace,
+  fixerAgentName,
   HerdrError,
   herdrCall,
   herdrLocatedAgents,
@@ -142,6 +144,7 @@ function herdrRules(agent: string, extra: FakeRule[] = []): FakeRule[] {
 const SPAWN_ARGS = ["spawn", "--issue", "42"];
 
 const FIXER_BRANCH = "recense-fix-20260103-readme-md";
+const FIXER_AGENT = "wt-fix-20260103-readme-md";
 const fixerClock = () => ({ ...fakeClock(), date: () => new Date("2026-01-02T19:15:00-05:00") });
 
 function recordFinding(repo: Repo, overrides: Partial<FindingInput> = {}): string {
@@ -168,9 +171,10 @@ test("spawn --findings claims, snapshots and prompts", () =>
         const { title, detail, path, line, kind, rule, severity, size, commit, createdAt } = showFinding(repo, id);
         return { id, title, detail, path, line, kind, rule, severity, size, commit, createdAt };
       });
-      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH)));
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
       const r = await spawn(repo, { findings: [...ids, second], slug: "readme-md", mode: "github" }, fixerClock());
       assert.equal(r.branch, FIXER_BRANCH);
+      assert.equal(r.agent, FIXER_AGENT);
       assert.deepEqual(r.findings, ids);
       assert.equal(r.issue, undefined);
       const wt = join(r.path, ".wt");
@@ -255,12 +259,31 @@ test("spawn --findings refuses invalid requests before setup", () =>
     assert.deepEqual(fakeCalls(env, "herdr"), []);
   }));
 
+test("spawn --findings refuses a non-GitHub origin before setup or claims", () =>
+  scenario({}, ({ env, fx, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      const before = showFinding(repo, id);
+      gitIn(fx.main, "remote", "set-url", "origin", fx.main);
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
+      await assert.rejects(spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock()), {
+        code: 2,
+        message: /origin must identify a github\.com repository.*Nothing was created\./,
+      });
+      assert.deepEqual(showFinding(repo, id), before);
+      assert.deepEqual(readRegistry(repo).worktrees, {});
+      assert.equal(existsSync(repo.worktreesDir), false);
+      assert.equal(gitIn(fx.main, "branch", "--list", FIXER_BRANCH), "");
+      assert.deepEqual(fakeCalls(env, "herdr"), []);
+    }),
+  ));
+
 test("spawn --findings refuses a taken finding or branch", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
       const start = () => spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock());
-      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH)));
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
       const pending = start();
       // The first read saw an open finding. Claim it while spawn is waiting for its port probes.
       claimFindings(repo, [id], { branch: "other-worker", worktree: fx.main });
@@ -284,18 +307,23 @@ test("spawn --findings refuses a taken finding or branch", () =>
     }),
   ));
 
-test("spawn --findings reports a lost claim before writing the brief", () =>
+test("spawn --findings reports how to check and release claims before writing the brief", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
-      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH)));
+      const ids = [id, recordFinding(repo, { kind: "docs" })];
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
       setBeforeWorktreeAddHookForTests(() => claimFindings(repo, [id], { branch: "other-worker", worktree: fx.main }));
       try {
-        await assert.rejects(spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
+        await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
           assert.ok(e instanceof WtError);
-          assert.match(e.message, /findings were not claimed/);
+          const wt = join(repo.mainRoot, "bin/wt");
+          assert.ok(e.message.includes(`A failed write can leave some of these findings claimed: ${ids.join(", ")}.`));
+          for (const id of ids) assert.ok(e.message.includes(`Check each with: ${wt} findings show ${id}`));
+          const release = `${wt} findings release ${ids.join(" ")}`;
+          assert.ok(e.message.includes(`Release any claimed by ${FIXER_BRANCH} with: ${release}`));
           assert.match(e.message, /Optional teardown:/);
-          assert.doesNotMatch(e.message, /findings release/);
+          assert.doesNotMatch(e.message, /findings were not claimed/);
           return true;
         });
       } finally {
@@ -312,7 +340,7 @@ test("spawn --findings keeps claims after a workspace failure", () =>
   scenario({}, ({ env, repo }) =>
     inHerdr(async () => {
       const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
-      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH), [{ match: ["worktree", "open"], code: 1 }]));
+      installFake(env, "herdr", herdrRules(FIXER_AGENT, [{ match: ["worktree", "open"], code: 1 }]));
       await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
         assert.ok(e instanceof WtError);
         assert.match(e.message, /Optional teardown:/);
@@ -567,6 +595,22 @@ test("agent name from a slashed branch", () => {
   assert.equal(agentName("014-add-thing"), "wt-014-add-thing");
   assert.equal(agentName("a".repeat(60)).length, 32);
   assert.equal(agentName("feat//x..y"), "wt-feat-x-y");
+});
+
+test("fixer agent names keep short slugs and distinguish long slugs on the same day", () => {
+  const prefix = "wt-fix-20260103-";
+  const name = (slug: string) => fixerAgentName(`recense-fix-20260103-${slug}`);
+  assert.equal(name("packages-core"), `${prefix}packages-core`);
+  assert.equal(name("abcdefghijklmnop"), `${prefix}abcdefghijklmnop`);
+  const slugs = ["packages-contract", "packages-contracts", "abcdefghijklmnopq"];
+  for (const slug of slugs) {
+    const hash = createHash("sha256").update(`recense-fix-20260103-${slug}`).digest("hex").slice(0, 6);
+    const shortened = slug.startsWith("packages-") ? "packages" : "abcdefghi";
+    assert.equal(name(slug), `${prefix}${shortened}-${hash}`);
+  }
+  const names = ["packages-core", ...slugs].map(name);
+  assert.equal(new Set(names).size, names.length);
+  for (const name of names) assert.match(name, /^[a-z][a-z0-9_-]{0,31}$/);
 });
 
 test("the prompt names the issue and the closing answer", () => {

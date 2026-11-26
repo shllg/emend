@@ -5,7 +5,14 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 import type { Command, CommandTable } from "./command.ts";
 import { type BundleFinding, checkedFindingIds, claimFindings, readBundleFindings } from "./findings.ts";
-import { issueSlug, issueSnapshot, issueSnapshotText, type PickedIssue, pickIssue } from "./issues.ts";
+import {
+  issueSlug,
+  issueSnapshot,
+  issueSnapshotText,
+  originRepository,
+  type PickedIssue,
+  pickIssue,
+} from "./issues.ts";
 import { run } from "./proc.ts";
 import { allocatePort, busyPorts, readRegistry, type WorktreeEntry, withRegistry } from "./registry.ts";
 import { gitTry, listGitWorktrees, type Repo, refExists } from "./repo.ts";
@@ -679,6 +686,14 @@ export function agentName(branch: string): string {
   return name;
 }
 
+/** The fixer branch already has a validated UTC date and slug. */
+export function fixerAgentName(branch: string): string {
+  const name = `wt-${branch.slice(BRANCH_PREFIX.length)}`;
+  if (name.length <= 32) return name;
+  const hash = createHash("sha256").update(branch).digest("hex").slice(0, 6);
+  return `${name.slice(0, 32 - 1 - hash.length).replace(/-$/, "")}-${hash}`;
+}
+
 export function spawnPrompt(task: string, mode: "github" | "local"): string {
   const answer = mode === "local" ? "Land locally after a recense review." : "Open a ready PR and finalize it.";
   return `/loop /e-work ${task} Closing answer from /e-spawn: ${answer}`;
@@ -750,7 +765,7 @@ function claudeExecutable(): string {
   throw new WtError(69, "Claude is unavailable on PATH.");
 }
 
-type Stage = "claiming" | "brief" | "opening" | "already_open" | "starting" | "not_ready" | "mismatch" | "prompting";
+type Stage = "brief" | "opening" | "already_open" | "starting" | "not_ready" | "mismatch" | "prompting";
 
 const SPAWN_USAGE =
   "Usage: bin/wt spawn --issue <n> [--mode github] [--model <m>] [--effort <e>] or " +
@@ -770,6 +785,11 @@ function spawnTask(o: SpawnOptions, clock: SpawnClock): number | { ids: string[]
   const date = (clock.date?.() ?? new Date()).toISOString().slice(0, 10).replaceAll("-", "");
   const branch = branchName(`${BRANCH_PREFIX}fix-${date}-${o.slug}`);
   return { ids: checkedFindingIds(o.findings), slug: o.slug, branch };
+}
+
+function pickFindings(repo: Repo, ids: string[]): BundleFinding[] {
+  originRepository(repo);
+  return readBundleFindings(repo, ids);
 }
 
 /**
@@ -809,7 +829,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
       slugValue = issueSlug(issue.titleOwned ? issue.title : "issue", issue.number);
       branch = `${BRANCH_PREFIX}${issue.number}-${slugValue}`;
     } else {
-      readBundleFindings(repo, task.ids);
+      pickFindings(repo, task.ids);
       slugValue = task.slug;
       branch = task.branch;
     }
@@ -833,7 +853,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
   let agent: string;
   try {
     requireIssueBranch(branch, issue?.number);
-    agent = agentName(branch);
+    agent = typeof task === "number" ? agentName(branch) : fixerAgentName(branch);
     if (
       refExists(repo, `refs/heads/${branch}`) ||
       Object.hasOwn(readRegistry(repo).worktrees, branch) ||
@@ -858,7 +878,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
   // Refresh after all asynchronous preflight work, immediately before setup. No issue comments are read.
   try {
     if (typeof task === "number") issue = pickIssue(repo, task);
-    else findings = readBundleFindings(repo, task.ids);
+    else findings = pickFindings(repo, task.ids);
   } catch (e) {
     throw nothingCreated(e);
   }
@@ -892,12 +912,6 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
     const code: Exit = cause instanceof WtError ? cause.code : 1;
     const herdrCode = cause instanceof HerdrError ? cause.herdrCode : "";
     const why = cause instanceof WtError ? cause.message : "Unexpected failure.";
-    if (stage === "claiming") {
-      return new WtError(
-        code,
-        `${why}\nThe findings were not claimed by this run.\n${existsReport(repo, branch, wt.path)}`,
-      );
-    }
     if (backend === "hc") {
       const lines = [tidy(why, 1000)];
       if (stage === "brief") {
@@ -986,13 +1000,20 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
   };
 
   if (ids) {
-    stage = "claiming";
     try {
       claimFindings(repo, ids, { branch, worktree: wt.path });
     } catch (e) {
-      throw failure(e);
+      const wtBin = quote(join(repo.mainRoot, "bin", "wt"));
+      const lines = [
+        e instanceof WtError ? e.message : "Claiming findings failed.",
+        `A failed write can leave some of these findings claimed: ${ids.join(", ")}.`,
+        ...ids.map((id) => `Check each with: ${wtBin} findings show ${id}`),
+        "Include only ids claimed by this branch in the release command.",
+        `Release any claimed by ${branch} with: ${wtBin} findings release ${ids.join(" ")}`,
+        existsReport(repo, branch, wt.path),
+      ];
+      throw new WtError(e instanceof WtError ? e.code : 1, lines.join("\n"));
     }
-    stage = "brief";
   }
   try {
     writeNew(join(wt.path, ".wt"), "brief.md", `${issue?.url ?? bundlePath}\n`, 0o600);

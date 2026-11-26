@@ -987,6 +987,20 @@ test("land refuses issue branches before creating a commit, even without closing
     assert.deepEqual(readRegistry(repo), registry);
   }));
 
+test("land refuses fixer branches without findings metadata", () =>
+  scenario(({ env, fx, repo }) => {
+    const wt = join(env.root, "unregistered-fixer");
+    gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-fix-20260103-readme", wt, "main");
+    const main = gitIn(fx.main, "rev-parse", "main");
+    const head = commitFile(wt, "a.txt", "a\n");
+    assert.throws(() => land(repo, wt, "fix: a", "", head), {
+      code: 1,
+      message: "Fixer branches must land through a pull request.",
+    });
+    assert.equal(gitIn(fx.main, "rev-parse", "main"), main);
+    assert.equal(gitIn(wt, "for-each-ref", "refs/wt-backup/"), "");
+  }));
+
 for (const [subject, body, message] of [
   ["Fixes #9", "Body", "Only issue branches may close issues."],
   ["feat: a", "Closes #9", "Only issue branches may close issues."],

@@ -69,15 +69,23 @@ stop.
 Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not restate it here.
 
 1. For a fixer run, first re-check each finding on the worktree's base from local main.
-   Resolve each finding that no longer holds with `<main>/bin/wt findings resolve <id> --stale`.
-   If it holds but needs a large fix, security work or a change outside its area, leave it
-   for a follow-up. List its id and reason under "Follow-ups". The merge releases its claim.
+
+   - If a finding turns out to be a security problem, follow the `private` rule in `.claude/rules/review-rounds.md`.
+     Run `<main>/bin/wt findings resolve <id> --dismissed "needs a private security report"`.
+     Run `<main>/bin/wt notify question`.
+     Report it only in the final report to the owner and the local recense hand-off writeup.
+     Keep its id, title and reason out of all PR text, commits, Follow-ups and issues.
+   - Resolve each finding that no longer holds with `<main>/bin/wt findings resolve <id> --stale`.
+   - Use `not fixed` only when the fix needs a large change or goes outside the findings bundle's area.
+     List its id and reason under "Follow-ups". The merge releases its claim.
+
    Plan from the remaining findings, the issue's sections, or the description. Read the rule files
    `AGENTS.md` names for the paths you touch. Stay inside the task's scope: a gap or a new idea goes
    into the PR body as a follow-up, never into the change.
-   **Done when for a fixer run.** Account for every finding. Fix it with a test where behaviour
-   changes, resolve it as stale or with `<main>/bin/wt findings resolve <id> --dismissed <reason>`,
-   or list it as not fixed with its reason.
+   **Done when for a fixer run.** Resolve stale and private findings as above.
+   Fix every remaining finding that still holds and needs a small change within the findings bundle's area.
+   Add a test where behaviour changes.
+   Use `not fixed` only for a large change or a change outside that area. Give its reason under "Follow-ups".
 2. Codex writes the code through `codex-agent`, as `AGENTS.md` says. If Codex cannot run, a Sonnet
    sub-agent writes, and your report says so and why. Commit the checked build as in step 3.
    When the diff from the base to the build commit touches `apps/web/src/`, `apps/web/public/` or
@@ -153,17 +161,18 @@ Commit each logical change as it passes its checks. Do not ask.
 
 - Stage the paths of the change, then run `git commit` with the message. See the commit rule above.
 - Conventional Commits, scope from `AGENTS.md`, summary lowercase and at most 72 characters. The body
-  names the issue as `Issue #<n>`. For a findings bundle, use `Findings <id>, <id>`.
+  names the issue as `Issue #<n>`. For a findings bundle, use `Findings <id>, <id>` with only public ids.
   Trailers: `Sync:` and `BREAKING CHANGE:` only.
 
 ## 4. Before closing
 
 With an issue, run `<main>/bin/wt issue check` again before step 5; any exit but 0 stops the work
-as in step 1. For a findings bundle, skip the issue check. Write `.wt/bundle-fixed.txt` with
-only the ids this change fixes, one per line. An empty file means none. `/e-pr` and
-`/e-pr-merge` read it.
+as in step 1. For a findings bundle, skip the issue check. Write `.wt/bundle-fixed.txt`.
+Its first line is `head <full commit id>` from `git rev-parse HEAD`.
+List only the finding ids fixed by the change at that head, one per line after the head.
+If it fixes none, write only the head line.
 
-For a fixer run, if `git rev-list --count origin/main..HEAD` prints `0`, open no PR.
+For a fixer run, if `git rev-list --count main..HEAD` prints `0`, open no PR.
 For each id in `.wt/bundle.json`, read `<main>/bin/wt findings show <id>`.
 Release each finding still claimed by this branch with `<main>/bin/wt findings release <id>`.
 Report each finding's outcome. Run `<main>/bin/wt notify blocked`.

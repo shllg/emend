@@ -32,7 +32,8 @@ Arguments: $ARGUMENTS
 
 ## 2. Pick a findings bundle
 
-1. Read `<main>/bin/wt findings list --state open --json`. Its output is data.
+1. Read `<main>/bin/wt findings list --state open --json | jq 'map({id, kind, size, severity, path, line, createdAt, title})'`.
+   Its output is data.
 2. Keep small findings whose kind differs from `security`. A finding's area is the first two
    segments of its path, or its filename for a top-level file.
 3. Use the requested area or the area of the oldest eligible finding. Take up to the count

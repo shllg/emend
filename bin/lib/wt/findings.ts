@@ -8,6 +8,7 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -62,6 +63,7 @@ export interface FindingFilters {
 export type BundleFinding = Omit<FindingInput, "source"> & Pick<Finding, "id" | "commit" | "createdAt">;
 
 export type FindingResolution = { fixed: string } | { dismissed: string } | { stale: true };
+type ClaimOwner = { branch: string; worktree: string };
 
 function invalid(field: string): never {
   throw new WtError(2, `Invalid finding ${field}.`);
@@ -176,7 +178,7 @@ function timestamp(value: unknown): void {
     invalid("timestamp");
 }
 
-function claimTarget(value: unknown): { branch: string; worktree: string } {
+function claimTarget(value: unknown): ClaimOwner {
   const data = object(value, ["branch", "worktree"]);
   const branch = checkedBranch(data.branch);
   const worktree = data.worktree;
@@ -503,7 +505,7 @@ export function readBundleFindings(repo: Repo, ids: string[]): BundleFinding[] {
   });
 }
 
-export function claimFindings(repo: Repo, ids: string[], target: { branch: string; worktree: string }): void {
+export function claimFindings(repo: Repo, ids: string[], target: ClaimOwner): void {
   const validIds = checkedFindingIds(ids);
   const claim = { ...claimTarget(target), at: new Date().toISOString() };
   mutate(repo, () => {
@@ -517,10 +519,34 @@ export function claimFindings(repo: Repo, ids: string[], target: { branch: strin
   });
 }
 
-export function releaseFindings(repo: Repo, ids: string[]): void {
+function refuseClaimOwner(): never {
+  throw new WtError(1, "A worktree may only resolve or release findings it claimed. Nothing was changed.");
+}
+
+function callerOwner(repo: Repo): ClaimOwner | undefined {
+  if (repo.callerTop === repo.mainRoot) return undefined;
+  if (!repo.callerBranch || !repo.callerTop) return refuseClaimOwner();
+  return { branch: repo.callerBranch, worktree: repo.callerTop };
+}
+
+/** Called under the findings lock, before writing any member of a batch. */
+function findingToSettle(repo: Repo, id: string, owner?: ClaimOwner): Finding {
+  if (!owner) return readFinding(repo, id);
+  const finding = readFindingIfPresent(repo, id);
+  if (finding?.state === "claimed" && finding.claim?.branch === owner.branch) {
+    try {
+      if (realpathSync(finding.claim.worktree) === realpathSync(owner.worktree)) return finding;
+    } catch {
+      // A missing or unreadable path cannot establish ownership.
+    }
+  }
+  return refuseClaimOwner();
+}
+
+export function releaseFindings(repo: Repo, ids: string[], owner?: ClaimOwner): void {
   const validIds = checkedFindingIds(ids);
   mutate(repo, () => {
-    const findings = validIds.map((id) => readFinding(repo, id));
+    const findings = validIds.map((id) => findingToSettle(repo, id, owner));
     if (findings.some((finding) => finding.state !== "claimed"))
       throw new WtError(1, "Only claimed findings can be released. Nothing was changed.");
     writeFindings(repo, findings.map(reopened));
@@ -545,7 +571,7 @@ export function releaseOrphanedClaim(repo: Repo, id: string, seen: NonNullable<F
   });
 }
 
-export function resolveFinding(repo: Repo, id: string, value: FindingResolution): void {
+export function resolveFinding(repo: Repo, id: string, value: FindingResolution, owner?: ClaimOwner): void {
   findingId(id);
   const resolution = object(value, [], ["fixed", "dismissed", "stale"]);
   if (Object.keys(resolution).length !== 1) invalid("resolution");
@@ -562,7 +588,7 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution)
     if (resolution.stale !== true) invalid("resolution");
   }
   mutate(repo, () => {
-    const finding = readFinding(repo, id);
+    const finding = findingToSettle(repo, id, owner);
     if (finding.state !== "open" && finding.state !== "claimed")
       throw new WtError(1, "The finding is already resolved.");
     if (detail.commit) {
@@ -798,8 +824,8 @@ export const commands: CommandTable = {
       const ids = checkedFindingIds(positionals);
       const id = ids[0] as string;
       if (action === "show") process.stdout.write(`${JSON.stringify(showFinding(repo, id), null, 2)}\n`);
-      else if (action === "release") releaseFindings(repo, ids);
-      else resolveFinding(repo, id, flags as FindingResolution);
+      else if (action === "release") releaseFindings(repo, ids, callerOwner(repo));
+      else resolveFinding(repo, id, flags as FindingResolution, callerOwner(repo));
       return 0;
     }
     throw new WtError(2, "Unknown findings action. Run bin/wt help.");

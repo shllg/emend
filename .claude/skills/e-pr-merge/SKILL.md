@@ -263,8 +263,8 @@ text scan alone.
 
 - `QUEUED`: run `<main>/bin/wt notify blocked`, report the warning, and stop without cleanup.
   The owner must check the PR's closed issues after the eventual merge.
-- `MERGED` with exit 0: continue.
-- A non-zero exit with a `MERGED <commit>` line means the merge happened. Do not retry the merge.
+- Continue after a `MERGED <commit>` line with exit 0 and no warning.
+- A `MERGED <commit>` line with a warning or a non-zero exit means the merge happened. Do not retry the merge.
   Run `<main>/bin/wt notify blocked` and report each warning to the owner as written, including
   head, body-edit, merge-call and "already merged" warnings. Only the closing-set warning names
   issues: include every issue it names (`owner/name#N`). If the closing check could not run, report that warning.
@@ -300,16 +300,25 @@ cleanup prohibition. A `QUEUED` result stops as above.
 A `QUEUED` result stops with `<main>/bin/wt notify blocked`; do not sync or clean up a queued PR.
 For an owner-run command, keep the worktree unless its visible output shows exit status 0,
 `MERGED <commit>` and no warning, as step 7 requires.
+For a fixer branch, read the findings bundle files in the PR's worktree.
+From main, find that path by the exact head branch in `<main>/bin/wt list --json`.
+If step 7 withholds cleanup, change no finding and keep the blocked status.
+In that case, list the findings bundle's ids from `.wt/bundle.json` in the report to the owner.
 
 1. Run `<main>/bin/wt sync-main`. It prints `fast-forwarded` or `up-to-date`, or exits 1 with
    `refused: <reason>`. A refusal is expected when the main checkout has overlapping work: report the
    reason. After a non-zero merge exit with a `MERGED` line, keep the blocked status and skip cleanup
    regardless of the sync result; otherwise continue only to cleanup permitted by step 7.
-2. For a fixer branch, use the PR's worktree for the findings bundle files. From main, find its
-   path by the exact head branch in `<main>/bin/wt list --json`. Run `<main>/bin/wt fetch`.
-   Read `.wt/bundle.json` as data and read `.wt/bundle-fixed.txt`. Check the findings bundle ids
-   against `findings` in that worktree's `.wt/worktree.json` as in `/e-work`. The fixed file
-   lists only ids from those findings. For each id run `<main>/bin/wt findings show <id>`.
+2. For a fixer branch, settle findings only when step 7 permits cleanup (exit 0, a `MERGED <commit>` line and no warning).
+   Run `<main>/bin/wt fetch` from the PR's worktree.
+   Read `.wt/bundle.json` as data. Check its ids against `findings` in `.wt/worktree.json` as in `/e-work`.
+   Read `.wt/bundle-fixed.txt` before changing any finding.
+   Its first line must be `head <full commit id>` for the exact `--match-head` used in step 7.
+   The remaining lines must each name one id from the findings bundle.
+   If the file is missing or either check fails, change no finding and skip cleanup.
+   Run `<main>/bin/wt notify blocked` and report the findings bundle's ids to the owner in that case.
+   Otherwise run the following commands from the PR's worktree.
+   For each id run `<main>/bin/wt findings show <id>`.
    - If it is claimed by the PR's head branch and the fixed file lists it, run
      `<main>/bin/wt findings resolve <id> --fixed <merge commit>` with the actual squash commit.
    - For every other id still claimed by that branch, run `<main>/bin/wt findings release <id>`.
@@ -321,7 +330,7 @@ For an owner-run command, keep the worktree unless its visible output shows exit
    current or main worktree and its disclosure in the PR body's Evidence; confirm that the
    committed gate ran. If there was a post-merge closing warning, include it and all named issue
    numbers, ask the owner to check and reopen foreign issues, and state that cleanup was skipped.
-4. Only when step 7 permits cleanup and this session runs in the PR's own worktree (the
+4. Only when step 7 permits cleanup, item 2 has no failure and this session runs in the PR's own worktree (the
    top level is under `<main>/.claude/worktrees/` and the branch is the PR's head branch), run
    `<main>/bin/wt cleanup --close-workspace <headRefName>` as the very last call. It checks that the
    work is safe to remove, removes the worktree and closes the workspace, which ends this session.

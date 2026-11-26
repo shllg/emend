@@ -927,6 +927,10 @@ export function gc(repo: Repo, prune: boolean, releaseClaim = releaseOrphanedCla
     if (!finding.orphaned || !finding.claim) continue;
     const item: GcItem = { kind: "orphaned-claim", name: finding.id, state: "found" };
     items.push(item);
+    if (lockedPaths.has(resolve(finding.claim.worktree))) {
+      item.state = "locked";
+      continue;
+    }
     if (!prune) continue;
     if (releaseClaim(repo, finding.id, finding.claim)) item.state = "released";
     else {

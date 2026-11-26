@@ -550,6 +550,46 @@ test("resolve and release implement state transitions and clear claims", async (
   }
 });
 
+test("a linked worktree can release and resolve only its own claims", async () => {
+  const branch = "recense-linked";
+  const worktree = join(env.root, "linked");
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", branch, worktree);
+  const alias = join(env.root, "alias");
+  symlinkSync(worktree, alias);
+  const own = addFinding(repo, input()).id;
+  const otherBranch = addFinding(repo, input({ rule: "other-branch" })).id;
+  const otherPath = addFinding(repo, input({ rule: "other-path" })).id;
+  const open = addFinding(repo, input({ rule: "open" })).id;
+  claimFindings(repo, [own], { branch, worktree: alias });
+  claimFindings(repo, [otherBranch], { branch: "other-worker", worktree });
+  claimFindings(repo, [otherPath], { branch, worktree: fx.main });
+  const linked = (...args: string[]) => runWt(join(fx.main, "bin/wt"), ["findings", ...args], { cwd: worktree });
+  const before = listFindings(repo);
+  const refused = async (...args: string[]) => {
+    const result = await linked(...args);
+    assert.equal(result.code, 1, result.stderr);
+    assert.match(result.stderr, /A worktree may only resolve or release findings it claimed\. Nothing was changed\./);
+    assert.deepEqual(listFindings(repo), before);
+  };
+  for (const id of [open, otherBranch, otherPath]) {
+    await refused("release", own, id);
+    await refused("resolve", id, "--stale");
+  }
+  gitIn(worktree, "switch", "--detach");
+  await refused("release", own);
+  await refused("resolve", own, "--stale");
+  gitIn(worktree, "switch", branch);
+  assert.equal((await linked("release", own)).code, 0);
+  assert.equal(showFinding(repo, own).state, "open");
+  claimFindings(repo, [own], { branch, worktree: alias });
+  assert.equal((await linked("resolve", own, "--stale")).code, 0);
+  assert.equal(showFinding(repo, own).state, "stale");
+
+  assert.equal((await cli("release", otherBranch)).code, 0);
+  assert.equal((await cli("resolve", otherPath, "--stale")).code, 0);
+  assert.equal((await cli("resolve", open, "--stale")).code, 0);
+});
+
 test("release validates the whole batch before writing", () => {
   const claimed = addFinding(repo, input()).id;
   const open = addFinding(repo, input({ rule: "open" })).id;
