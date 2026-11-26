@@ -89,7 +89,7 @@ it: run it on each machine.
 
 ## Set it up with an agent
 
-```text
+```text prompt
 Rules: never run recense update yourself; give it to me to run in my own terminal; run the
 steps yourself and show me what each command printed; before you change an agent's permission
 or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the change
@@ -125,7 +125,7 @@ print `recense: client_outdated`, and `recense attach` prints `recense: The clie
 first, and the new version raises that minimum, the old machines stop. Do these steps on the hub,
 then repeat them on each attached machine ([attach.md](attach.md)).
 
-```text
+```text prompt
 Rules: never run recense update yourself; give it to me to run in my own terminal; never read secrets (tokens, .env files, credential stores) or recense's state folder.
 Tell me which of these I run recense on: a hub, attached machines, a single machine. If I run a hub,
 remind me to update the hub first and the attached machines after it.
@@ -216,7 +216,7 @@ version can come first; the service install right after it fixes that. Check it:
 version, and `recense skills install --dry-run` (with your `--dir <folder>`
 if you link there) prints `... already linked` for each skill you linked.
 
-```text
+```text prompt
 Rules: never run recense update yourself; give it to me to run in my own terminal; show me
 each change and wait for my yes; never read secrets (tokens, .env files, credential stores)
 or recense's state folder; never open mise's config files and never run a mise
@@ -271,7 +271,7 @@ If `recense service install` or `recense stop` says a server is from an older re
 to stop, see
 [troubleshooting.md](troubleshooting.md#a-server-from-an-older-recense-cannot-be-asked-to-stop).
 
-```text
+```text prompt
 Rules: never run recense update yourself; give it to me to run in my own terminal; show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; outside your sandbox run only recense service install (no new flags),
 recense service status and recense stop, and no other command; never pass --host or any flag this page
@@ -296,7 +296,7 @@ recense skills install
 
 You should see `linked ...` for each skill, or `... already linked` when nothing changed.
 
-```text
+```text prompt
 Rules: never run recense update yourself; give it to me to run in my own terminal; show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; if a dotfiles tool manages a file or link you would change (a
 symlink into a dotfiles repository, stow, chezmoi, home-manager or similar), change its source and
@@ -317,7 +317,7 @@ Restart Claude Code, or run `/reload-plugins` in a running session. If you turne
 for the marketplace in `/plugin`, under Marketplaces, Claude Code does this for you; you can still
 run the commands. See [agents.md](agents.md#1-add-the-plugin-to-claude-code).
 
-```text
+```text prompt
 Rules: never run recense update yourself; give it to me to run in my own terminal; never read secrets (tokens, .env files, credential stores) or recense's state folder; never
 run claude plugin commands yourself.
 If I use the recense plugin in Claude Code, give me claude plugin marketplace update recense and claude
@@ -338,7 +338,7 @@ secure shows `Updates need the installed app over a secure connection.`
 
 You do this step on the phone yourself.
 
-```text
+```text prompt
 Rules: never run recense update yourself; give it to me to run in my own terminal; never read secrets (tokens, .env files, credential stores) or recense's state folder.
 Remind me to update the recense app on my phone after the hub is updated: open Devices, find the App
 section, tap Check for update, then Update now, then Reload. Do not try to do this for me.

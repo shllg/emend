@@ -8,7 +8,7 @@ device reaches them.
 
 ## Set it up with an agent
 
-```text
+```text prompt
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me the
 change and wait for my yes; never read secrets (tokens, .env files, credential stores) or recense's
@@ -59,7 +59,7 @@ serve --tailscale.`, the hub does not know its public address yet. Finish
 
 You run this yourself: the link is a one-time secret.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never run
 recense pair, attach, detach, config or devices yourself, give me the command instead.
 Tell me to run recense pair --machine myself in a terminal on my hub, and to copy the recense attach
@@ -103,7 +103,7 @@ at once on the hub: `recense devices`, then `recense devices --revoke <id>`.
 You run this yourself, never an agent: attaching sends this machine's reviews to the hub. See
 [What an agent can do with recense](agents.md#what-an-agent-can-do-with-recense).
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never run
 recense pair, attach, detach, config or devices yourself, give me the command instead.
 Tell me to run the recense attach <link> command from my hub myself, on this machine, and what the
@@ -121,7 +121,7 @@ the hub's address, or opens it in your browser when `openBrowser` is on. A brows
 is not paired yet: pair it from the hub with `recense pair`. If you installed a service on this
 machine earlier and want none, run `recense service uninstall`.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; if a dotfiles tool manages a file or link you would change (a
 symlink into a dotfiles repository, stow, chezmoi, home-manager or similar), change its source and

@@ -62,7 +62,7 @@ It links to the [recense-theme skill](skills/recense-theme/SKILL.md) at the runn
 or at `main` for a build without a release.
 Write what you want after "What I want:". This example links to `main`:
 
-```text
+```text prompt
 Make me a custom theme for recense. Read the skill at https://raw.githubusercontent.com/shllg/recense/refs/heads/main/docs/skills/recense-theme/SKILL.md and follow it.
 
 What I want: a dark theme called forest, with deep green backgrounds and a warm amber accent. Keep it easy to read.
@@ -274,7 +274,7 @@ The command gives up after 2 seconds; `RECENSE_STATUS_LINE_DEADLINE_MS` (100 to 
 
 Paste this prompt into Claude Code:
 
-```text
+```text prompt
 Add recense to my Claude Code status line. In my ~/.claude/settings.json, add a statusLine setting of type command that runs recense status --line.
 
 Keep any existing status line by printing both: the existing command's output, a separator, then recense's line. Show me the change before saving it.

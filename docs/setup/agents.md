@@ -7,7 +7,7 @@ agent side.
 
 ## Set it up with an agent
 
-```text
+```text prompt
 Rules: run the steps yourself and show me what each command printed; before you change an agent's
 permission or sandbox settings (for example ~/.claude/settings.json or ~/.codex/rules/), show me
 the change and wait for my yes; never read secrets (tokens, .env files, credential stores) or
@@ -57,7 +57,7 @@ choose Marketplaces, choose `recense`, and turn on auto-update. Without it, upda
 Do not add the marketplace twice from two sources. If you work in a recense checkout, add the
 checkout as the marketplace instead of `shllg/recense@release`, never both.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never
 run claude plugin commands yourself.
 Add the recense plugin to Claude Code: give me claude plugin marketplace add shllg/recense@release and
@@ -93,7 +93,7 @@ recense; move it away, then run recense skills install again`.
 If a dotfiles tool manages `~/.agents/skills`, the links belong in its source. Link into that
 source with `--dir <path>` and apply the change as the tool says.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; if a dotfiles tool manages a file or link you would change (a
 symlink into a dotfiles repository, stow, chezmoi, home-manager or similar), change its source and
@@ -152,7 +152,7 @@ args = ["mcp"]
 
 Restart the agent. You should see a `recense` server in its MCP list.
 
-```text
+```text prompt
 Rules: show me each change and wait for my yes; never read secrets (tokens, .env files, credential
 stores) or recense's state folder; never open ~/.codex/config.toml or ~/.claude/settings.json; if a
 dotfiles tool manages a file or link you would change (a symlink into a dotfiles repository,
@@ -172,7 +172,7 @@ An agent publishes a doc from outside its repository only from a folder you allo
 `recense config add docRoots <folder>`. You run that command, once per folder.
 [local.md](local.md#6-allow-docs-from-other-folders-optional) explains it and what recense refuses.
 
-```text
+```text prompt
 Rules: never read secrets (tokens, .env files, credential stores) or recense's state folder; never
 run recense pair, attach, detach, config or devices yourself, give me the command instead.
 Ask me which folders outside my repositories my agents should publish docs from, check that each

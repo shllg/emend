@@ -13,8 +13,9 @@ The previous release is the highest plain `v<x.y.z>` tag merged into the selecte
 Non-merge commits since that tag count only when they touch a shipped path and their Conventional
 Commit type is neither `test` nor `ci`. Merge wrappers never count. `SHIPPED_PATHS` in
 `scripts/release.ts` is the source of truth: it covers the apps, packages, plugin and marketplace,
-user setup and usage docs, the skills agents follow from a link, README, license, and root package,
-lockfile, workspace, TypeScript config and packing-hook files.
+user setup and usage docs with their site manifest and images, the skills agents follow from a
+link, README, license, and root package, lockfile, workspace, TypeScript config and packing-hook
+files.
 
 - **Patch** (`0.1.1`): fixes, performance work and other counted changes without a feature or
   breaking change.

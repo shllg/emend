@@ -9,7 +9,7 @@ test.each(integrations)("$name prompt matches its usage guide section exactly", 
   const following = lines.slice(heading + 1);
   const nextHeading = following.findIndex((line) => line.startsWith("## "));
   const section = (nextHeading === -1 ? following : following.slice(0, nextHeading)).join("\n");
-  const blocks = [...section.matchAll(/^```text\n([\s\S]*?)^```$/gm)];
+  const blocks = [...section.matchAll(/^```text prompt\n([\s\S]*?)^```$/gm)];
   expect(blocks).toHaveLength(1);
   expect(blocks[0]?.[1]?.replace(/\n$/, "")).toBe(integration.prompt);
 });
