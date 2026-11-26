@@ -1751,12 +1751,15 @@ A caller that gates on approval must require a non-null `approved`, `approved.he
 `approved.revision === newest.revision` (an import can carry an older approval). It must also
 require a non-null `approved.diff` whose `digest` equals the digest it computes by the rule above
 from its own merge base to `sha`, and `answerWaiting === false`. If either field is null, the
-server did not say and the gate refuses. A Send after approval does not revoke the approval.
-If the agent already confirmed the approval, confirming the later Send leaves the item approved with
-`answerWaiting: false`. The list cannot tell whether there was a later Send in this case.
-The gate must also check its own agent's `wait` or `take` results.
-It must not merge while feedback the agent took is still unhandled.
-When the agent acts on feedback, it publishes a new revision. That clears the approval.
+server did not say and the gate refuses. A Send after an unconfirmed approval can still undo it:
+when take claims the approval together with a later Go, it sets the approval aside and reopens the
+review, and `approved` becomes null. A Send after a confirmed approval does not revoke it. Once
+that Send is confirmed too, the item reads as approved with `answerWaiting: false`, and the list
+cannot show that the Send happened. Any agent token of the same instance can take and confirm the
+review's deliveries. The gate must rely on a record of every delivery taken for the review on that
+instance, for example by letting one consumer take them all. It must not merge while any feedback
+taken after the approval is unhandled. Only a new revision clears the approval. A Go handled with
+replies alone, such as an `explain` Go, leaves it in place.
 
 The server computes the digest from the blob hashes stored
 with the revision and checks each blob's hash on upload. A match means the revision stored exactly

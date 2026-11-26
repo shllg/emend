@@ -256,12 +256,14 @@ that head. The publisher supplies the head and branch. To rely on an approval, r
 `branch`. Require `approved.diff.digest` to equal the digest of your change from its merge base
 to `<sha>`, using the rule in [docs/api.md](api.md). A match means the revision held exactly those
 file versions, without proving the reviewer opened each one or checking file modes. Also require
-`answerWaiting` to be `false`. A Send after approval does not revoke the approval.
-If your agent already confirmed the approval, confirming the later Send leaves the item approved with
-`answerWaiting: false`. The list cannot tell you whether there was a later Send in this case.
-Check your agent's record of the answers it took through `wait` or `take`.
-Do not merge while any feedback it took is still unhandled.
-When your agent acts on feedback, it publishes a new revision. That clears the approval.
+`answerWaiting` to be `false`. If your agent takes an approval that is not yet confirmed together
+with a later Go, the approval is set aside and the review reopens. A Send after a confirmed
+approval does not revoke it. Once that Send is confirmed too, the item still reads as approved with
+`answerWaiting: false`, and the list cannot show that the Send happened. Any agent on the same
+machine can take and confirm the review's answers. Keep a record of every answer taken for the
+review, for example by letting one agent take them all. Do not merge while any feedback taken
+after the approval is unhandled. Only a new revision clears the approval. A Go answered with
+replies alone, such as an `explain` Go, leaves it in place.
 
 An item with `newest.head` equal to `<sha>` and `approved: null` means the commit is published
 but has no approval on this review.
