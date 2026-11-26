@@ -8,6 +8,7 @@ const root = resolve(import.meta.dirname, "..", "..", "..");
 
 const SKILLS = [
   "e-spawn",
+  "e-triage",
   "e-fix",
   "e-work",
   "e-pr",
@@ -120,6 +121,35 @@ function fixerBuildItem(): string {
   assert.ok(item, "missing e-work build item 1");
   return item[0];
 }
+
+test("e-fix selects approved findings by priority and counts those waiting for triage", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-fix/SKILL.md"), "utf8");
+  assert.match(skill, /bin\/findings list --state open --triage approved --json/);
+  assert.match(skill, /priority: \.approval\.priority/);
+  assert.match(skill, /sort_by\(\.priority, \.createdAt, \.id\)/);
+  assert.match(skill, /bin\/findings list --state open --triage untriaged --json/);
+});
+
+test("e-triage uses validated ids, literal priorities and a fixed dismissal reason", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-triage/SKILL.md"), "utf8");
+  assert.match(skill, /^disable-model-invocation: true$/m);
+  assert.ok(skill.includes("^f-[0-9a-f]{12}$"));
+  assert.ok(skill.includes("a literal priority from `P0`, `P1`, `P2`"));
+  const commands = [...skill.matchAll(/<main>\/bin\/findings ([^`\n]+)/g)].map((match) => match[1]);
+  assert.deepEqual(commands, [
+    "list --state open --triage untriaged --json",
+    "approve <id> --priority <P>",
+    'resolve <id> --dismissed "skipped by the owner in triage"',
+  ]);
+});
+
+test("e-pr-merge reports FIXED lines and leaves manual resolution to the owner", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
+  const manual = skill.split("\n").filter((line) => line.includes("--fixed"));
+  assert.equal(manual.length, 1);
+  assert.match(manual[0] ?? "", /the owner runs `<main>\/bin\/findings resolve <id> --fixed <merge commit>`/);
+  assert.ok(skill.includes("report the findings named in the merge's `FIXED <id>` lines"));
+});
 
 test("e-work reads each claim before its first resolve in build item 1", () => {
   const item = fixerBuildItem();

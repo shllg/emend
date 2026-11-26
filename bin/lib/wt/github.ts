@@ -13,6 +13,7 @@ import type { Command, CommandTable } from "./command.ts";
 import { gitLocalDiagnostic, repoDiagnostic } from "./diagnostics.ts";
 import { changeDigest } from "./digest.ts";
 import { htmlEntityNames, legacyEntities, legacyEntityNames, namedEntities } from "./entities.ts";
+import { resolveMergedFindings } from "./findings.ts";
 import { checkIssue, githubRepository, originRepository } from "./issues.ts";
 import { type RunResult, run } from "./proc.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
@@ -21,6 +22,7 @@ import { hasTerminal, readTerminalLine } from "./terminal.ts";
 import {
   branchName,
   commitSha,
+  isFixerBranch,
   issueFromBranch,
   NUMERIC_BRANCH,
   oneLine,
@@ -1308,6 +1310,21 @@ export function prMerge(
     if (warnings.length) {
       print(`MERGED ${oid}`);
       throw new WtError(1, warnings.join("\n"));
+    }
+    if (isFixerBranch(branch)) {
+      let fixed: string[];
+      try {
+        fixed = resolveMergedFindings(repo, branch, oid);
+      } catch (error) {
+        print(`MERGED ${oid}`);
+        const reason = error instanceof Error ? error.message.replace(/\.$/, "") : "unknown error";
+        throw new WtError(
+          1,
+          `Warning: the merge is done, but its findings were not recorded as fixed: ${reason}. ` +
+            `From the main checkout, run bin/findings resolve <id> --fixed ${oid} for each finding the branch still claims.`,
+        );
+      }
+      for (const id of fixed) print(`FIXED ${id}`);
     }
     deleteRemoteBranch(repo, pr.headRefName, sha, identity.nameWithOwner);
     return `MERGED ${oid}`;

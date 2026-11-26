@@ -24,6 +24,7 @@ import { branchName, commitSha, parseFlags, readFileBytes, readTextFile, WtError
 
 const KINDS = ["bug", "defect", "test", "docs", "ux", "react-perf", "react-style", "architecture", "security"] as const;
 const STATES = ["open", "claimed", "fixed", "dismissed", "stale"] as const;
+const PRIORITIES = ["P0", "P1", "P2"] as const;
 const INPUT_KEYS = ["title", "detail", "path", "line", "kind", "severity", "size", "source"];
 const HASH = /^[0-9a-f]{64}$/;
 const CONTROLS = /\p{Cc}/u;
@@ -50,12 +51,14 @@ export interface Finding extends FindingInput {
   anchor: string;
   state: (typeof STATES)[number];
   createdAt: string;
+  approval?: { priority: (typeof PRIORITIES)[number]; at: string };
   claim?: { branch: string; worktree: string; at: string };
   resolution?: { at: string; commit?: string; reason?: string };
 }
 
 export interface FindingFilters {
   state?: string;
+  triage?: string;
   kind?: string;
   path?: string;
 }
@@ -210,7 +213,7 @@ function parseStored(value: unknown, id: string): Finding {
   const data = object(
     value,
     [...INPUT_KEYS, "version", "id", "fingerprint", "commit", "anchor", "state", "createdAt"],
-    ["rule", "claim", "resolution"],
+    ["rule", "approval", "claim", "resolution"],
   );
   const input = parseInput(
     Object.fromEntries(
@@ -223,6 +226,11 @@ function parseStored(value: unknown, id: string): Finding {
     invalid("fingerprint");
   commitSha(data.commit as string);
   timestamp(data.createdAt);
+  if (Object.hasOwn(data, "approval")) {
+    const approval = object(data.approval, ["priority", "at"]);
+    choice(approval.priority, PRIORITIES, "priority");
+    timestamp(approval.at);
+  }
   const state = choice(data.state, STATES, "state");
   if (state === "claimed") {
     const claim = object(data.claim, ["branch", "worktree", "at"]);
@@ -445,44 +453,49 @@ export function showFinding(repo: Repo, id: string): Finding & { orphaned: boole
   return withOrphaned(readFinding(repo, findingId(id)));
 }
 
+/** Read under the findings lock. Only a listing may skip an unreadable record. */
+function readStoredFindings(repo: Repo, onSkipped: (message: string) => void = () => storageError()): Finding[] {
+  if (!storageDirectory(repo)) return [];
+  let names: string[];
+  try {
+    names = readdirSync(findingsDir(repo));
+  } catch {
+    return storageError();
+  }
+  const findings: Finding[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const id = name.slice(0, -5);
+    if (!isFindingId(id)) {
+      onSkipped("Skipped a finding file with an invalid name.");
+      continue;
+    }
+    try {
+      findings.push(readFinding(repo, id));
+    } catch {
+      storageDirectory(repo);
+      onSkipped(`Skipped unreadable finding ${id}.`);
+    }
+  }
+  return findings;
+}
+
 export function listFindings(
   repo: Repo,
   filters: FindingFilters = {},
   onSkipped?: (message: string) => void,
 ): (Finding & { orphaned: boolean })[] {
   if (filters.state !== undefined) choice(filters.state, STATES, "state");
+  if (filters.triage !== undefined) choice(filters.triage, ["approved", "untriaged"], "triage");
   if (filters.kind !== undefined) choice(filters.kind, KINDS, "kind");
   if (filters.path !== undefined) inputPath(filters.path);
   if (!storageDirectory(repo)) return [];
-  const findings = withStateLock(repo, "findings", () => {
-    let names: string[];
-    try {
-      names = readdirSync(findingsDir(repo));
-    } catch {
-      return storageError();
-    }
-    const findings: Finding[] = [];
-    for (const name of names) {
-      if (!name.endsWith(".json")) continue;
-      const id = name.slice(0, -5);
-      if (!isFindingId(id)) {
-        onSkipped?.("Skipped a finding file with an invalid name.");
-        continue;
-      }
-      try {
-        findings.push(readFinding(repo, id));
-      } catch {
-        // A bad record is skippable; an unsafe storage directory still fails the call.
-        storageDirectory(repo);
-        onSkipped?.(`Skipped unreadable finding ${id}.`);
-      }
-    }
-    return findings;
-  });
+  const findings = withStateLock(repo, "findings", () => readStoredFindings(repo, (message) => onSkipped?.(message)));
   return findings
     .filter(
       (finding) =>
         (filters.state === undefined || finding.state === filters.state) &&
+        (filters.triage === undefined || filters.triage === (finding.approval ? "approved" : "untriaged")) &&
         (filters.kind === undefined || finding.kind === filters.kind) &&
         (filters.path === undefined || finding.path === filters.path || finding.path.startsWith(`${filters.path}/`)),
     )
@@ -495,12 +508,37 @@ export function checkedFindingIds(ids: string[]): string[] {
   return [...new Set(ids.map(findingId))];
 }
 
+export function approveFindings(repo: Repo, ids: string[], priority: unknown): void {
+  if (repo.callerTop !== repo.mainRoot)
+    throw new WtError(2, "Only the main checkout approves findings. Nothing was changed.");
+  const validIds = checkedFindingIds(ids);
+  if (validIds.length !== ids.length) invalid("ids: duplicates");
+  const checkedPriority = choice(priority, PRIORITIES, "priority");
+  mutate(repo, () => {
+    const approval = { priority: checkedPriority, at: new Date().toISOString() };
+    const findings = validIds.map((id) => {
+      const finding = readFinding(repo, id);
+      if (finding.state !== "open") throw new WtError(1, `Finding ${id} is claimed or resolved. Nothing was changed.`);
+      if (finding.kind === "security" || finding.size === "large")
+        throw new WtError(2, "/e-fix does not take security or large findings. Nothing was changed.");
+      return { ...finding, approval };
+    });
+    writeFindings(repo, findings);
+  });
+}
+
+function requireFindingApproval(finding: Finding): void {
+  if (!finding.approval)
+    throw new WtError(2, `Finding ${finding.id} is not approved for fixing. Run /e-triage first. Nothing was changed.`);
+}
+
 export function readBundleFindings(repo: Repo, ids: string[]): BundleFinding[] {
   return checkedFindingIds(ids).map((id) => {
     const finding = readFinding(repo, id, 2);
     if (finding.state !== "open") throw new WtError(3, `Finding ${id} is already claimed or resolved.`);
     if (finding.kind === "security" || finding.size === "large")
       throw new WtError(2, `Finding ${id} needs an issue. Only small, non-security findings can be bundled.`);
+    requireFindingApproval(finding);
     return finding;
   });
 }
@@ -512,6 +550,7 @@ export function claimFindings(repo: Repo, ids: string[], target: ClaimOwner): vo
     const findings = validIds.map((id) => readFinding(repo, id));
     if (findings.some((finding) => finding.state !== "open" || finding.kind === "security" || finding.size === "large"))
       throw new WtError(1, "Only open, small, non-security findings can be claimed. Nothing was changed.");
+    for (const finding of findings) requireFindingApproval(finding);
     writeFindings(
       repo,
       findings.map((finding) => ({ ...finding, state: "claimed", claim })),
@@ -576,6 +615,24 @@ export function releaseOrphanedClaim(
   });
 }
 
+export function resolveMergedFindings(repo: Repo, branch: string, commit: string): string[] {
+  commitSha(commit);
+  return mutate(repo, () => {
+    const findings = readStoredFindings(repo).filter(
+      (finding) => finding.state === "claimed" && finding.claim?.branch === branch,
+    );
+    if (!findings.length) return [];
+    const resolution = { at: new Date().toISOString(), commit };
+    for (const finding of findings) {
+      delete finding.claim;
+      finding.state = "fixed";
+      finding.resolution = resolution;
+    }
+    writeFindings(repo, findings);
+    return findings.map((finding) => finding.id).sort();
+  });
+}
+
 export function resolveFinding(repo: Repo, id: string, value: FindingResolution, owner?: ClaimOwner): void {
   findingId(id);
   const resolution = object(value, [], ["fixed", "dismissed", "stale"]);
@@ -583,6 +640,11 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution,
   let state: "fixed" | "dismissed" | "stale";
   const detail: NonNullable<Finding["resolution"]> = { at: new Date().toISOString() };
   if (Object.hasOwn(resolution, "fixed")) {
+    if (owner || repo.callerTop !== repo.mainRoot)
+      throw new WtError(
+        2,
+        "A fixer's merge records its findings as fixed. A worktree cannot resolve a finding as fixed. Nothing was changed.",
+      );
     state = "fixed";
     detail.commit = commitSha(resolution.fixed as string);
   } else if (Object.hasOwn(resolution, "dismissed")) {
@@ -592,31 +654,15 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution,
     state = "stale";
     if (resolution.stale !== true) invalid("resolution");
   }
+  const caller = owner ?? callerOwner(repo);
   mutate(repo, () => {
-    const finding = findingToSettle(repo, id, owner);
+    const finding = findingToSettle(repo, id, caller);
     if (finding.state !== "open" && finding.state !== "claimed")
       throw new WtError(1, "The finding is already resolved.");
     if (detail.commit) {
       const result = run("git", [...GIT_BASE, "cat-file", "-t", detail.commit], gitOptions(repo));
       gitResult(result.code, 2, "The fixed commit does not exist.");
       if (result.stdout.trim() !== "commit") invalid("fixed commit");
-      if (owner) {
-        const ancestry = run(
-          "git",
-          [...GIT_BASE, "merge-base", "--is-ancestor", detail.commit, "refs/remotes/origin/main"],
-          gitOptions(repo),
-        );
-        if (ancestry.code === 1)
-          throw new WtError(
-            1,
-            "A worktree may resolve a finding as fixed only with a commit on origin/main. Run bin/wt fetch first. Nothing was changed.",
-          );
-        if (ancestry.code !== 0)
-          throw new WtError(
-            2,
-            "Could not check the fixed commit against origin/main. Run bin/wt fetch first. Nothing was changed.",
-          );
-      }
     }
     delete finding.claim;
     writeFindings(repo, [{ ...finding, state, resolution: detail }]);
@@ -819,11 +865,18 @@ export const commands: CommandTable = {
     return result.created ? 0 : 3;
   },
   list({ repo, args }) {
-    const { flags } = options(args, { state: "string", kind: "string", path: "string", json: "boolean" });
+    const { flags } = options(args, {
+      state: "string",
+      kind: "string",
+      path: "string",
+      triage: "string",
+      json: "boolean",
+    });
     const findings = listFindings(
       repo,
       {
         state: flags.state as string | undefined,
+        triage: flags.triage as string | undefined,
         kind: flags.kind as string | undefined,
         path: flags.path as string | undefined,
       },
@@ -833,7 +886,7 @@ export const commands: CommandTable = {
     else
       for (const finding of findings)
         process.stdout.write(
-          `${finding.id}\t${finding.state}${finding.orphaned ? " orphaned" : ""}\t${finding.kind}\t${finding.severity}\t${finding.path}:${finding.line}\t${finding.title}\n`,
+          `${finding.id}\t${finding.state}${finding.orphaned ? " orphaned" : ""}\t${finding.approval?.priority ?? "-"}\t${finding.kind}\t${finding.severity}\t${finding.path}:${finding.line}\t${finding.title}\n`,
         );
     return 0;
   },
@@ -841,6 +894,11 @@ export const commands: CommandTable = {
     const { positionals } = options(args, {}, 1);
     const id = checkedFindingIds(positionals)[0] as string;
     process.stdout.write(`${JSON.stringify(showFinding(repo, id), null, 2)}\n`);
+    return 0;
+  },
+  approve({ repo, args }) {
+    const { flags, positionals } = options(args, { priority: "string" }, args.length);
+    approveFindings(repo, positionals, flags.priority);
     return 0;
   },
   release({ repo, args }) {
@@ -851,7 +909,7 @@ export const commands: CommandTable = {
   resolve({ repo, args }) {
     const { flags, positionals } = options(args, { fixed: "string", dismissed: "string", stale: "boolean" }, 1);
     const id = checkedFindingIds(positionals)[0] as string;
-    resolveFinding(repo, id, flags as FindingResolution, callerOwner(repo));
+    resolveFinding(repo, id, flags as FindingResolution);
     return 0;
   },
 };

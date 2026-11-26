@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
   addFinding,
+  approveFindings,
   claimFindings,
   findingsDir,
   releaseFindings,
@@ -43,6 +44,7 @@ function claim(repo: Repo, branch: string, worktree: string): string {
     size: "small",
     source: { kind: "groom", pass: "first" },
   });
+  approveFindings(repo, [id], "P1");
   claimFindings(repo, [id], { branch, worktree });
   return id;
 }
@@ -51,6 +53,7 @@ test("gc reports orphaned claims and releases them only with --prune", () =>
   scenario(({ repo, fx }) => {
     const gone = claim(repo, "gone-worker", join(fx.env.root, "gone"));
     const live = claim(repo, "live-worker", fx.main);
+    const approval = showFinding(repo, gone).approval;
     const report = gc(repo, false);
     assert.deepEqual(report.items, [{ kind: "orphaned-claim", name: gone, state: "found" }]);
     assert.match(formatGc(report, false), /gc --prune to remove or release/);
@@ -59,6 +62,7 @@ test("gc reports orphaned claims and releases them only with --prune", () =>
     assert.deepEqual(pruned.items, [{ kind: "orphaned-claim", name: gone, state: "released" }]);
     const released = showFinding(repo, gone);
     assert.equal(released.state, "open");
+    assert.deepEqual(released.approval, approval);
     assert.equal(Object.hasOwn(released, "claim"), false);
     assert.equal(showFinding(repo, live).state, "claimed");
   }));

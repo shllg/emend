@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
 import {
   addFinding,
+  approveFindings,
   claimFindings,
   type FindingInput,
   findingsDir,
@@ -168,6 +169,7 @@ test("bin/findings spawn claims, snapshots and prompts", () =>
       const first = recordFinding(repo, { rule: "selection" });
       const second = recordFinding(repo, { kind: "docs" });
       const ids = [second, first];
+      approveFindings(repo, ids, "P0");
       const expected = ids.map((id) => {
         const { title, detail, path, line, kind, rule, severity, size, commit, createdAt } = showFinding(repo, id);
         return { id, title, detail, path, line, kind, rule, severity, size, commit, createdAt };
@@ -211,6 +213,7 @@ test("bin/findings spawn claims, snapshots and prompts", () =>
 test("bin/findings spawn labels the hc terminal and prints the selected ids", () =>
   scenario({ withBin: true }, async ({ env, fx, repo }) => {
     const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
+    approveFindings(repo, ids, "P2");
     installFake(env, "claude", []);
     installFake(env, "hc", [
       { match: ["ls", "--json"], stdout: JSON.stringify({ terminals: [] }) },
@@ -233,11 +236,36 @@ test("bin/findings spawn labels the hc terminal and prints the selected ids", ()
     assert.equal(launch.at(-1), spawnPrompt(".wt/bundle.json", "github"));
   }));
 
+test("bin/findings spawn refuses an unapproved finding before creating anything", () =>
+  scenario({ withBin: true }, async ({ env, fx, repo }) => {
+    const approved = recordFinding(repo);
+    approveFindings(repo, [approved], "P1");
+    const untriaged = recordFinding(repo, { rule: "untriaged" });
+    const before = listFindings(repo);
+    installFake(env, "herdr", herdrRules(FIXER_AGENT));
+    const result = await runWt(
+      join(fx.main, "bin/findings"),
+      ["spawn", `${approved},${untriaged}`, "--slug", "readme"],
+      {
+        cwd: fx.main,
+        env: { HERDR_ENV: "1" },
+      },
+    );
+    assert.equal(result.code, 2);
+    assert.ok(result.stderr.includes(`Finding ${untriaged} is not approved for fixing. Run /e-triage first.`));
+    assert.deepEqual(listFindings(repo), before);
+    assert.deepEqual(readRegistry(repo).worktrees, {});
+    assert.equal(existsSync(repo.worktreesDir), false);
+    assert.equal(gitIn(fx.main, "branch", "--list", "recense-*"), "");
+    assert.deepEqual(fakeCalls(env, "herdr"), []);
+  }));
+
 test("bin/findings spawn refuses invalid requests before setup", () =>
   scenario({ withBin: true }, async ({ env, fx, repo }) => {
     const open = recordFinding(repo);
     const security = recordFinding(repo, { kind: "security" });
     const large = recordFinding(repo, { size: "large", rule: "large" });
+    approveFindings(repo, [open], "P1");
     const before = listFindings(repo);
     installFake(env, "herdr", herdrRules("unused"));
     const flags = [open, "--slug", "readme-md"];
@@ -270,6 +298,7 @@ test("bin/findings spawn refuses a non-GitHub origin before setup or claims", ()
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
+      approveFindings(repo, [id], "P1");
       const before = showFinding(repo, id);
       gitIn(fx.main, "remote", "set-url", "origin", fx.main);
       installFake(env, "herdr", herdrRules(FIXER_AGENT));
@@ -289,6 +318,7 @@ test("bin/findings spawn refuses a taken finding or branch", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
+      approveFindings(repo, [id], "P1");
       const start = () => spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock());
       installFake(env, "herdr", herdrRules(FIXER_AGENT));
       const pending = start();
@@ -316,7 +346,9 @@ test("bin/findings spawn refuses a taken finding or branch", () =>
 
 test("fixer setup refuses a live origin branch and accepts a stale tracking ref", () =>
   scenario({}, ({ fx, repo }) => {
-    const finding = showFinding(repo, recordFinding(repo));
+    const id = recordFinding(repo);
+    approveFindings(repo, [id], "P1");
+    const finding = showFinding(repo, id);
     const start = () => setup(repo, { branch: FIXER_BRANCH, findings: [finding] });
     const remoteHead = `refs/heads/${FIXER_BRANCH}`;
     gitIn(fx.origin, "update-ref", remoteHead, "refs/heads/main");
@@ -335,6 +367,7 @@ test("bin/findings spawn reports a refused claim without a release command", () 
     inHerdr(async () => {
       const id = recordFinding(repo);
       const ids = [id, recordFinding(repo, { kind: "docs" })];
+      approveFindings(repo, ids, "P1");
       installFake(env, "herdr", herdrRules(FIXER_AGENT));
       setBeforeWorktreeAddHookForTests(() => claimFindings(repo, [id], { branch: "other-worker", worktree: fx.main }));
       try {
@@ -361,6 +394,7 @@ test("bin/findings spawn scopes the release command to its worktree after an unc
   scenario({}, ({ env, repo }) =>
     inHerdr(async () => {
       const id = recordFinding(repo);
+      approveFindings(repo, [id], "P1");
       installFake(env, "herdr", herdrRules(FIXER_AGENT));
       setBeforeWorktreeAddHookForTests(() => rmSync(join(findingsDir(repo), `${id}.json`)));
       try {
@@ -383,6 +417,7 @@ test("bin/findings spawn keeps claims after a workspace failure", () =>
   scenario({}, ({ env, repo }) =>
     inHerdr(async () => {
       const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
+      approveFindings(repo, ids, "P1");
       installFake(env, "herdr", herdrRules(FIXER_AGENT, [{ match: ["worktree", "open"], code: 1 }]));
       await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
         assert.ok(e instanceof WtError);

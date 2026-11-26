@@ -19,6 +19,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import {
   addFinding,
+  approveFindings,
   claimFindings,
   type FindingInput,
   findingsDir,
@@ -28,6 +29,7 @@ import {
   releaseFindings,
   releaseOrphanedClaim,
   resolveFinding,
+  resolveMergedFindings,
   showFinding,
 } from "./findings.ts";
 import { stateDir, withStateLock } from "./registry.ts";
@@ -338,13 +340,83 @@ test("a linked worktree uses its own HEAD and the shared finding store", () => {
   assert.throws(() => addFinding(repo, input({ path: "linked.md" })), fails(2));
 });
 
-test("claim rejects security, large, non-open, unknown and invalid ids as one batch", () => {
+test("approve records a priority for every id from main and replaces the priority and time", async () => {
+  const first = addFinding(repo, input()).id;
+  const second = addFinding(repo, input({ rule: "second" })).id;
+  const result = await cli("approve", first, second, "--priority", "P2");
+  assert.equal(result.code, 0, result.stderr);
+  const approval = showFinding(repo, first).approval;
+  assert.ok(approval);
+  assert.equal(approval.priority, "P2");
+  assert.equal(new Date(approval.at).toISOString(), approval.at);
+  assert.deepEqual(showFinding(repo, second).approval, approval);
+  const updated = await cli("approve", first, "--priority", "P0");
+  assert.equal(updated.code, 0, updated.stderr);
+  const replacement = showFinding(repo, first).approval;
+  assert.ok(replacement && replacement.at > approval.at);
+  assert.equal(replacement.priority, "P0");
+  assert.deepEqual(showFinding(repo, second).approval, approval);
+});
+
+test("approve refuses a linked worktree and leaves the finding untriaged", async () => {
+  const id = addFinding(repo, input()).id;
+  const worktree = join(env.root, "linked");
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-linked", worktree);
+  const result = await runWt(join(fx.main, "bin/findings"), ["approve", id, "--priority", "P1"], { cwd: worktree });
+  assert.equal(result.code, 2);
+  assert.equal(result.stderr.trim(), "Only the main checkout approves findings. Nothing was changed.");
+  assert.equal(showFinding(repo, id).approval, undefined);
+});
+
+test("approve rejects an invalid priority or id and refuses a mixed batch atomically", async () => {
+  const open = addFinding(repo, input()).id;
+  const claimed = addFinding(repo, input({ rule: "claimed" })).id;
+  const resolved = addFinding(repo, input({ rule: "stale" })).id;
+  const security = addFinding(repo, input({ kind: "security" })).id;
+  const large = addFinding(repo, input({ rule: "large", size: "large" })).id;
+  approveFindings(repo, [claimed], "P2");
+  claimFindings(repo, [claimed], target());
+  resolveFinding(repo, resolved, { stale: true });
+  const before = listFindings(repo);
+  for (const id of [claimed, resolved, security, large, "f-000000000000"]) {
+    const result = await cli("approve", open, id, "--priority", "P0");
+    if (id === security || id === large) {
+      assert.equal(result.code, 2);
+      assert.equal(result.stderr.trim(), "/e-fix does not take security or large findings. Nothing was changed.");
+    } else {
+      assert.equal(result.code, 1);
+      assert.equal(
+        result.stderr.trim(),
+        id === "f-000000000000" ? "Unknown finding." : `Finding ${id} is claimed or resolved. Nothing was changed.`,
+      );
+    }
+    assert.deepEqual(listFindings(repo), before);
+  }
+  for (const args of [
+    [open, "--priority", "P3"],
+    [open],
+    ["--priority", "P1"],
+    [open, open, "--priority", "P1"],
+    [open, "bad", "--priority", "P1"],
+  ]) {
+    assert.equal((await cli("approve", ...args)).code, 2);
+    assert.deepEqual(listFindings(repo), before);
+  }
+});
+
+test("claim rejects unapproved, security, large, non-open, unknown and invalid ids as one batch", () => {
   const open = addFinding(repo, input()).id;
   const security = addFinding(repo, input({ kind: "security" })).id;
   const large = addFinding(repo, input({ rule: "large", size: "large" })).id;
   const claimed = addFinding(repo, input({ rule: "claimed" })).id;
+  const untriaged = addFinding(repo, input({ rule: "untriaged" })).id;
+  approveFindings(repo, [open, claimed], "P2");
   claimFindings(repo, [claimed], target());
   const before = listFindings(repo);
+  assert.throws(() => claimFindings(repo, [open, untriaged], target()), {
+    code: 2,
+    message: `Finding ${untriaged} is not approved for fixing. Run /e-triage first. Nothing was changed.`,
+  });
   for (const id of [security, large, claimed, "f-000000000000"]) {
     assert.throws(() => claimFindings(repo, [open, id], target()), fails(1));
     assert.deepEqual(listFindings(repo), before);
@@ -357,6 +429,7 @@ test("claim rejects security, large, non-open, unknown and invalid ids as one ba
 
 test("claim accepts and stores a worktree under a home folder", () => {
   const id = addFinding(repo, input()).id;
+  approveFindings(repo, [id], "P1");
   const worktree = ["", "ho" + "me", "worker" + "-name", "src", "repo"].join("/");
   claimFindings(repo, [id], { ...target(), worktree });
   const record = JSON.parse(readFileSync(stored(id), "utf8"));
@@ -367,6 +440,7 @@ test("claim accepts and stores a worktree under a home folder", () => {
 
 test("orphan release rechecks every claim field and the worktree directory", () => {
   const { id } = addFinding(repo, input());
+  approveFindings(repo, [id], "P1");
   const worktree = join(env.root, "returning-worker");
   claimFindings(repo, [id], { ...target(), worktree });
   const seen = showFinding(repo, id).claim;
@@ -449,6 +523,7 @@ for (const action of ["claim", "release"] as const) {
   for (const failure of ["staging", "rename"] as const) {
     test(`${action} restores both records after a second-record ${failure} failure`, (t) => {
       const ids = [addFinding(repo, input()).id, addFinding(repo, input({ rule: "second" })).id];
+      approveFindings(repo, ids, "P1");
       if (action === "release") claimFindings(repo, ids, target());
       // Noncanonical whitespace must also survive rollback byte for byte.
       for (const id of ids) {
@@ -496,6 +571,7 @@ for (const action of ["claim", "release"] as const) {
 test("a failed rollback reports possible changes and cleans up remaining temp files", (t) => {
   const first = addFinding(repo, input()).id;
   const second = addFinding(repo, input({ rule: "second" })).id;
+  approveFindings(repo, [first, second], "P1");
   const originalRename = fs.renameSync;
   let renamed = 0;
   const mocked = t.mock.method(fs, "renameSync", (...args: Parameters<typeof fs.renameSync>) => {
@@ -529,6 +605,8 @@ test("resolve and release implement state transitions and clear claims", async (
   const released = addFinding(repo, input({ rule: "released" })).id;
   const stale = addFinding(repo, input({ rule: "stale" })).id;
   const dismissed = addFinding(repo, input({ rule: "dismissed" })).id;
+  approveFindings(repo, [fixed, released, stale, dismissed], "P0");
+  const approval = showFinding(repo, fixed).approval;
   claimFindings(repo, [fixed, released], target());
   const commit = commitFile(fx.main, "fix.md", "local fix\n");
   assert.equal((await cli("resolve", fixed, "--fixed", commit)).code, 0);
@@ -543,6 +621,7 @@ test("resolve and release implement state transitions and clear claims", async (
   ]) {
     const finding = showFinding(repo, id as string);
     assert.equal(finding.state, state);
+    assert.deepEqual(finding.approval, approval);
     assert.equal(Object.hasOwn(finding, "claim"), false);
   }
   assert.equal(showFinding(repo, fixed).resolution?.commit, commit);
@@ -565,6 +644,7 @@ test("a linked worktree can release and resolve only its own claims", async () =
   const otherBranch = addFinding(repo, input({ rule: "other-branch" })).id;
   const otherPath = addFinding(repo, input({ rule: "other-path" })).id;
   const open = addFinding(repo, input({ rule: "open" })).id;
+  approveFindings(repo, [own, otherBranch, otherPath], "P1");
   claimFindings(repo, [own], { branch, worktree: alias });
   claimFindings(repo, [otherBranch], { branch: "other-worker", worktree });
   claimFindings(repo, [otherPath], { branch, worktree: fx.main });
@@ -595,44 +675,61 @@ test("a linked worktree can release and resolve only its own claims", async () =
   assert.equal((await cli("resolve", open, "--stale")).code, 0);
 });
 
-test("a linked worktree can resolve its claim as fixed only with a commit on origin/main", async () => {
+test("a linked worktree cannot resolve its claim as fixed", async () => {
   const branch = "recense-linked";
   const worktree = join(env.root, "linked");
   gitIn(fx.main, "worktree", "add", "--quiet", "-b", branch, worktree);
   const id = addFinding(repo, input()).id;
+  approveFindings(repo, [id], "P1");
   claimFindings(repo, [id], { branch, worktree });
   const claimed = showFinding(repo, id);
-  const commit = commitFile(worktree, "fix.md", "local fix\n");
-  const resolveFixed = () =>
-    runWt(join(fx.main, "bin/findings"), ["resolve", id, "--fixed", commit], { cwd: worktree });
-
-  const local = await resolveFixed();
-  assert.equal(local.code, 1, local.stderr);
+  const commit = gitIn(fx.main, "rev-parse", "origin/main");
+  const result = await runWt(join(fx.main, "bin/findings"), ["resolve", id, "--fixed", commit], { cwd: worktree });
+  assert.equal(result.code, 2);
   assert.equal(
-    local.stderr.trim(),
-    "A worktree may resolve a finding as fixed only with a commit on origin/main. Run bin/wt fetch first. Nothing was changed.",
+    result.stderr.trim(),
+    "A fixer's merge records its findings as fixed. A worktree cannot resolve a finding as fixed. Nothing was changed.",
   );
   assert.deepEqual(showFinding(repo, id), claimed);
+});
 
-  gitIn(fx.main, "update-ref", "-d", "refs/remotes/origin/main");
-  const missing = await resolveFixed();
-  assert.equal(missing.code, 2, missing.stderr);
-  assert.deepEqual(showFinding(repo, id), claimed);
-
-  commitFile(worktree, "later.md", "later change\n");
-  gitIn(worktree, "push", "--quiet", "origin", "HEAD:refs/heads/main");
-  gitIn(fx.main, "fetch", "--quiet", "origin");
-  const merged = await resolveFixed();
-  assert.equal(merged.code, 0, merged.stderr);
-  const fixed = showFinding(repo, id);
-  assert.equal(fixed.state, "fixed");
-  assert.equal(fixed.resolution?.commit, commit);
-  assert.equal(fixed.claim, undefined);
+test("resolveMergedFindings fixes only the branch's current claims, including legacy claims", () => {
+  const first = addFinding(repo, input()).id;
+  const legacy = addFinding(repo, input({ rule: "legacy" })).id;
+  const other = addFinding(repo, input({ rule: "other" })).id;
+  const released = addFinding(repo, input({ rule: "released" })).id;
+  approveFindings(repo, [first, legacy, other, released], "P2");
+  claimFindings(repo, [first, legacy, released], target());
+  claimFindings(repo, [other], { ...target(), branch: "other-worker" });
+  releaseFindings(repo, [released]);
+  const record = JSON.parse(readFileSync(stored(legacy), "utf8"));
+  delete record.approval;
+  writeFileSync(stored(legacy), JSON.stringify(record));
+  const before = listFindings(repo);
+  const untouched = [other, released].map((id) => readFileSync(stored(id)));
+  const commit = "c".repeat(40);
+  assert.throws(() => resolveMergedFindings(repo, target().branch, "bad"), fails(2));
+  assert.deepEqual(listFindings(repo), before);
+  assert.deepEqual(resolveMergedFindings(repo, target().branch, commit), [first, legacy].sort());
+  for (const id of [first, legacy]) {
+    const finding = showFinding(repo, id);
+    assert.equal(finding.state, "fixed");
+    assert.equal(finding.claim, undefined);
+    assert.ok(finding.resolution);
+    assert.deepEqual(finding.resolution, { at: new Date(finding.resolution.at).toISOString(), commit });
+    assert.deepEqual(finding.approval, before.find((record) => record.id === id)?.approval);
+  }
+  assert.deepEqual(
+    [other, released].map((id) => readFileSync(stored(id))),
+    untouched,
+  );
+  assert.deepEqual(resolveMergedFindings(repo, target().branch, commit), []);
 });
 
 test("release validates the whole batch before writing", () => {
   const claimed = addFinding(repo, input()).id;
   const open = addFinding(repo, input({ rule: "open" })).id;
+  approveFindings(repo, [claimed], "P1");
   claimFindings(repo, [claimed], target());
   const before = readFileSync(stored(claimed));
   for (const id of [open, "f-000000000000"]) {
@@ -681,6 +778,7 @@ test("list is read-only when absent and filters and sorts records with orphan st
   const second = addFinding(repo, input({ path: "docs-extra.md", kind: "docs" })).id;
   const worktree = join(env.root, "claim-folder");
   mkdirSync(worktree);
+  approveFindings(repo, [first], "P1");
   claimFindings(repo, [first], { ...target(), worktree });
   assert.equal(showFinding(repo, first).orphaned, false);
   rmSync(worktree, { recursive: true });
@@ -701,7 +799,7 @@ test("list is read-only when absent and filters and sorts records with orphan st
   assert.deepEqual(listFindings(repo, { path: "not-tracked" }), []);
   assert.deepEqual(readFileSync(stored(first)), recordBefore);
   const text = await cli("list", "--state", "claimed");
-  assert.equal(text.stdout, `${first}\tclaimed orphaned\tbug\tmedium\tdocs/guide.md:1\t${input().title}\n`);
+  assert.equal(text.stdout, `${first}\tclaimed orphaned\tP1\tbug\tmedium\tdocs/guide.md:1\t${input().title}\n`);
   const json = await cli("list", "--json", "--path", "docs");
   assert.equal(JSON.parse(json.stdout)[0].orphaned, true);
   // Timestamp ordering comes first; ids break ties independent of directory order.
@@ -724,6 +822,24 @@ test("list is read-only when absent and filters and sorts records with orphan st
   );
   assert.throws(() => listFindings(repo, { state: "unknown" }), fails(2));
   assert.throws(() => listFindings(repo, { kind: "unknown" }), fails(2));
+});
+
+test("list filters approved and untriaged findings and prints the priority after state", async () => {
+  const approved = addFinding(repo, input()).id;
+  const open = addFinding(repo, input({ rule: "untriaged" })).id;
+  approveFindings(repo, [approved], "P1");
+  for (const [triage, id, priority] of [
+    ["approved", approved, "P1"],
+    ["untriaged", open, "-"],
+  ] as const) {
+    const args = ["list", "--state", "open", "--triage", triage];
+    const row = await cli(...args);
+    assert.equal(row.code, 0, row.stderr);
+    assert.deepEqual(row.stdout.trimEnd().split("\t").slice(0, 4), [id, "open", priority, "bug"]);
+    const json = await cli(...args, "--json");
+    assert.deepEqual(JSON.parse(json.stdout), [showFinding(repo, id)]);
+  }
+  assert.equal((await cli("list", "--triage", "unknown")).code, 2);
 });
 
 test("symlinked state and findings folders are refused on reads and writes without touching targets", () => {
@@ -762,6 +878,12 @@ test("strict stored validation rejects corruption, extra fields and invalid stat
     { commit: "bad" },
     { createdAt: "yesterday" },
     { state: "unknown" },
+    { approval: null },
+    { approval: { priority: "P2" } },
+    { approval: { at: original.createdAt } },
+    { approval: { priority: "P3", at: original.createdAt } },
+    { approval: { priority: "P1", at: "yesterday" } },
+    { approval: { priority: "P0", at: original.createdAt, extra: true } },
     { line: 0 },
     { title: "" },
     { source: { kind: "groom", pass: "1", extra: 1 } },
@@ -839,7 +961,7 @@ test("list skips corrupt, symlinked and invalidly named records with diagnostics
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(result.stderr.trimEnd().split("\n").sort(), expected);
     if (flags.length) assert.deepEqual(JSON.parse(result.stdout), findings);
-    else assert.equal(result.stdout, `${valid}\topen\tbug\tmedium\tREADME.md:1\t${input().title}\n`);
+    else assert.equal(result.stdout, `${valid}\topen\t-\tbug\tmedium\tREADME.md:1\t${input().title}\n`);
   }
   assert.equal(readFileSync(stored(corrupt), "utf8"), "{not json");
   assert.equal(lstatSync(stored(linked)).isSymbolicLink(), true);
@@ -1034,8 +1156,9 @@ test("bin/findings help lists every registry, fixer and groom command", async ()
   const lines = result.stdout.split("\n").map((line) => line.trim());
   for (const usage of [
     "add --file <file>",
-    "list [--state <s>] [--kind <k>] [--path <p>] [--json]",
+    "list [--state <s>] [--kind <k>] [--path <p>] [--triage approved|untriaged] [--json]",
     "show <id>",
+    "approve <id>... --priority P0|P1|P2",
     "release <id>...",
     "resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)",
     "groom next [--count N]",

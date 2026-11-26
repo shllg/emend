@@ -13,14 +13,17 @@ const HELP = `bin/findings: the local findings registry
 
 Registry:
   add --file <file>                                record a local finding (3 when already recorded)
-  list [--state <s>] [--kind <k>] [--path <p>] [--json]
+  list [--state <s>] [--kind <k>] [--path <p>] [--triage approved|untriaged] [--json]
   show <id>
+  approve <id>... --priority P0|P1|P2              approve open findings from the main checkout
   release <id>...
   resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)
+                                                   --fixed runs only from the main checkout
 
 Fixer:
   spawn <id,id> --slug <slug> [--model <m>] [--effort <e>]
-                                                   start a fixer worktree and its agent
+                                                   start a fixer for approved findings
+  A fixer's merge prints FIXED <id> for each claim it records as fixed.
 
 Groomer:
   groom next [--count N]                           the files the groomer reads next (JSON; N from 1 to 50, default 5)

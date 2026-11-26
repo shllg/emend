@@ -67,6 +67,7 @@ Remote:
   pr edit [--pr <n>] [--title <text> | --title-file <path>] [--body <text> | --body-file <path>]
   pr merge [--pr <n>] --match-head <sha> [--approved-head <sha>] (--subject <text> | --subject-file <path>)
            (--body <text> | --body-file <path>)
+                                                   a fixer's merge prints FIXED <id> for each claim it records as fixed
 
 History:
   rebase  restack  sync-main  digest
