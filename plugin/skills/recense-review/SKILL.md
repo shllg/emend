@@ -235,6 +235,7 @@ Write the opening fields below. The app groups them for the reviewer.
 - `topics[slug]`: `why` and `example` as the writing reference says; `body` gives the decisions,
   trade-offs and checks. A request to explain something in the writeup belongs here.
   A topic that changes a state flow shows a state diagram in its `why`, as the writing reference says.
+  A topic that changes code names the callers and workflows that behave differently, as the writing reference says.
   A change that crosses two or more parts, or adds a flow, shows a change graph with a legend in a
   topic's `why`, as the writing reference says.
   Show what you claim, as the writing reference says under "Pictures" and "Tables": a screenshot
