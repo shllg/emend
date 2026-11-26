@@ -1235,9 +1235,10 @@ test("a fixer merge with a warning keeps its claim and remote branch", () =>
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${FIXER_BRANCH}`), headSha);
   }, "synthetic warning\n"));
 
-test("a fixer merge reports MERGED and the recovery command when recording fails", () =>
+test("a fixer merge limits manual recovery to its registered findings when recording fails", () =>
   fixerMergeScenario(async (ctx) => {
     const id = claimedFinding(ctx.repo, "first");
+    const abandoned = claimedFinding(ctx.repo, "abandoned");
     const before = showFinding(ctx.repo, id);
     registerFixer(ctx.repo, [id, "f-000000000000"]);
     writeFileSync(join(findingsDir(ctx.repo), "f-000000000000.json"), "{");
@@ -1250,9 +1251,10 @@ test("a fixer merge reports MERGED and the recovery command when recording fails
     );
     assert.ok(
       result.stderr.includes(
-        `From the main checkout, run bin/wt fetch, then bin/findings resolve <id> --fixed ${MERGE_SHA} for each finding the branch still claims.`,
+        `From the main checkout, run bin/wt fetch, then bin/findings resolve <id> --fixed ${MERGE_SHA} for each of ${id}, f-000000000000 that bin/findings show still shows claimed by ${FIXER_BRANCH}.`,
       ),
     );
+    assert.ok(!result.stderr.includes(abandoned));
     assert.deepEqual(showFinding(ctx.repo, id), before);
     assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${FIXER_BRANCH}`), headSha);
   }));
@@ -1266,8 +1268,12 @@ for (const missing of ["entry", "findings list"]) {
       const result = await runFixerMerge(ctx);
       assert.equal(result.code, 1);
       assert.equal(result.stdout, `MERGED ${MERGE_SHA}\n`);
-      assert.match(result.stderr, /no findings list in the worktree registry/);
-      assert.ok(result.stderr.includes(`run bin/wt fetch, then bin/findings resolve <id> --fixed ${MERGE_SHA}`));
+      assert.ok(
+        result.stderr.includes(
+          `The worktree registry lists no findings for ${FIXER_BRANCH}. Resolve none by hand without checking which findings this PR fixed.`,
+        ),
+      );
+      assert.doesNotMatch(result.stderr, /bin\/findings resolve/);
       assert.deepEqual(showFinding(ctx.repo, id), before);
       assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${FIXER_BRANCH}`), headSha);
     }));

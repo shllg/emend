@@ -85,7 +85,7 @@ export function stateDir(repo: Repo): string {
       try {
         renameSync(old, current);
       } catch (error) {
-        // Another bin/wt run moved it first: either way there is nothing left to do.
+        // Another process moved the folder first.
         if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
       }
     }

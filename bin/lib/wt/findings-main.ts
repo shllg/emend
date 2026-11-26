@@ -18,6 +18,7 @@ Registry:
   page                                             write the main checkout's triage page (JSON)
   show <id>
   approve <id>... --priority P0|P1|P2              approve open findings from the main checkout
+  skip <id>...                                     dismiss untriaged findings from the main checkout
   release <id>...
   resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)
                                                    --fixed runs only from the main checkout

@@ -223,7 +223,10 @@ test("a worktree is accepted only with the layout git itself writes", () =>
     const admin = join(fx.main, ".git", "worktrees", "lay-a");
     const gitdirFile = readFileSync(join(admin, "gitdir"), "utf8");
     writeFileSync(join(admin, "gitdir"), `${join(env.root, "elsewhere", ".git")}\n`);
-    expectCode(() => resolveRepo(w.path), 69);
+    assert.throws(() => resolveRepo(w.path), {
+      code: 69,
+      message: "The repository layout is not trusted. Nothing was changed.",
+    });
     writeFileSync(join(admin, "gitdir"), gitdirFile);
     const other = join(env.root, "other-common");
     mkdirSync(other);
@@ -278,11 +281,10 @@ test("assertNoGitlinks refuses a gitlink in the index and in HEAD", () =>
     // take it out of the index again: HEAD still holds it
     gitIn(fx.main, "update-index", "--force-remove", "sub");
     assert.equal(gitIn(fx.main, "ls-files", "--stage").includes("160000"), false);
-    expectCode(() => assertNoGitlinks(repo, fx.main), 1);
-    assert.throws(
-      () => assertNoGitlinks(repo, fx.main),
-      (e: unknown) => e instanceof WtError && /gitlink \(submodule\) entry is in HEAD or the index/.test(e.message),
-    );
+    assert.throws(() => assertNoGitlinks(repo, fx.main), {
+      code: 1,
+      message: "A gitlink (submodule) entry is in HEAD or the index. Both bin/wt and bin/findings refuse it.",
+    });
   }));
 
 test("the safety guard names a gitlink before any status runs", () =>

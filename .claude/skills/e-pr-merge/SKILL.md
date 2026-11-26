@@ -299,9 +299,13 @@ cleanup prohibition. A `QUEUED` result stops as above.
 ## 8. After the merge
 
 If step 7 withholds cleanup, keep the blocked status and change no finding.
-For a fixer branch with a merge warning or `QUEUED`, run `<main>/bin/findings list --state claimed --json`.
-Report only ids whose `claim.branch` equals the PR's head branch. Report any unreadable records.
-Give the owner these commands for after they check the squash commit and what it fixed.
+For a fixer branch with a merge warning or `QUEUED`, run `<main>/bin/wt list --json`.
+Find the row whose `branch` equals the PR's head branch.
+If the row or its `findings` list is missing, report that and give no resolve command.
+For each id in that row's `findings` list, run `<main>/bin/findings show <id>`.
+Report a claim only when `claim.branch` equals the head branch and `claim.worktree` equals the row's `path`.
+Report any read error.
+Give the owner these commands only for matching claims after they check the squash commit and what it fixed.
 The owner runs `<main>/bin/wt fetch` once in the main checkout.
 There the owner runs `<main>/bin/findings resolve <id> --fixed <merge commit>` for each confirmed id still claimed.
 Give the actual squash commit when known.

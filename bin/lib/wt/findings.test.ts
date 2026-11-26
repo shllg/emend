@@ -32,6 +32,7 @@ import {
   resolveMergedFindings,
   showFinding,
 } from "./findings.ts";
+import { renderTriagePage } from "./findings-page.ts";
 import { stateDir, withStateLock } from "./registry.ts";
 import { type Repo, resolveRepo } from "./repo.ts";
 import {
@@ -39,6 +40,7 @@ import {
   deadPid,
   type Fixture,
   gitIn,
+  installFake,
   makeFixture,
   makeTestEnv,
   runWt,
@@ -376,7 +378,7 @@ test("page groups findings in page order, fences their text and excerpts main HE
   assert.deepEqual(readdirSync(directory), ["triage.md"]);
   assert.equal(statSync(directory).mode & 0o777, 0o700);
   assert.equal(statSync(page).mode & 0o777, 0o600);
-  assert.deepEqual(findings, [first, second, root, security, large]);
+  assert.deepEqual(findings, [first, second, root, large]);
   const text = readFileSync(page, "utf8");
   assert.deepEqual(text.match(/^#{1,3} .+$/gm), [
     "# Findings triage",
@@ -388,7 +390,6 @@ test("page groups findings in page order, fences their text and excerpts main HE
     "## `README.md`",
     `### ${root}`,
     "## Not for /e-fix",
-    `### ${security}`,
     `### ${large}`,
   ]);
   const block = text.slice(text.indexOf(`### ${first}`), text.indexOf(`### ${second}`));
@@ -396,11 +397,40 @@ test("page groups findings in page order, fences their text and excerpts main HE
   assert.ok(block.includes("\n\n``` `a``b` ```\n\n````text\nbefore\n```\n### literal text\n````\n"));
   assert.ok(block.includes(["", "", "`````", ...lines.slice(1, 14), "`````", ""].join("\n")));
   assert.doesNotMatch(block, /source line (1|15)\./);
-  assert.doesNotMatch(text, /working tree marker|private (title|detail|excerpt) marker/);
-  assert.ok(
-    text.includes(`A security finding's text stays on this machine. Read it with \`bin/findings show ${security}\`.`),
-  );
+  assert.doesNotMatch(text, /working tree marker|private\.md|private (title|detail|excerpt) marker/);
+  assert.ok(!text.includes(security));
+  const count =
+    "1 security findings are open. They stay on this machine: list them with `bin/findings list --state open --kind security`.";
+  assert.equal(text.split(count).length, 2);
+  assert.ok(text.indexOf("## How to answer") < text.indexOf(count) && text.indexOf(count) < text.indexOf("## `"));
   assert.ok(text.includes("`Large change`"));
+});
+
+test("page with only security findings gives their open count and no triage ids", async () => {
+  const ids = ["first", "second", "third"].map((rule) => addFinding(repo, input({ kind: "security", rule })).id);
+  resolveFinding(repo, ids[0] as string, { stale: true });
+  const { page, findings } = await triagePage();
+  assert.ok(page);
+  assert.deepEqual(findings, []);
+  const text = readFileSync(page, "utf8");
+  assert.match(text, /^2 security findings are open\./m);
+  assert.doesNotMatch(text, /^### |f-[0-9a-f]{12}|## Not for \/e-fix|README\.md/m);
+});
+
+test("page shortens finding ids in titles, details, excerpts and paths while preserving id headings", async () => {
+  const other = addFinding(repo, input()).id;
+  const short = `${other.slice(0, 6)}…`;
+  const path = `docs/${other}/guide.md`;
+  commitFile(fx.main, path, `line ${other}\n`);
+  const id = addFinding(repo, input({ path, title: other, detail: `See ${other} and ${other}.` })).id;
+  const { page, findings } = await triagePage();
+  assert.ok(page);
+  const text = readFileSync(page, "utf8");
+  assert.deepEqual(text.match(/f-[0-9a-f]{12}/g), findings);
+  for (const heading of [other, id]) assert.ok(text.includes(`\n### ${heading}\n`));
+  assert.ok(text.includes(`\n\n\`${short}\`\n\n`));
+  assert.ok(text.includes(`\nSee ${short} and ${short}.\n`));
+  assert.ok(text.includes(`\nline ${short}\n`));
 });
 
 test("page omits untracked files present on disk and symlinks tracked by main", async () => {
@@ -422,7 +452,7 @@ test("page omits untracked files present on disk and symlinks tracked by main", 
   assert.doesNotMatch(text, /excerpt marker/);
 });
 
-test("page omits excerpts for oversized blobs and blobs containing NUL", async () => {
+test("page omits excerpts for oversized blobs, NUL bytes and invalid UTF-8", async () => {
   const files = [
     ["large.txt", "x".repeat(1024 * 1024 + 1)],
     ["binary.txt", "binary marker\0tail"],
@@ -432,11 +462,49 @@ test("page omits excerpts for oversized blobs and blobs containing NUL", async (
     addFinding(repo, input({ path }));
     commitFile(fx.main, path, content);
   }
+  addFinding(repo, input());
+  writeFileSync(join(fx.main, "README.md"), Buffer.from([0x61, 0xff, 0x62]));
+  gitIn(fx.main, "commit", "--quiet", "-am", "store invalid UTF-8");
   const { page } = await triagePage();
   assert.ok(page);
   const text = readFileSync(page, "utf8");
-  assert.equal(text.split("The file is too large or not text.").length - 1, 2);
-  assert.doesNotMatch(text, /binary marker|x{10}|plain text/);
+  assert.equal(text.split("The file is too large or not text.").length - 1, 3);
+  assert.doesNotMatch(text, /binary marker|x{10}|plain text|\uFFFD/);
+});
+
+test("page omits the excerpt when the recorded line is past the end of HEAD", async () => {
+  commitFile(fx.main, "README.md", "first\nrecorded\n");
+  addFinding(repo, input({ line: 2 }));
+  commitFile(fx.main, "README.md", "last remaining line\n");
+  const { page } = await triagePage();
+  assert.ok(page);
+  const text = readFileSync(page, "utf8");
+  assert.ok(text.includes("Line 2 is past the end of the file in the main checkout's HEAD."));
+  assert.doesNotMatch(text, /last remaining line/);
+});
+
+test("page warns on a changed anchor and treats surrounding whitespace as the same line", async () => {
+  addFinding(repo, input());
+  commitFile(fx.main, "README.md", "\tfixture  \r\n");
+  const { page } = await triagePage();
+  assert.ok(page);
+  const warning = "The recorded line changed since the finding was recorded.";
+  assert.ok(!readFileSync(page, "utf8").includes(warning));
+  commitFile(fx.main, "README.md", "updated excerpt\n");
+  await triagePage();
+  assert.ok(readFileSync(page, "utf8").includes(`\nupdated excerpt\n\`\`\`\n\n${warning}`));
+});
+
+test("page reports a blob read failure after finding the tracked file in HEAD", () => {
+  const finding = showFinding(repo, addFinding(repo, input()).id);
+  const blob = gitIn(fx.main, "rev-parse", "HEAD:README.md");
+  rmSync(join(env.fakeBin, "git"));
+  installFake(env, "git", [
+    { match: ["ls-tree"], stdout: `100644 blob ${blob}       8\tREADME.md\0` },
+    { match: ["cat-file", "blob", blob], code: 1 },
+  ]);
+  const page = renderTriagePage(repo, [finding]);
+  assert.ok(page?.markdown.includes("Could not read the file from the main checkout's HEAD."));
 });
 
 test("page writes nothing without untriaged findings and returns a stable key per checkout", async () => {
@@ -541,6 +609,49 @@ test("approve rejects an invalid priority or id and refuses a mixed batch atomic
     assert.equal((await cli("approve", ...args)).code, 2);
     assert.deepEqual(listFindings(repo), before);
   }
+});
+
+test("skip dismisses untriaged findings together from main with the owner's triage reason", async () => {
+  const ids = [addFinding(repo, input()).id, addFinding(repo, input({ rule: "large", size: "large" })).id];
+  const result = await cli("skip", ...ids);
+  assert.equal(result.code, 0, result.stderr);
+  for (const id of ids) {
+    const finding = showFinding(repo, id);
+    assert.equal(finding.state, "dismissed");
+    assert.equal(finding.resolution?.reason, "skipped by the owner in triage");
+  }
+});
+
+test("skip refuses a linked worktree and leaves the finding open", async () => {
+  const id = addFinding(repo, input()).id;
+  const linked = join(env.root, "linked");
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", "recense-linked", linked);
+  const result = await runWt(join(fx.main, "bin/findings"), ["skip", id], { cwd: linked });
+  assert.equal(result.code, 2);
+  assert.equal(result.stderr.trim(), "Only the main checkout skips findings. Nothing was changed.");
+  assert.equal(showFinding(repo, id).state, "open");
+});
+
+test("skip leaves the batch unchanged for claimed, resolved, approved, unknown or invalid ids", async () => {
+  const open = addFinding(repo, input()).id;
+  const claimed = addFinding(repo, input({ rule: "claimed" })).id;
+  const resolved = addFinding(repo, input({ rule: "stale" })).id;
+  const approved = addFinding(repo, input({ rule: "approved" })).id;
+  approveFindings(repo, [claimed, approved], "P2");
+  claimFindings(repo, [claimed], target());
+  resolveFinding(repo, resolved, { stale: true });
+  const before = listFindings(repo);
+  for (const id of [claimed, resolved, approved]) {
+    const result = await cli("skip", open, id);
+    assert.equal(result.code, 1);
+    assert.equal(result.stderr.trim(), `Finding ${id} is claimed, resolved or approved. Nothing was changed.`);
+    assert.deepEqual(listFindings(repo), before);
+  }
+  const unknown = await cli("skip", open, "f-000000000000");
+  assert.equal(unknown.code, 1);
+  assert.equal(unknown.stderr.trim(), "Unknown finding.");
+  for (const args of [[], [open, open], [open, "bad"]]) assert.equal((await cli("skip", ...args)).code, 2);
+  assert.deepEqual(listFindings(repo), before);
 });
 
 test("claim rejects unapproved, security, large, non-open, unknown and invalid ids as one batch", () => {
@@ -1328,6 +1439,7 @@ test("bin/findings help lists every registry, fixer and groom command", async ()
     "page ",
     "show <id>",
     "approve <id>... --priority P0|P1|P2",
+    "skip <id>...",
     "release <id>...",
     "resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)",
     "groom next [--count N]",

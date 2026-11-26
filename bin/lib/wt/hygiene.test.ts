@@ -130,7 +130,7 @@ test("e-fix selects approved findings by priority and counts those waiting for t
   assert.match(skill, /bin\/findings list --state open --triage untriaged --json/);
 });
 
-test("e-triage validates the page key, checks explain mode and shows a heading's finding before a change", () => {
+test("e-triage validates the heading, checks before approve or skip and republishes only after a change", () => {
   const skill = readFileSync(join(root, ".claude/skills/e-triage/SKILL.md"), "utf8");
   assert.match(skill, /^disable-model-invocation: true$/m);
   assert.ok(skill.includes("^f-[0-9a-f]{12}$"));
@@ -144,16 +144,22 @@ test("e-triage validates the page key, checks explain mode and shows a heading's
   assert.ok(skill.includes("still `open` and has no approval"));
   assert.ok(skill.includes("a literal priority from `P0`, `P1`, `P2`"));
   const commands = [...skill.matchAll(/<main>\/bin\/findings ([^`\n]+)/g)].map((match) => match[1]);
-  assert.deepEqual(commands, [
-    "page",
-    "show <id>",
-    "approve <id> --priority <P>",
-    'resolve <id> --dismissed "skipped by the owner in triage"',
-  ]);
+  assert.deepEqual(commands, ["page", "show <id>", "approve <id> --priority <P>", "skip <id>", "page"]);
+  assert.ok(skill.includes("After the replies, run `<main>/bin/findings page`"));
+  assert.ok(skill.includes("Republish only if this delivery recorded at least one approve or skip"));
+  assert.ok(skill.includes("and the returned `findings` list is non-empty"));
+  assert.ok(skill.includes("Otherwise keep the published page and its ids.\nWait again"));
 });
 
-test("e-pr-merge reports FIXED lines and leaves manual resolution to the owner", () => {
+test("e-pr-merge reports FIXED lines and checks the registered ids and worktree for manual recovery", () => {
   const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
+  const recovery = skill.split("## 8. After the merge")[1] ?? "";
+  assert.ok(recovery.includes("with a merge warning or `QUEUED`, run `<main>/bin/wt list --json`"));
+  assert.ok(recovery.includes("row whose `branch` equals the PR's head branch"));
+  assert.ok(recovery.includes("row or its `findings` list is missing, report that and give no resolve command"));
+  assert.ok(recovery.includes("For each id in that row's `findings` list, run `<main>/bin/findings show <id>`"));
+  assert.ok(recovery.includes("`claim.branch` equals the head branch and `claim.worktree` equals the row's `path`"));
+  assert.ok(!recovery.includes("bin/findings list --state claimed"));
   const manual = skill.split("\n").filter((line) => line.includes("--fixed"));
   assert.equal(manual.length, 1);
   assert.match(manual[0] ?? "", /the owner runs `<main>\/bin\/findings resolve <id> --fixed <merge commit>`/);

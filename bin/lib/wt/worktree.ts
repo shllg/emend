@@ -423,6 +423,7 @@ export interface ListRow {
   branch: string;
   path: string;
   issue?: number;
+  findings: string[] | null;
   port: number;
   mode: "github" | "local";
   /** Commits on the branch that its base lacks (local main for a local-mode entry, origin/main otherwise), or null when unknown. */
@@ -520,6 +521,7 @@ export function list(repo: Repo): ListRow[] {
       branch,
       path: entry.path,
       issue: entry.issue,
+      findings: entry.findings ?? null,
       port: entry.port,
       mode: entry.mode,
       ahead,

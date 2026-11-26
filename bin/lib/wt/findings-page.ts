@@ -1,4 +1,5 @@
 import type { Finding } from "./findings.ts";
+import { findingAnchor, findingLines } from "./findings-source.ts";
 import { gitBytes, type Repo } from "./repo.ts";
 
 const INSTRUCTIONS = `# Findings triage
@@ -28,7 +29,11 @@ function codeBlock(content: string, language = ""): string {
   return `${fence}${language}\n${content}\n${fence}`;
 }
 
-function excerpt(repo: Repo, { path, line }: Finding): string {
+function shortenFindingIds(text: string): string {
+  return text.replace(/(f-[0-9a-f]{4})[0-9a-f]{8}/g, "$1…");
+}
+
+function excerpt(repo: Repo, { path, line, anchor }: Finding): string {
   const untracked = "Not tracked as a file in the main checkout's HEAD.";
   const nonText = "The file is too large or not text.";
   const tree = gitBytes(repo, ["--literal-pathspecs", "ls-tree", "--long", "-z", "--full-tree", "HEAD", "--", path]);
@@ -38,37 +43,41 @@ function excerpt(repo: Repo, { path, line }: Finding): string {
   if (!entry) return untracked;
   if (Number(entry[2]) > 1024 * 1024) return nonText;
   const blob = gitBytes(repo, ["cat-file", "blob", entry[1] as string]);
-  if (blob.code !== 0) return untracked;
+  if (blob.code !== 0) return "Could not read the file from the main checkout's HEAD.";
   if (blob.stdout.includes(0)) return nonText;
-  let content: string;
+  let lines: string[];
   try {
-    content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(blob.stdout);
+    lines = findingLines(blob.stdout);
   } catch {
     return nonText;
   }
-  const lines = content.split(/\r?\n/);
-  if (lines.at(-1) === "") lines.pop();
-  const start = Math.max(0, Math.min(line - 7, lines.length - 1));
-  return codeBlock(lines.slice(start, line + 6).join("\n"));
+  const current = lines[line - 1];
+  if (current === undefined) return `Line ${line} is past the end of the file in the main checkout's HEAD.`;
+  const block = codeBlock(lines.slice(Math.max(0, line - 7), line + 6).join("\n"));
+  if (findingAnchor(current) !== anchor) return `${block}\n\nThe recorded line changed since the finding was recorded.`;
+  return block;
 }
 
 function renderFinding(repo: Repo, finding: Finding): string {
   const location = codeSpan(`${finding.path}:${finding.line}`);
   const meta = `${finding.kind} · ${finding.severity} · ${finding.size} · ${location} · ${finding.createdAt}`;
-  const body =
-    finding.kind === "security"
-      ? `A security finding's text stays on this machine. Read it with \`bin/findings show ${finding.id}\`.`
-      : [codeSpan(finding.title), codeBlock(finding.detail, "text"), excerpt(repo, finding)].join("\n\n");
-  return `### ${finding.id}\n\n${meta}\n\n${body}`;
+  const body = [meta, codeSpan(finding.title), codeBlock(finding.detail, "text"), excerpt(repo, finding)].join("\n\n");
+  return `### ${finding.id}\n\n${shortenFindingIds(body)}`;
 }
 
-/** Findings arrive oldest first, with id breaking ties. Map insertion order preserves each area's first finding. */
-export function renderTriagePage(repo: Repo, findings: Finding[]): { markdown: string; ids: string[] } {
+/** Open findings arrive oldest first, with id breaking ties. Map insertion order preserves each area's first finding. */
+export function renderTriagePage(repo: Repo, findings: Finding[]): { markdown: string; ids: string[] } | null {
   const groups = new Map<string | null, Finding[]>();
-  const ineligible: Finding[] = [];
+  const large: Finding[] = [];
+  let securityCount = 0;
   for (const finding of findings) {
-    if (finding.kind === "security" || finding.size === "large") {
-      ineligible.push(finding);
+    if (finding.kind === "security") {
+      securityCount++;
+      continue;
+    }
+    if (finding.approval) continue;
+    if (finding.size === "large") {
+      large.push(finding);
       continue;
     }
     const area = finding.path.split("/").slice(0, 2).join("/");
@@ -76,11 +85,20 @@ export function renderTriagePage(repo: Repo, findings: Finding[]): { markdown: s
     if (group) group.push(finding);
     else groups.set(area, [finding]);
   }
-  if (ineligible.length) groups.set(null, ineligible);
+  if (large.length) groups.set(null, large);
+  if (!groups.size && !securityCount) return null;
   const parts = [INSTRUCTIONS];
+  if (securityCount)
+    parts.push(
+      `${securityCount} security findings are open. They stay on this machine: list them with \`bin/findings list --state open --kind security\`.`,
+    );
   const ids: string[] = [];
   for (const [area, group] of groups) {
-    parts.push(area === null ? "## Not for /e-fix\n\nThese findings take only `skip`." : `## ${codeSpan(area)}`);
+    parts.push(
+      area === null
+        ? "## Not for /e-fix\n\nThese findings take only `skip`."
+        : `## ${codeSpan(shortenFindingIds(area))}`,
+    );
     for (const finding of group) {
       parts.push(renderFinding(repo, finding));
       ids.push(finding.id);

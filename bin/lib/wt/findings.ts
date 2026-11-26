@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -18,6 +18,7 @@ import { isAbsolute, join } from "node:path";
 import { checkText } from "../../../scripts/check-public.ts";
 import type { CommandTable } from "./command.ts";
 import { renderTriagePage } from "./findings-page.ts";
+import { findingAnchor, findingLines, sha256 } from "./findings-source.ts";
 import { run, runBytes } from "./proc.ts";
 import { isFindingId, stateDir, withStateLock } from "./registry.ts";
 import { GIT_BASE, type Repo } from "./repo.ts";
@@ -200,10 +201,6 @@ function claimTarget(value: unknown): ClaimOwner {
   const hit = hits.find((hit) => hit !== "claim worktree: real home path");
   if (hit) throw new WtError(2, hit);
   return { branch, worktree };
-}
-
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function fingerprint(input: FindingInput, anchor: string): string {
@@ -414,17 +411,15 @@ export function addFinding(repo: Repo, value: unknown): { id: string; created: b
     if (!entry || entry[3] !== input.path) invalid("path: expected a regular file tracked at HEAD");
     const blob = runBytes("git", [...GIT_BASE, "cat-file", "blob", entry[2] as string], gitOptions(repo));
     gitResult(blob.code, 2, "Could not read finding blob at HEAD.");
-    let text: string;
+    let lines: string[];
     try {
-      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(blob.stdout);
+      lines = findingLines(blob.stdout);
     } catch {
       invalid("path: expected UTF-8");
     }
-    const lines = text === "" ? [] : text.split("\n");
-    if (text.endsWith("\n")) lines.pop();
     const line = lines[input.line - 1];
     if (line === undefined) invalid("line");
-    const anchor = sha256(line.trim());
+    const anchor = findingAnchor(line);
     const hash = fingerprint(input, anchor);
     const id = `f-${hash.slice(0, 12)}`;
     storageDirectory(repo, true);
@@ -524,10 +519,10 @@ function writeTriagePage(repo: Repo): { page: string | null; key: string; findin
   if (repo.callerTop !== repo.mainRoot)
     throw new WtError(2, "Only the main checkout writes the triage page. Nothing was changed.");
   const key = `e-triage-${sha256(realpathSync(repo.mainRoot)).slice(0, 12)}`;
-  const findings = listFindings(repo, { triage: "untriaged" }, (message) => process.stderr.write(`${message}\n`));
+  const open = listFindings(repo, { state: "open" }, (message) => process.stderr.write(`${message}\n`));
   const directory = join(repo.mainRoot, ".wt");
   const folderError = "The main checkout's .wt must be a real folder. Nothing was changed.";
-  const rendered = findings.length ? renderTriagePage(repo, findings) : null;
+  const rendered = renderTriagePage(repo, open);
   if (rendered) {
     try {
       mkdirSync(directory, { mode: 0o700 });
@@ -547,11 +542,16 @@ export function checkedFindingIds(ids: string[]): string[] {
   return [...new Set(ids.map(findingId))];
 }
 
-export function approveFindings(repo: Repo, ids: string[], priority: unknown): void {
+function triageIds(repo: Repo, ids: string[], action: "approves" | "skips"): string[] {
   if (repo.callerTop !== repo.mainRoot)
-    throw new WtError(2, "Only the main checkout approves findings. Nothing was changed.");
+    throw new WtError(2, `Only the main checkout ${action} findings. Nothing was changed.`);
   const validIds = checkedFindingIds(ids);
   if (validIds.length !== ids.length) invalid("ids: duplicates");
+  return validIds;
+}
+
+export function approveFindings(repo: Repo, ids: string[], priority: unknown): void {
+  const validIds = triageIds(repo, ids, "approves");
   const checkedPriority = choice(priority, PRIORITIES, "priority");
   mutate(repo, () => {
     const approval = { priority: checkedPriority, at: new Date().toISOString() };
@@ -561,6 +561,20 @@ export function approveFindings(repo: Repo, ids: string[], priority: unknown): v
       if (finding.kind === "security" || finding.size === "large")
         throw new WtError(2, "/e-fix does not take security or large findings. Nothing was changed.");
       return { ...finding, approval };
+    });
+    writeFindings(repo, findings);
+  });
+}
+
+function skipFindings(repo: Repo, ids: string[]): void {
+  const validIds = triageIds(repo, ids, "skips");
+  mutate(repo, () => {
+    const resolution = { at: new Date().toISOString(), reason: "skipped by the owner in triage" };
+    const findings = validIds.map((id) => {
+      const finding = readFinding(repo, id);
+      if (finding.state !== "open" || finding.approval)
+        throw new WtError(1, `Finding ${id} is claimed, resolved or approved. Nothing was changed.`);
+      return { ...finding, state: "dismissed" as const, resolution };
     });
     writeFindings(repo, findings);
   });
@@ -944,6 +958,11 @@ export const commands: CommandTable = {
   approve({ repo, args }) {
     const { flags, positionals } = options(args, { priority: "string" }, args.length);
     approveFindings(repo, positionals, flags.priority);
+    return 0;
+  },
+  skip({ repo, args }) {
+    const { positionals } = options(args, {}, args.length);
+    skipFindings(repo, positionals);
     return 0;
   },
   release({ repo, args }) {
