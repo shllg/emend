@@ -9,6 +9,7 @@ import { findExecutable } from "../executable.ts";
 import { CliError } from "../http.ts";
 import type { CliRuntime } from "../runtime.ts";
 import { runtimeInRepository } from "../runtime-repository.ts";
+import { readAttachment } from "../target.ts";
 import type { ServerReady, ServerReadyOptions } from "./takeover.ts";
 
 export interface ServiceResult {
@@ -153,10 +154,15 @@ export function clearServicePending(stateDir: string) {
   return removeIfPresent(join(stateDir, "service.pending"));
 }
 
-export function printServiceInstalled(io: Io, server: ServerReady) {
+export async function printServiceInstalled(io: Io, stateDir: string, server: ServerReady) {
   io.stdout("recense: service installed\n");
   io.stdout(`recense: the service starts at login and serves ${escapeReference(server.publicUrl ?? server.url)}\n`);
-  io.stdout("To sign a browser in, run recense in a terminal.\n");
+  const attachment = await readAttachment(stateDir).catch(() => null);
+  io.stdout(
+    attachment
+      ? "This machine publishes to a hub; pair a browser from the hub with recense pair.\n"
+      : "To sign a browser in, run recense in your own terminal.\n",
+  );
 }
 
 export function serviceStatus(io: Io, path: string, running: boolean) {

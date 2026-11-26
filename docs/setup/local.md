@@ -254,7 +254,7 @@ recense service status
 ```text
 recense: service installed
 recense: the service starts at login and serves http://127.0.0.1:3636
-To sign a browser in, run recense in a terminal.
+To sign a browser in, run recense in your own terminal.
 recense: service running (<path>)
 ```
 

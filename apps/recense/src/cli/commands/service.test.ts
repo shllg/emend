@@ -43,10 +43,11 @@ const failed: ServiceResult = { code: 1, stdout: "", stderr: "first failure\nmor
 const unsupported =
   "recense: recense service supports systemd on Linux and launchd on macOS; run recense serve yourself.\n";
 const linger = "To keep recense running after you log out, run sudo loginctl enable-linger $USER.\n";
+const publicUrl = "https://public.example.test";
 const installedOutput = (url = "http://127.0.0.1:3636") => [
   "recense: service installed\n",
   `recense: the service starts at login and serves ${url}\n`,
-  "To sign a browser in, run recense in a terminal.\n",
+  "To sign a browser in, run recense in your own terminal.\n",
 ];
 
 let root: string;
@@ -97,7 +98,11 @@ beforeEach(async () => {
   recorded = vi.fn(async (_file, args) => (args[0] === "print" ? failed : ok));
   callLog = [];
   stopLocalServer = vi.fn(async () => undefined);
-  waitForServer = vi.fn(async () => ({ url: "http://127.0.0.1:3636", pid: 12345 }));
+  waitForServer = vi.fn<NonNullable<ServiceOptions["waitForServer"]>>(async (ready) => ({
+    url: "http://127.0.0.1:3636",
+    pid: 12345,
+    ...(ready.publicOrigin ? { publicUrl } : {}),
+  }));
   elapsed = 0;
   sleep = vi.fn(async (ms) => {
     elapsed += ms;
@@ -537,7 +542,26 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
     const output = stdout.join("");
     expect(output).not.toContain("/pair");
     expect(output).not.toContain("#");
-    expect(output.endsWith("To sign a browser in, run recense in a terminal.\n")).toBe(true);
+    expect(output.endsWith("To sign a browser in, run recense in your own terminal.\n")).toBe(true);
+  });
+
+  test("an attached machine prints the hub pairing command without a sign-in link or code", async () => {
+    stateFiles.writeSecretFile(
+      join(state, "attach.json"),
+      JSON.stringify({
+        hubId: "11111111-1111-4111-8111-111111111111",
+        hubName: "Synthetic hub",
+        hubUrl: "https://hub.example.test",
+      }),
+    );
+    expect(await invoke("install")).toBe(0);
+    expect(stdout).toEqual([
+      ...installedOutput().slice(0, 2),
+      "This machine publishes to a hub; pair a browser from the hub with recense pair.\n",
+    ]);
+    const output = stdout.join("");
+    expect(output).not.toContain("/pair");
+    expect(output).not.toContain("#");
   });
 
   test("stops the service and detached server before starting and confirming the replacement", async () => {
@@ -1307,6 +1331,7 @@ test.each(["linux", "darwin"])("%s service install saves the public URL and wait
   options.platform = platform;
   const flags = ["--public-url", "https://recense.example.com"];
   expect(await invoke("install", ...flags)).toBe(0);
+  expect(stdout).toEqual(installedOutput(publicUrl));
   const path = platform === "linux" ? unitPath() : plistPath();
   const content = await readFile(path, "utf8");
   expect(content).toContain(
@@ -1320,6 +1345,7 @@ test.each(["linux", "darwin"])("%s service install saves the public URL and wait
   expect(await invoke("install")).toBe(0);
   expect(await readFile(path, "utf8")).toBe(content);
   expect(waitForServer).toHaveBeenCalledWith(expect.objectContaining({ publicOrigin: true }));
+  expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput(publicUrl)]);
 });
 
 test.each(["linux", "darwin"])("%s service install without options needs no public origin", async (platform) => {
@@ -1351,6 +1377,7 @@ test.each(["linux", "darwin"])(
 test.each(["linux", "darwin"])("%s service install preserves tailscale serve flags", async (platform) => {
   options.platform = platform;
   expect(await invoke("install", "--tailscale", "--port", "4000")).toBe(0);
+  expect(stdout).toEqual(installedOutput(publicUrl));
   const content = await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8");
   expect(content).toContain(platform === "linux" ? "serve --tailscale --port 4000" : "<string>--tailscale</string>");
 });
@@ -1359,6 +1386,7 @@ test.each(["linux", "darwin"])("%s service install saves and keeps the tailscale
   options.platform = platform;
   const flags = ["--tailscale", "--tailscale-port", "13636"];
   expect(await invoke("install", ...flags)).toBe(0);
+  expect(stdout).toEqual(installedOutput(publicUrl));
   const content = await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8");
   expect(content).toContain(
     platform === "linux"
@@ -1368,11 +1396,12 @@ test.each(["linux", "darwin"])("%s service install saves and keeps the tailscale
   expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(flags);
   resetOutput();
   expect(await invoke("install")).toBe(0);
-  expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput()]);
+  expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput(publicUrl)]);
   expect(await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8")).toBe(content);
   expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(flags);
   resetOutput();
   expect(await invoke("install", "--tailscale")).toBe(0);
+  expect(stdout).toEqual(installedOutput(publicUrl));
   expect(await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8")).not.toContain("13636");
 });
 
@@ -1386,6 +1415,7 @@ test("launchd installs a fixed trusted PATH including both Homebrew locations", 
   options.platform = "darwin";
   io.env.PATH = `${bin}:./node_modules/.bin:/synthetic/review/node_modules/.bin`;
   expect(await invoke("install", "--tailscale")).toBe(0);
+  expect(stdout).toEqual(installedOutput(publicUrl));
   const content = await readFile(plistPath(), "utf8");
   expect(content).toContain(
     "<key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>",
@@ -1402,24 +1432,25 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     options.platform = platform;
   });
 
-  test.each([{ flags: ["--tailscale"] }, { flags: ["--port", "4000", "--host", "192.0.2.1"] }])(
-    "a bare reinstall keeps $flags in order and announces them first",
-    async ({ flags }) => {
-      expect(await invoke("install", ...flags)).toBe(0);
-      expect(stdout).toEqual(installedOutput());
-      expect(await saved()).toEqual(flags);
-      expect((await stat(optionsPath())).mode & 0o777).toBe(0o600);
-      const content = await readFile(path(), "utf8");
-      resetOutput();
-      expect(await invoke("install")).toBe(0);
-      expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput()]);
-      expect(await readFile(path(), "utf8")).toBe(content);
-      expect(await saved()).toEqual(flags);
-      expect(calls()).toContainEqual(
-        platform === "linux" ? systemctl("start", "recense") : launchctl("bootstrap", "gui/501", path()),
-      );
-    },
-  );
+  test.each([
+    { flags: ["--tailscale"], url: publicUrl },
+    { flags: ["--public-url", "https://recense.example.test"], url: publicUrl },
+    { flags: ["--port", "4000", "--host", "192.0.2.1"], url: "http://127.0.0.1:3636" },
+  ])("a bare reinstall keeps $flags in order and announces them first", async ({ flags, url }) => {
+    expect(await invoke("install", ...flags)).toBe(0);
+    expect(stdout).toEqual(installedOutput(url));
+    expect(await saved()).toEqual(flags);
+    expect((await stat(optionsPath())).mode & 0o777).toBe(0o600);
+    const content = await readFile(path(), "utf8");
+    resetOutput();
+    expect(await invoke("install")).toBe(0);
+    expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput(url)]);
+    expect(await readFile(path(), "utf8")).toBe(content);
+    expect(await saved()).toEqual(flags);
+    expect(calls()).toContainEqual(
+      platform === "linux" ? systemctl("start", "recense") : launchctl("bootstrap", "gui/501", path()),
+    );
+  });
 
   test("empty saved options never print a keep line", async () => {
     for (let i = 0; i < 2; i++) {
@@ -1432,6 +1463,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
 
   test("given options replace the whole saved list, including tailscale", async () => {
     expect(await invoke("install", "--tailscale", "--port", "4000")).toBe(0);
+    expect(stdout).toEqual(installedOutput(publicUrl));
     resetOutput();
     expect(await invoke("install", "--port", "3636")).toBe(0);
     expect(await saved()).toEqual(["--port", "3636"]);
@@ -1441,6 +1473,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
 
   test.each([false, true])("an older install announces defaults once (legacy pending marker: %s)", async (pending) => {
     expect(await invoke("install", "--tailscale")).toBe(0);
+    expect(stdout).toEqual(installedOutput(publicUrl));
     await unlink(optionsPath());
     if (pending) await writeFile(pendingPath(), "");
     resetOutput();
@@ -1467,6 +1500,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
 
   test("an older install announces defaults before a failed start or bootstrap", async () => {
     expect(await invoke("install", "--tailscale")).toBe(0);
+    expect(stdout).toEqual(installedOutput(publicUrl));
     await unlink(optionsPath());
     const start = platform === "linux" ? "start" : "bootstrap";
     let outputAtStart: string[] | undefined;
@@ -1490,6 +1524,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
 
   test("explicit options on an older install print no defaults notice", async () => {
     expect(await invoke("install", "--tailscale")).toBe(0);
+    expect(stdout).toEqual(installedOutput(publicUrl));
     await unlink(optionsPath());
     resetOutput();
     expect(await invoke("install", "--port", "3636")).toBe(0);
@@ -1554,6 +1589,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
 
   test("an owned unit with a round-0 pending record refuses a bare install and accepts explicit flags", async () => {
     expect(await invoke("install", "--tailscale")).toBe(0);
+    expect(stdout).toEqual(installedOutput(publicUrl));
     const content = await readFile(path(), "utf8");
     const pending = JSON.stringify({ flags: ["--tailscale"], content });
     await writeFile(pendingPath(), pending);
@@ -1707,6 +1743,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     await writeFile(options.node, "synthetic node");
     await writeFile(options.entry, "synthetic entry");
     expect(await invoke("install", "--tailscale")).toBe(0);
+    expect(stdout).toEqual(installedOutput(publicUrl));
     expect(Buffer.byteLength(await readFile(path(), "utf8"))).toBeGreaterThan(LIMITS.publicJsonBytes);
     const writer = stateFiles.writeSecretFile;
     const spy = vi.spyOn(stateFiles, "writeSecretFile").mockImplementation((file, ...args) => {
@@ -1752,6 +1789,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     "invalid saved options refuse without changing the unit, and explicit flags repair them (case %#)",
     async (bad) => {
       expect(await invoke("install", "--tailscale")).toBe(0);
+      expect(stdout).toEqual(installedOutput(publicUrl));
       const content = await readFile(path(), "utf8");
       await writeFile(optionsPath(), bad);
       resetOutput();
@@ -1793,6 +1831,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     "unreadable saved options refuse, and explicit flags replace the file",
     async () => {
       expect(await invoke("install", "--tailscale")).toBe(0);
+      expect(stdout).toEqual(installedOutput(publicUrl));
       const content = await readFile(path(), "utf8");
       await chmod(optionsPath(), 0o000);
       try {
@@ -1816,7 +1855,10 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     test.each(["pending", "unit", "options", "start"])(
       `a failed ${installed ? "repeat" : "first"} install at %s recovers the options for the unit on disk`,
       async (step) => {
-        if (installed) expect(await invoke("install", "--tailscale")).toBe(0);
+        if (installed) {
+          expect(await invoke("install", "--tailscale")).toBe(0);
+          expect(stdout).toEqual(installedOutput(publicUrl));
+        }
         resetOutput();
         const writer = stateFiles.writeSecretFile;
         const spy = vi.spyOn(stateFiles, "writeSecretFile").mockImplementation((file, ...args) => {
@@ -1845,7 +1887,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
         expect(await saved()).toEqual(expected);
         expect(stdout).toEqual([
           ...(expected.length ? [`recense: keeping the service options ${expected.join(" ")}\n`] : []),
-          ...installedOutput(),
+          ...installedOutput(expected.includes("--tailscale") ? publicUrl : undefined),
         ]);
         const content = await readFile(path(), "utf8");
         expect(content.includes("4000")).toBe(renamed);
@@ -1857,6 +1899,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
 
   test("a second failed explicit update cannot discard an earlier pending options recovery", async () => {
     expect(await invoke("install", "--tailscale")).toBe(0);
+    expect(stdout).toEqual(installedOutput(publicUrl));
     const writer = stateFiles.writeSecretFile;
     const spy = vi.spyOn(stateFiles, "writeSecretFile").mockImplementation((file, ...args) => {
       if (file === optionsPath()) throw new Error("synthetic options write failure");
@@ -2081,6 +2124,7 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
     await expect(lstat(newPath())).rejects.toMatchObject({ code: "ENOENT" });
     resetOutput();
     expect(await invoke("install")).toBe(0);
+    expect(stdout).toEqual(expect.arrayContaining(installedOutput(publicUrl)));
     expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(["--port", "4000", "--tailscale"]);
     await expect(lstat(oldPath())).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -2096,6 +2140,7 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
     expect(await readFile(oldPath(), "utf8")).toBe(oldUnit(["--port", "4000", "--tailscale"]));
     resetOutput();
     expect(await invoke("install")).toBe(0);
+    expect(stdout).toEqual(expect.arrayContaining(installedOutput(publicUrl)));
     expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(["--port", "4000", "--tailscale"]);
     expect(await readFile(newPath(), "utf8")).toContain("tailscale");
     await expect(lstat(oldPath())).rejects.toMatchObject({ code: "ENOENT" });
@@ -2104,6 +2149,7 @@ ${["/usr/bin/node", "/opt/e &amp; mend/entry.mjs", "serve", ...options].map((wor
   test("an install without options keeps the options of the old service", async () => {
     await put(oldPath(), oldUnit(["--port", "4000", "--tailscale", "--tailscale-port", "8443"]));
     expect(await invoke("install")).toBe(0);
+    expect(stdout).toEqual(expect.arrayContaining(installedOutput(publicUrl)));
     expect(await readFile(newPath(), "utf8")).toContain(
       platform === "linux"
         ? "serve --port 4000 --tailscale --tailscale-port 8443\n"
