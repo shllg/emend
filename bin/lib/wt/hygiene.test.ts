@@ -140,7 +140,8 @@ test("e-triage validates the heading, checks before approve or skip and republis
   const otherTarget = skill.indexOf("For any other target, answer the comment");
   assert.ok(otherTarget >= 0);
   assert.ok(skill.indexOf("For a comment on the security count, reply `explained`") > otherTarget);
-  assert.ok(skill.indexOf("Never put a security finding's id, title, detail, path or code in a reply.") > otherTarget);
+  assert.ok(skill.indexOf("Put nothing about security findings in a reply but the page's count.") > otherTarget);
+  assert.ok(skill.indexOf("Never read security findings to answer a comment.") > otherTarget);
   const mode = skill.indexOf("read the hand-off's `mode` first");
   const explain = skill.indexOf("In `explain`, change nothing in the registry");
   const show = skill.indexOf("<main>/bin/findings show <id>");

@@ -39,6 +39,7 @@ import {
   commitFile,
   deadPid,
   type Fixture,
+  fakeCalls,
   gitIn,
   installFake,
   makeFixture,
@@ -505,6 +506,34 @@ test("page reports a blob read failure after finding the tracked file in HEAD", 
   ]);
   const page = renderTriagePage(repo, [finding]);
   assert.ok(page?.markdown.includes("Could not read the file from the main checkout's HEAD."));
+});
+
+test("page reports an invalid ls-tree size without reading the blob", () => {
+  const finding = showFinding(repo, addFinding(repo, input()).id);
+  const blob = gitIn(fx.main, "rev-parse", "HEAD:README.md");
+  rmSync(join(env.fakeBin, "git"));
+  installFake(env, "git", [{ match: ["ls-tree"], stdout: `100644 blob ${blob}     BAD\tREADME.md\0` }]);
+  const page = renderTriagePage(repo, [finding]);
+  assert.ok(page?.markdown.includes("Could not read the file from the main checkout's HEAD."));
+  assert.ok(!fakeCalls(env, "git").some((args) => args.includes("cat-file")));
+});
+
+test("page reports a read failure when HEAD names a missing directory tree", () => {
+  commitFile(fx.main, "docs/a.md", "fixture\n");
+  const finding = showFinding(repo, addFinding(repo, input({ path: "docs/a.md" })).id);
+  const tree = spawnSync("git", ["mktree", "--missing"], {
+    cwd: fx.main,
+    input: `040000 tree ${"1".repeat(40)}\tdocs\n`,
+    encoding: "utf8",
+  });
+  assert.equal(tree.status, 0, tree.stderr);
+  const commit = gitIn(fx.main, "commit-tree", tree.stdout.trim(), "-p", "HEAD", "-m", "reference a missing tree");
+  gitIn(fx.main, "update-ref", "HEAD", commit);
+
+  const page = renderTriagePage(repo, [finding]);
+  assert.ok(page);
+  assert.ok(page.markdown.includes("Could not read the file from the main checkout's HEAD."));
+  assert.ok(!page.markdown.includes("Not tracked as a file in the main checkout's HEAD."));
 });
 
 test("page reports a read failure when HEAD names a missing blob", () => {

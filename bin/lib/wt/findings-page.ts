@@ -38,8 +38,9 @@ function excerpt(repo: Repo, { path, line, anchor }: Finding): string {
   const readFailure = "Could not read the file from the main checkout's HEAD.";
   const nonText = "The file is too large or not text.";
   const tree = gitBytes(repo, ["--literal-pathspecs", "ls-tree", "--long", "-z", "--full-tree", "HEAD", "--", path]);
+  if (tree.code !== 0) return readFailure;
   const tab = tree.stdout.indexOf(9);
-  if (tree.code !== 0 || tab < 0 || !tree.stdout.subarray(tab + 1).equals(Buffer.from(`${path}\0`))) return untracked;
+  if (tab < 0 || !tree.stdout.subarray(tab + 1).equals(Buffer.from(`${path}\0`))) return untracked;
   const entry = /^(?:100644|100755) blob ([0-9a-f]{40}) +(\S+)$/.exec(tree.stdout.subarray(0, tab).toString("ascii"));
   if (!entry) return untracked;
   const size = entry[2] as string;
