@@ -45,6 +45,7 @@ export interface WorktreeEntry {
   path: string;
   port: number;
   issue?: number;
+  findings?: string[];
   mode: "github" | "local";
   createdAt: string;
   /** Commit that landed this branch on local main (set by `land`). */
@@ -194,6 +195,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+export function isFindingId(value: unknown): value is string {
+  return typeof value === "string" && /^f-[0-9a-f]{12}$/.test(value);
+}
+
+export function validFindingIds(ids: unknown): ids is string[] {
+  return Array.isArray(ids) && ids.length > 0 && ids.every(isFindingId) && new Set(ids).size === ids.length;
+}
+
 function parseRegistry(text: string): Registry {
   let data: unknown;
   try {
@@ -207,6 +216,8 @@ function parseRegistry(text: string): Registry {
   for (const entry of Object.values(data.worktrees)) {
     if (isRecord(entry) && Object.hasOwn(entry, "hcAddress") && hcAddress(entry.hcAddress) === null)
       throw new WtError(1, "The worktree registry has an invalid hc address. Nothing was changed.");
+    if (isRecord(entry) && Object.hasOwn(entry, "findings") && !validFindingIds(entry.findings))
+      throw new WtError(1, "The worktree registry has invalid finding ids. Nothing was changed.");
   }
   // Older registries may still carry `reservations` and per-entry `task` keys; they are ignored.
   return data as unknown as Registry;

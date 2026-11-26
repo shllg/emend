@@ -17,14 +17,13 @@ import { isAbsolute, join } from "node:path";
 import { checkText } from "../../../scripts/check-public.ts";
 import type { CommandTable } from "./command.ts";
 import { run, runBytes } from "./proc.ts";
-import { stateDir, withStateLock } from "./registry.ts";
+import { isFindingId, stateDir, withStateLock } from "./registry.ts";
 import { GIT_BASE, type Repo } from "./repo.ts";
 import { branchName, commitSha, parseFlags, readFileBytes, readTextFile, WtError } from "./validate.ts";
 
 const KINDS = ["bug", "defect", "test", "docs", "ux", "react-perf", "react-style", "architecture", "security"] as const;
 const STATES = ["open", "claimed", "fixed", "dismissed", "stale"] as const;
 const INPUT_KEYS = ["title", "detail", "path", "line", "kind", "severity", "size", "source"];
-const ID = /^f-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const CONTROLS = /\p{Cc}/u;
 const BLOB = /^[0-9a-f]{40}$/;
@@ -59,6 +58,8 @@ export interface FindingFilters {
   kind?: string;
   path?: string;
 }
+
+export type BundleFinding = Omit<FindingInput, "source"> & Pick<Finding, "id" | "commit" | "createdAt">;
 
 export type FindingResolution = { fixed: string } | { dismissed: string } | { stale: true };
 
@@ -166,7 +167,7 @@ function parseInput(value: unknown): FindingInput {
 }
 
 function findingId(value: string): string {
-  if (typeof value !== "string" || !ID.test(value)) invalid("id");
+  if (!isFindingId(value)) invalid("id");
   return value;
 }
 
@@ -266,8 +267,8 @@ function storageDirectory(repo: Repo, create = false, store: Store = "findings")
   }
 }
 
-function readFinding(repo: Repo, id: string): Finding {
-  if (!storageDirectory(repo)) throw new WtError(1, "Unknown finding.");
+function readFindingIfPresent(repo: Repo, id: string): Finding | undefined {
+  if (!storageDirectory(repo)) return undefined;
   try {
     return parseStored(
       JSON.parse(
@@ -276,9 +277,15 @@ function readFinding(repo: Repo, id: string): Finding {
       id,
     );
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") throw new WtError(1, "Unknown finding.");
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     return storageError();
   }
+}
+
+function readFinding(repo: Repo, id: string, missingCode: 1 | 2 = 1): Finding {
+  const finding = readFindingIfPresent(repo, id);
+  if (!finding) throw new WtError(missingCode, "Unknown finding.");
+  return finding;
 }
 
 function stageFile(directory: string, id: string, content: string | Buffer, temps: Set<string>): string {
@@ -456,7 +463,7 @@ export function listFindings(
     for (const name of names) {
       if (!name.endsWith(".json")) continue;
       const id = name.slice(0, -5);
-      if (!ID.test(id)) {
+      if (!isFindingId(id)) {
         onSkipped?.("Skipped a finding file with an invalid name.");
         continue;
       }
@@ -481,13 +488,23 @@ export function listFindings(
     .map(withOrphaned);
 }
 
-function checkedIds(ids: string[]): string[] {
+export function checkedFindingIds(ids: string[]): string[] {
   if (ids.length === 0) invalid("ids");
   return [...new Set(ids.map(findingId))];
 }
 
+export function readBundleFindings(repo: Repo, ids: string[]): BundleFinding[] {
+  return checkedFindingIds(ids).map((id) => {
+    const finding = readFinding(repo, id, 2);
+    if (finding.state !== "open") throw new WtError(3, `Finding ${id} is already claimed or resolved.`);
+    if (finding.kind === "security" || finding.size === "large")
+      throw new WtError(2, `Finding ${id} needs an issue. Only small, non-security findings can be bundled.`);
+    return finding;
+  });
+}
+
 export function claimFindings(repo: Repo, ids: string[], target: { branch: string; worktree: string }): void {
-  const validIds = checkedIds(ids);
+  const validIds = checkedFindingIds(ids);
   const claim = { ...claimTarget(target), at: new Date().toISOString() };
   mutate(repo, () => {
     const findings = validIds.map((id) => readFinding(repo, id));
@@ -501,18 +518,30 @@ export function claimFindings(repo: Repo, ids: string[], target: { branch: strin
 }
 
 export function releaseFindings(repo: Repo, ids: string[]): void {
-  const validIds = checkedIds(ids);
+  const validIds = checkedFindingIds(ids);
   mutate(repo, () => {
     const findings = validIds.map((id) => readFinding(repo, id));
     if (findings.some((finding) => finding.state !== "claimed"))
       throw new WtError(1, "Only claimed findings can be released. Nothing was changed.");
-    writeFindings(
-      repo,
-      findings.map((finding) => {
-        delete finding.claim;
-        return { ...finding, state: "open" };
-      }),
-    );
+    writeFindings(repo, findings.map(reopened));
+  });
+}
+
+function reopened(finding: Finding): Finding {
+  delete finding.claim;
+  return { ...finding, state: "open" };
+}
+
+export function releaseOrphanedClaim(repo: Repo, id: string, seen: NonNullable<Finding["claim"]>): boolean {
+  findingId(id);
+  return mutate(repo, () => {
+    const finding = readFindingIfPresent(repo, id);
+    const claim = finding?.claim;
+    if (finding?.state !== "claimed" || !claim) return false;
+    if (claim.branch !== seen.branch || claim.worktree !== seen.worktree || claim.at !== seen.at) return false;
+    if (!withOrphaned(finding).orphaned) return false;
+    writeFindings(repo, [reopened(finding)]);
+    return true;
   });
 }
 
@@ -766,7 +795,7 @@ export const commands: CommandTable = {
       const spec: Parameters<typeof parseFlags>[1] =
         action === "resolve" ? { fixed: "string", dismissed: "string", stale: "boolean" } : {};
       const { flags, positionals } = options(rest, spec, action === "release" ? rest.length : 1);
-      const ids = checkedIds(positionals);
+      const ids = checkedFindingIds(positionals);
       const id = ids[0] as string;
       if (action === "show") process.stdout.write(`${JSON.stringify(showFinding(repo, id), null, 2)}\n`);
       else if (action === "release") releaseFindings(repo, ids);

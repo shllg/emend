@@ -26,6 +26,7 @@ import {
   groomVisited,
   listFindings,
   releaseFindings,
+  releaseOrphanedClaim,
   resolveFinding,
   showFinding,
 } from "./findings.ts";
@@ -363,6 +364,24 @@ test("claim accepts and stores a worktree under a home folder", () => {
   assert.equal(record.state, "claimed");
   assert.equal(record.claim.worktree, worktree);
   assert.deepEqual(listFindings(repo), [{ ...record, orphaned: true }]);
+});
+
+test("orphan release rechecks every claim field and the worktree directory", () => {
+  const { id } = addFinding(repo, input());
+  const worktree = join(env.root, "returning-worker");
+  claimFindings(repo, [id], { ...target(), worktree });
+  const seen = showFinding(repo, id).claim;
+  assert.ok(seen);
+  for (const changed of [{ branch: "other" }, { worktree: fx.main }, { at: "2000-01-01T00:00:00.000Z" }]) {
+    assert.equal(releaseOrphanedClaim(repo, id, { ...seen, ...changed }), false);
+    assert.deepEqual(showFinding(repo, id).claim, seen);
+  }
+  mkdirSync(worktree);
+  assert.equal(releaseOrphanedClaim(repo, id, seen), false);
+  assert.deepEqual(showFinding(repo, id).claim, seen);
+  rmSync(worktree, { recursive: true });
+  assert.equal(releaseOrphanedClaim(repo, id, seen), true);
+  assert.equal(releaseOrphanedClaim(repo, id, seen), false);
 });
 
 test("claim worktree paths reject combining-mark runs and URL passwords without changing storage", () => {

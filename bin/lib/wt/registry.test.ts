@@ -218,6 +218,22 @@ test("a legacy registry with reservations and task keys loads, and a write keeps
   writeFileSync(registryPath(repo), JSON.stringify({ version: 1, worktrees: {} }));
 });
 
+test("registry refuses invalid finding id lists", () => {
+  const isolated = { ...repo, commonDir: join(env.root, "invalid-finding-ids") };
+  const path = registryPath(isolated);
+  mkdirSync(dirname(path), { recursive: true });
+  const id = "f-0123456789ab";
+  for (const findings of [null, id, [], [42], ["f-ABCDEF012345"], [id, id]]) {
+    const data = JSON.stringify({ version: 1, worktrees: { fixer: { ...entry(PORT_MIN), findings } } });
+    writeFileSync(path, data);
+    assert.throws(
+      () => readRegistry(isolated),
+      (e) => e instanceof WtError && e.code === 1 && e.message.includes("Nothing was changed."),
+    );
+    assert.equal(readFileSync(path, "utf8"), data);
+  }
+});
+
 test("allocatePort takes the lowest port neither registered nor busy", () => {
   const { min, max } = portRange();
   const r = { version: 1 as const, worktrees: { a: entry(min), b: entry(min + 2) } };

@@ -60,6 +60,7 @@ Local:
 
 herdr / herdr desktop:
   spawn --issue <n> [--mode github] [--model <m>] [--effort <e>]
+  spawn --findings <id,id> --slug <slug> [--model <m>] [--effort <e>]
   notify ...
   agents [--json]                                  agents in registered worktrees, from both backends
   agent read <target> [--lines N]                   registered worker output (1..400 lines, default 80)

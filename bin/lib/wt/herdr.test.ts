@@ -3,6 +3,14 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
 import {
+  addFinding,
+  claimFindings,
+  type FindingInput,
+  listFindings,
+  releaseFindings,
+  showFinding,
+} from "./findings.ts";
+import {
   agentName,
   closeWorkspace,
   HerdrError,
@@ -37,7 +45,7 @@ import {
   type TestEnv,
 } from "./test-support.ts";
 import { WtError } from "./validate.ts";
-import { cleanup, safetyGuard, setup, terminal } from "./worktree.ts";
+import { cleanup, safetyGuard, setBeforeWorktreeAddHookForTests, setup, terminal } from "./worktree.ts";
 
 async function scenario(
   o: { withBin?: boolean },
@@ -132,6 +140,194 @@ function herdrRules(agent: string, extra: FakeRule[] = []): FakeRule[] {
 }
 
 const SPAWN_ARGS = ["spawn", "--issue", "42"];
+
+const FIXER_BRANCH = "recense-fix-20260103-readme-md";
+const fixerClock = () => ({ ...fakeClock(), date: () => new Date("2026-01-02T19:15:00-05:00") });
+
+function recordFinding(repo: Repo, overrides: Partial<FindingInput> = {}): string {
+  return addFinding(repo, {
+    title: "Keep the selection",
+    detail: "The selection is lost when the view changes.",
+    path: "README.md",
+    line: 1,
+    kind: "bug",
+    severity: "medium",
+    size: "small",
+    source: { kind: "groom", pass: "first" },
+    ...overrides,
+  }).id;
+}
+
+test("spawn --findings claims, snapshots and prompts", () =>
+  scenario({}, ({ env, repo }) =>
+    inHerdr(async () => {
+      const first = recordFinding(repo, { rule: "selection" });
+      const second = recordFinding(repo, { kind: "docs" });
+      const ids = [second, first];
+      const expected = ids.map((id) => {
+        const { title, detail, path, line, kind, rule, severity, size, commit, createdAt } = showFinding(repo, id);
+        return { id, title, detail, path, line, kind, rule, severity, size, commit, createdAt };
+      });
+      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH)));
+      const r = await spawn(repo, { findings: [...ids, second], slug: "readme-md", mode: "github" }, fixerClock());
+      assert.equal(r.branch, FIXER_BRANCH);
+      assert.deepEqual(r.findings, ids);
+      assert.equal(r.issue, undefined);
+      const wt = join(r.path, ".wt");
+      assert.deepEqual(JSON.parse(readFileSync(join(wt, "worktree.json"), "utf8")), {
+        branch: FIXER_BRANCH,
+        port: r.port,
+        recenseHome: r.recenseHome,
+        mode: "github",
+        findings: ids,
+      });
+      assert.deepEqual(readRegistry(repo).worktrees[FIXER_BRANCH]?.findings, ids);
+      assert.equal(
+        readFileSync(join(wt, "bundle.json"), "utf8"),
+        `${JSON.stringify({ version: 1, findings: expected }, null, 2)}\n`,
+      );
+      assert.equal(statSync(join(wt, "bundle.json")).mode & 0o777, 0o600);
+      assert.equal(readFileSync(join(wt, "brief.md"), "utf8"), ".wt/bundle.json\n");
+      for (const id of ids) {
+        const finding = showFinding(repo, id);
+        assert.equal(finding.state, "claimed");
+        assert.equal(finding.claim?.branch, FIXER_BRANCH);
+        assert.equal(finding.claim?.worktree, r.path);
+      }
+      const prompts = fakeCalls(env, "herdr").filter((call) => call[1] === "prompt");
+      assert.equal(prompts.length, 1);
+      assert.equal(
+        prompts[0]?.[3],
+        "/loop /e-work .wt/bundle.json Closing answer from /e-spawn: Open a ready PR and finalize it.",
+      );
+    }),
+  ));
+
+test("hc spawn --findings labels the terminal and prints the selected ids", () =>
+  scenario({ withBin: true }, async ({ env, fx, repo }) => {
+    const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
+    installFake(env, "claude", []);
+    installFake(env, "hc", [
+      { match: ["ls", "--json"], stdout: JSON.stringify({ terminals: [] }) },
+      { match: ["run"], stdout: JSON.stringify({ address: "t2", state: "live" }) },
+      { match: ["get", "t2"], stdout: JSON.stringify({ address: "t2", status: { state: "working" } }) },
+    ]);
+    const r = await runWt(join(fx.main, "bin/wt"), ["spawn", "--findings", ids.join(","), "--slug", "readme-md"], {
+      cwd: fx.main,
+      env: { HC_TERMINAL_ID: "t1" },
+    });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout.split("\n")[0], `Findings: ${ids.join(", ")}`);
+    assert.doesNotMatch(r.stdout, /^Issue:/m);
+    const launch = fakeCalls(env, "hc").find((call) => call[0] === "run");
+    assert.ok(launch);
+    assert.ok(launch.includes(`recense.findings=${ids.join(",")}`));
+    assert.ok(!launch.some((arg) => arg.startsWith("recense.issue=")));
+    assert.equal(launch.at(-1), spawnPrompt(".wt/bundle.json", "github"));
+  }));
+
+test("spawn --findings refuses invalid requests before setup", () =>
+  scenario({ withBin: true }, async ({ env, fx, repo }) => {
+    const open = recordFinding(repo);
+    const security = recordFinding(repo, { kind: "security" });
+    const large = recordFinding(repo, { size: "large", rule: "large" });
+    const before = listFindings(repo);
+    installFake(env, "herdr", herdrRules("unused"));
+    const flags = ["--findings", open, "--slug", "readme-md"];
+    for (const args of [
+      [...flags, "--issue", "42"],
+      [...flags, "--mode", "local"],
+      ["--slug", "readme"],
+      ["--findings", open],
+      ...["", `${open},`, `,${open}`, "bad", `${open},f-000000000000`, `${open},${security}`, `${open},${large}`].map(
+        (ids) => ["--findings", ids, "--slug", "readme"],
+      ),
+      ...["", "UPPER", "double--dash", "a".repeat(64)].map((slug) => ["--findings", open, "--slug", slug]),
+    ]) {
+      const r = await runWt(join(fx.main, "bin/wt"), ["spawn", ...args], { cwd: fx.main, env: { HERDR_ENV: "1" } });
+      assert.equal(r.code, 2, r.stderr);
+      assert.match(r.stderr, /Nothing was created\./);
+    }
+    assert.deepEqual(readRegistry(repo).worktrees, {});
+    assert.equal(existsSync(repo.worktreesDir), false);
+    assert.equal(gitIn(fx.main, "branch", "--list", "recense-*"), "");
+    assert.deepEqual(listFindings(repo), before);
+    assert.deepEqual(fakeCalls(env, "herdr"), []);
+  }));
+
+test("spawn --findings refuses a taken finding or branch", () =>
+  scenario({}, ({ env, fx, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      const start = () => spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock());
+      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH)));
+      const pending = start();
+      // The first read saw an open finding. Claim it while spawn is waiting for its port probes.
+      claimFindings(repo, [id], { branch: "other-worker", worktree: fx.main });
+      const before = showFinding(repo, id);
+      const taken = (e: unknown) =>
+        e instanceof WtError && e.code === 3 && /already claimed or resolved.*Nothing was created/.test(e.message);
+      await assert.rejects(pending, taken);
+      await assert.rejects(start, taken);
+      assert.deepEqual(showFinding(repo, id), before);
+      assert.equal(gitIn(fx.main, "branch", "--list", FIXER_BRANCH), "");
+      releaseFindings(repo, [id]);
+      gitIn(fx.main, "branch", FIXER_BRANCH);
+      await assert.rejects(
+        start,
+        (e) => e instanceof WtError && e.code === 3 && /branch already exists.*Nothing was created/.test(e.message),
+      );
+      assert.equal(showFinding(repo, id).state, "open");
+      assert.deepEqual(readRegistry(repo).worktrees, {});
+      assert.equal(existsSync(repo.worktreesDir), false);
+      assert.ok(!fakeCalls(env, "herdr").some((call) => call[0] === "worktree"));
+    }),
+  ));
+
+test("spawn --findings reports a lost claim before writing the brief", () =>
+  scenario({}, ({ env, fx, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH)));
+      setBeforeWorktreeAddHookForTests(() => claimFindings(repo, [id], { branch: "other-worker", worktree: fx.main }));
+      try {
+        await assert.rejects(spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
+          assert.ok(e instanceof WtError);
+          assert.match(e.message, /findings were not claimed/);
+          assert.match(e.message, /Optional teardown:/);
+          assert.doesNotMatch(e.message, /findings release/);
+          return true;
+        });
+      } finally {
+        setBeforeWorktreeAddHookForTests(null);
+      }
+      assert.equal(showFinding(repo, id).claim?.branch, "other-worker");
+      assert.ok(readRegistry(repo).worktrees[FIXER_BRANCH]);
+      assert.equal(existsSync(join(repo.worktreesDir, FIXER_BRANCH, ".wt/brief.md")), false);
+      assert.deepEqual(fakeCalls(env, "herdr"), [["agent", "list"]]);
+    }),
+  ));
+
+test("spawn --findings keeps claims after a workspace failure", () =>
+  scenario({}, ({ env, repo }) =>
+    inHerdr(async () => {
+      const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
+      installFake(env, "herdr", herdrRules(agentName(FIXER_BRANCH), [{ match: ["worktree", "open"], code: 1 }]));
+      await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
+        assert.ok(e instanceof WtError);
+        assert.match(e.message, /Optional teardown:/);
+        const release = `${repo.mainRoot}/bin/wt findings release ${ids.join(" ")}`;
+        const notice = `Findings ${ids.join(", ")} stay claimed by ${FIXER_BRANCH}. Release them with: ${release}`;
+        assert.ok(e.message.includes(notice));
+        return true;
+      });
+      for (const id of ids) {
+        const finding = showFinding(repo, id);
+        assert.equal(finding.state, "claimed");
+        assert.equal(finding.claim?.branch, FIXER_BRANCH);
+      }
+    }),
+  ));
 
 function processInfo(pids: number[], shell = 10): FakeRule {
   return {

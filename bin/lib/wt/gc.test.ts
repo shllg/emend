@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import {
+  addFinding,
+  claimFindings,
+  findingsDir,
+  releaseFindings,
+  releaseOrphanedClaim,
+  showFinding,
+} from "./findings.ts";
 import { readRegistry, registryPath, setAfterLockHookForTests, withRegistry } from "./registry.ts";
 import { type Repo, resolveRepo } from "./repo.ts";
 import { type Fixture, gitIn, makeFixture, makeTestEnv, type TestEnv } from "./test-support.ts";
@@ -22,6 +30,61 @@ async function scenario(fn: (ctx: { env: TestEnv; fx: Fixture; repo: Repo }) => 
 
 const find = (items: ReturnType<typeof gc>["items"], kind: string, name: string) =>
   items.find((i) => i.kind === kind && i.name === name);
+
+function claim(repo: Repo, branch: string, worktree: string): string {
+  const { id } = addFinding(repo, {
+    title: "Keep the selected line",
+    detail: "Refreshing loses the selected line.",
+    path: "README.md",
+    line: 1,
+    kind: "bug",
+    rule: branch,
+    severity: "low",
+    size: "small",
+    source: { kind: "groom", pass: "first" },
+  });
+  claimFindings(repo, [id], { branch, worktree });
+  return id;
+}
+
+test("gc reports orphaned claims and releases them only with --prune", () =>
+  scenario(({ repo, fx }) => {
+    const gone = claim(repo, "gone-worker", join(fx.env.root, "gone"));
+    const live = claim(repo, "live-worker", fx.main);
+    const report = gc(repo, false);
+    assert.deepEqual(report.items, [{ kind: "orphaned-claim", name: gone, state: "found" }]);
+    assert.match(formatGc(report, false), /gc --prune to remove or release/);
+    assert.equal(showFinding(repo, gone).state, "claimed");
+    const pruned = gc(repo, true);
+    assert.deepEqual(pruned.items, [{ kind: "orphaned-claim", name: gone, state: "released" }]);
+    const released = showFinding(repo, gone);
+    assert.equal(released.state, "open");
+    assert.equal(Object.hasOwn(released, "claim"), false);
+    assert.equal(showFinding(repo, live).state, "claimed");
+  }));
+
+test("gc keeps a claim that changed after the scan", () =>
+  scenario(({ repo, fx }) => {
+    const id = claim(repo, "first-worker", join(fx.env.root, "gone"));
+    const pruned = gc(repo, true, (repo, id, seen) => {
+      releaseFindings(repo, [id]);
+      claimFindings(repo, [id], { branch: "next-worker", worktree: fx.main });
+      return releaseOrphanedClaim(repo, id, seen);
+    });
+    assert.deepEqual(pruned.items, [{ kind: "orphaned-claim", name: id, state: "kept", why: "claim changed" }]);
+    assert.equal(showFinding(repo, id).claim?.branch, "next-worker");
+  }));
+
+test("gc reports other items when finding storage is unreadable", () =>
+  scenario(({ repo, fx }) => {
+    gitIn(fx.main, "branch", "merged-worker");
+    const dir = findingsDir(repo);
+    mkdirSync(dirname(dir), { recursive: true });
+    writeFileSync(dir, "not a directory");
+    const pruned = gc(repo, true);
+    assert.equal(find(pruned.items, "merged-branch", "merged-worker")?.state, "removed");
+    assert.match(formatGc(pruned, true), /^Finding claims were not checked: Finding storage/m);
+  }));
 
 test("gc report and prune", () =>
   scenario(({ repo, fx }) => {
