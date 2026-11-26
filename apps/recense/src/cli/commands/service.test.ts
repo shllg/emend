@@ -43,6 +43,11 @@ const failed: ServiceResult = { code: 1, stdout: "", stderr: "first failure\nmor
 const unsupported =
   "recense: recense service supports systemd on Linux and launchd on macOS; run recense serve yourself.\n";
 const linger = "To keep recense running after you log out, run sudo loginctl enable-linger $USER.\n";
+const installedOutput = (url = "http://127.0.0.1:3636") => [
+  "recense: service installed\n",
+  `recense: the service starts at login and serves ${url}\n`,
+  "To sign a browser in, run recense in a terminal.\n",
+];
 
 let root: string;
 let home: string;
@@ -265,7 +270,7 @@ test.each(["deleted unit", "failed uninstall"])(
     ]);
     expect(running).toBe(await readFile(unitPath(), "utf8"));
     expect(running).not.toContain("--host");
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
   },
 );
 
@@ -329,7 +334,7 @@ test("Linux reloads an unchanged unit with no pending record after an interrupte
   ]);
   expect(loaded).toBe(content);
   expect(running).toBe(content);
-  expect(stdout).toEqual(["recense: service installed\n"]);
+  expect(stdout).toEqual(installedOutput());
   expect(stderr).toEqual([]);
   await expect(lstat(pendingPath())).rejects.toMatchObject({ code: "ENOENT" });
 });
@@ -390,7 +395,7 @@ test("a first macOS install stops the detached server without bootout", async ()
   expect(calls()).toEqual([["stopLocalServer"], launchctl("bootstrap", "gui/501", plistPath()), ["waitForServer"]]);
   expect(stdout).toEqual([
     "recense: stopped the recense server at http://127.0.0.1:3636, so the service can take over\n",
-    "recense: service installed\n",
+    ...installedOutput(),
   ]);
 });
 
@@ -463,7 +468,7 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
           : launchctl("print", "gui/501/dev.recense.server");
       expect(calls()).toContainEqual(query);
       if (kind === "matching") {
-        expect(stdout).toEqual(["recense: service installed\n"]);
+        expect(stdout).toEqual(installedOutput(server.url));
         expect(stderr).toEqual([]);
       } else {
         const log =
@@ -486,8 +491,24 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
     }
   });
 
-  test("tailscale readiness waits for the public origin after matching the managed pid", async () => {
-    const server = await startServer({ stateDir: state, port: 0, publicOrigin: "https://review.example.ts.net" });
+  test.each([
+    {
+      name: "tailscale readiness waits for the public origin after matching the managed pid",
+      flags: ["--tailscale"],
+      publicOrigin: "https://review.example.ts.net",
+    },
+    {
+      name: "tailscale readiness with a chosen port waits for the public origin that has the port",
+      flags: ["--tailscale", "--tailscale-port", "13636"],
+      publicOrigin: "https://review.example.ts.net:13636",
+    },
+    {
+      name: "--public-url prints the public address the service serves",
+      flags: ["--public-url", "https://recense.example.test"],
+      publicOrigin: "https://recense.example.test",
+    },
+  ])("$name", async ({ flags, publicOrigin }) => {
+    const server = await startServer({ stateDir: state, port: 0, publicOrigin });
     recorded.mockImplementation(async (_file, args) => {
       if (args.includes("show")) return { ...ok, stdout: `${process.pid}\n` };
       if (args[0] === "print") return { ...ok, stdout: `target = {\n pid = ${process.pid}\n}\n` };
@@ -502,42 +523,21 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
       waitForManagedServer(state, { ...ready, timeoutMs: 1000, now: () => elapsed, sleep }),
     );
     try {
-      expect(await invoke("install", "--tailscale")).toBe(0);
+      expect(await invoke("install", ...flags)).toBe(0);
       expect(elapsed).toBe(400);
-      expect(stdout).toEqual(["recense: service installed\n"]);
+      expect(stdout).toEqual(installedOutput(publicOrigin));
+      expect(JSON.parse(await readFile(join(state, "server-url.json"), "utf8"))).toEqual({ baseUrl: publicOrigin });
     } finally {
       await server.close();
     }
   });
 
-  test("tailscale readiness with a chosen port waits for the public origin that has the port", async () => {
-    const server = await startServer({
-      stateDir: state,
-      port: 0,
-      publicOrigin: "https://review.example.ts.net:13636",
-    });
-    recorded.mockImplementation(async (_file, args) => {
-      if (args.includes("show")) return { ...ok, stdout: `${process.pid}\n` };
-      if (args[0] === "print") return { ...ok, stdout: `target = {\n pid = ${process.pid}\n}\n` };
-      return ok;
-    });
-    sleep.mockImplementation(async (ms) => {
-      elapsed += ms;
-      expect(stdout).toEqual([]);
-      if (elapsed >= 400) server.setPublicOriginReady(true);
-    });
-    waitForServer.mockImplementation((ready) =>
-      waitForManagedServer(state, { ...ready, timeoutMs: 1000, now: () => elapsed, sleep }),
-    );
-    try {
-      expect(await invoke("install", "--tailscale", "--tailscale-port", "13636")).toBe(0);
-      expect(elapsed).toBe(400);
-      expect(JSON.parse(await readFile(join(state, "server-url.json"), "utf8"))).toEqual({
-        baseUrl: "https://review.example.ts.net:13636",
-      });
-    } finally {
-      await server.close();
-    }
+  test("a default install prints the sign-in command without a sign-in link or code", async () => {
+    expect(await invoke("install")).toBe(0);
+    const output = stdout.join("");
+    expect(output).not.toContain("/pair");
+    expect(output).not.toContain("#");
+    expect(output.endsWith("To sign a browser in, run recense in a terminal.\n")).toBe(true);
   });
 
   test("stops the service and detached server before starting and confirming the replacement", async () => {
@@ -573,7 +573,7 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
     );
     expect(stdout).toEqual([
       "recense: stopped the recense server at http://127.0.0.1:3636, so the service can take over\n",
-      "recense: service installed\n",
+      ...installedOutput(),
     ]);
     expect(stderr).toEqual([]);
   });
@@ -1368,7 +1368,7 @@ test.each(["linux", "darwin"])("%s service install saves and keeps the tailscale
   expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(flags);
   resetOutput();
   expect(await invoke("install")).toBe(0);
-  expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, "recense: service installed\n"]);
+  expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput()]);
   expect(await readFile(platform === "linux" ? unitPath() : plistPath(), "utf8")).toBe(content);
   expect(JSON.parse(await readFile(optionsPath(), "utf8"))).toEqual(flags);
   resetOutput();
@@ -1406,16 +1406,13 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     "a bare reinstall keeps $flags in order and announces them first",
     async ({ flags }) => {
       expect(await invoke("install", ...flags)).toBe(0);
-      expect(stdout).toEqual(["recense: service installed\n"]);
+      expect(stdout).toEqual(installedOutput());
       expect(await saved()).toEqual(flags);
       expect((await stat(optionsPath())).mode & 0o777).toBe(0o600);
       const content = await readFile(path(), "utf8");
       resetOutput();
       expect(await invoke("install")).toBe(0);
-      expect(stdout).toEqual([
-        `recense: keeping the service options ${flags.join(" ")}\n`,
-        "recense: service installed\n",
-      ]);
+      expect(stdout).toEqual([`recense: keeping the service options ${flags.join(" ")}\n`, ...installedOutput()]);
       expect(await readFile(path(), "utf8")).toBe(content);
       expect(await saved()).toEqual(flags);
       expect(calls()).toContainEqual(
@@ -1429,7 +1426,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
       resetOutput();
       expect(await invoke("install")).toBe(0);
       expect(await saved()).toEqual([]);
-      expect(stdout).toEqual(["recense: service installed\n"]);
+      expect(stdout).toEqual(installedOutput());
     }
   });
 
@@ -1439,7 +1436,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install", "--port", "3636")).toBe(0);
     expect(await saved()).toEqual(["--port", "3636"]);
     expect(await readFile(path(), "utf8")).not.toContain("--tailscale");
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
   });
 
   test.each([false, true])("an older install announces defaults once (legacy pending marker: %s)", async (pending) => {
@@ -1450,11 +1447,11 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install")).toBe(0);
     expect(await saved()).toEqual([]);
     expect(await readFile(path(), "utf8")).not.toContain("--tailscale");
-    expect(stdout).toEqual([defaults, "recense: service installed\n"]);
+    expect(stdout).toEqual([defaults, ...installedOutput()]);
     await expect(lstat(pendingPath())).rejects.toMatchObject({ code: "ENOENT" });
     resetOutput();
     expect(await invoke("install")).toBe(0);
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
   });
 
   test("an older install already using defaults prints no defaults notice", async () => {
@@ -1465,7 +1462,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install")).toBe(0);
     expect(await readFile(path(), "utf8")).toBe(content);
     expect(await saved()).toEqual([]);
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
   });
 
   test("an older install announces defaults before a failed start or bootstrap", async () => {
@@ -1497,7 +1494,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     resetOutput();
     expect(await invoke("install", "--port", "3636")).toBe(0);
     expect(await saved()).toEqual(["--port", "3636"]);
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
   });
 
   test("saved empty options print no defaults notice when the runtime changes", async () => {
@@ -1507,7 +1504,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     resetOutput();
     expect(await invoke("install")).toBe(0);
     expect(await readFile(path(), "utf8")).toContain("updated-recense.mjs");
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
   });
 
   test.each([false, true])("a deleted unit discards a saved host (pending record: %s)", async (pending) => {
@@ -1524,7 +1521,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install")).toBe(0);
     expect(await saved()).toEqual([]);
     expect(await readFile(path(), "utf8")).not.toContain("--host");
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
     await expect(lstat(pendingPath())).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -1537,7 +1534,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install")).toBe(0);
     expect(await saved()).toEqual([]);
     expect(await readFile(path(), "utf8")).not.toContain("--host");
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
     if (kind === "symlink") expect(await readFile(target, "utf8")).toBe('["--host","0.0.0.0"]');
   });
 
@@ -1549,7 +1546,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
       expect(await invoke("install")).toBe(0);
       expect(await saved()).toEqual([]);
       expect(await readFile(path(), "utf8")).not.toContain("--host");
-      expect(stdout).toEqual(["recense: service installed\n"]);
+      expect(stdout).toEqual(installedOutput());
       expect(stderr).toEqual([]);
       await expect(lstat(pendingPath())).rejects.toMatchObject({ code: "ENOENT" });
     },
@@ -1571,7 +1568,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install", "--port", "3636")).toBe(0);
     expect(await saved()).toEqual(["--port", "3636"]);
     expect(await readFile(path(), "utf8")).not.toContain("--tailscale");
-    expect(stdout).toEqual(["recense: service installed\n"]);
+    expect(stdout).toEqual(installedOutput());
     await expect(lstat(pendingPath())).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -1606,7 +1603,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install")).toBe(0);
     expect(await saved()).toEqual([]);
     expect(await readFile(path(), "utf8")).not.toContain("--host");
-    expect(stdout).toEqual([defaults, "recense: service installed\n"]);
+    expect(stdout).toEqual([defaults, ...installedOutput()]);
   });
 
   test.each(["options", "pending", "unit"])(
@@ -1665,7 +1662,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
           : step === "pending"
             ? [defaults]
             : []),
-        "recense: service installed\n",
+        ...installedOutput(),
       ]);
       await expect(lstat(pendingPath())).rejects.toMatchObject({ code: "ENOENT" });
     },
@@ -1734,7 +1731,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
     expect(await invoke("install")).toBe(0);
     expect(await saved()).toEqual(["--port", "4000"]);
     expect(await readFile(path(), "utf8")).toBe(content);
-    expect(stdout).toEqual(["recense: keeping the service options --port 4000\n", "recense: service installed\n"]);
+    expect(stdout).toEqual(["recense: keeping the service options --port 4000\n", ...installedOutput()]);
     await expect(lstat(pendingPath())).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -1768,7 +1765,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
       resetOutput();
       expect(await invoke("install", "--port", "3636")).toBe(0);
       expect(await saved()).toEqual(["--port", "3636"]);
-      expect(stdout).toEqual(["recense: service installed\n"]);
+      expect(stdout).toEqual(installedOutput());
     },
   );
 
@@ -1848,7 +1845,7 @@ describe.each(["linux", "darwin"])("%s saved service options", (platform) => {
         expect(await saved()).toEqual(expected);
         expect(stdout).toEqual([
           ...(expected.length ? [`recense: keeping the service options ${expected.join(" ")}\n`] : []),
-          "recense: service installed\n",
+          ...installedOutput(),
         ]);
         const content = await readFile(path(), "utf8");
         expect(content.includes("4000")).toBe(renamed);

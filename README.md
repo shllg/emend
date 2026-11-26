@@ -31,13 +31,19 @@ On macOS, install Node.js and git from Homebrew first:
 brew install node git
 ```
 
-Then install recense, start it and add its skills:
+If `node --version` is older than 24.18 or `git --version` older than 2.44, as on many Linux
+distributions and with Apple's git on macOS, follow step 1 of
+[local.md](https://github.com/shllg/recense/blob/release/docs/setup/local.md#1-install-nodejs-and-git)
+first.
+
+The full walkthrough, with a prompt that lets Claude Code or Codex do it with you, is
+[docs/setup/local.md](https://github.com/shllg/recense/blob/release/docs/setup/local.md).
+
+Install recense and add its skills:
 
 ```sh
 npm install -g @shllg/recense
 recense --version
-recense service install
-recense
 claude plugin marketplace add shllg/recense@release
 claude plugin install recense@recense
 recense skills install
@@ -47,17 +53,29 @@ With mise activated in your shell, install with
 `mise use -g 'npm:@shllg/recense[allow_low_downloads=true]'` instead of the `npm` line, from any
 folder; [local.md](https://github.com/shllg/recense/blob/release/docs/setup/local.md#2-install-recense)
 says why it needs `-g` and `allow_low_downloads`.
-`recense service install` runs the server at login, which is recommended. `recense` prints a
-one-time sign-in link. The two `claude plugin` lines add the skills to Claude Code, and
+
+The two `claude plugin` lines add the skills to Claude Code, and
 `recense skills install` adds them for Codex and other agents that read `~/.agents/skills`.
 
-If `node --version` is older than 24.18 or `git --version` older than 2.44, as on many Linux
-distributions and with Apple's git on macOS, follow step 1 of
-[local.md](https://github.com/shllg/recense/blob/release/docs/setup/local.md#1-install-nodejs-and-git)
-first.
+We recommend `recense service install`. It adds a user service that starts the recense server at
+every login. On Linux this is a systemd user unit. On macOS it is a launchd agent.
+`recense service uninstall` removes it. The server listens on `http://127.0.0.1:3636`, and only
+this machine reaches it.
 
-The full walkthrough, with a prompt that lets Claude Code or Codex do it with you, is
-[docs/setup/local.md](https://github.com/shllg/recense/blob/release/docs/setup/local.md).
+```sh
+recense service install
+```
+
+Run `recense` in a terminal. Open the one-time link it prints within 10 minutes to sign your
+browser in.
+
+```sh
+recense
+```
+
+To review from a phone or another device, set up a hub first
+([your own hub on Tailscale](https://github.com/shllg/recense/blob/release/docs/setup/hub-tailscale.md)),
+then pair each device with `recense pair`.
 
 ## Pick your setup
 

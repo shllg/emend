@@ -338,17 +338,19 @@ describe("server takeover by request", () => {
         elapsed += ms;
         await writeFile(
           join(stateDir, "server-url.json"),
-          JSON.stringify({ baseUrl: elapsed < 400 ? url : "https://review.example.test" }),
+          JSON.stringify({ baseUrl: elapsed < 400 ? url : "https://review.example.test/" }),
         );
       });
       expect(await waitForServer(stateDir, { mainPid, publicOrigin: true, now: () => elapsed, sleep })).toEqual({
         url,
         pid,
+        publicUrl: "https://review.example.test",
       });
       expect(elapsed).toBe(400);
       expect(sleep.mock.calls).toEqual([[200], [200]]);
       expect(mainPid).toHaveBeenCalledTimes(3);
       expect(calls.map((call) => call.outcome)).toEqual([{ status: 200 }, { status: 200 }]);
+      expect(await waitForServer(stateDir)).toStrictEqual({ url, pid });
     });
   });
 

@@ -9,7 +9,7 @@ import { findExecutable } from "../executable.ts";
 import { CliError } from "../http.ts";
 import type { CliRuntime } from "../runtime.ts";
 import { runtimeInRepository } from "../runtime-repository.ts";
-import type { ServerReadyOptions } from "./takeover.ts";
+import type { ServerReady, ServerReadyOptions } from "./takeover.ts";
 
 export interface ServiceResult {
   code: number | string;
@@ -33,7 +33,7 @@ export interface ServiceOptions extends Partial<CliRuntime> {
   /** Tests answer which processes hold the old database; the default asks the system. */
   holders?: HolderProbe;
   stopLocalServer?: () => Promise<string | undefined>;
-  waitForServer?: (options: ServerReadyOptions) => Promise<{ url: string; pid: number } | null>;
+  waitForServer?: (options: ServerReadyOptions) => Promise<ServerReady | null>;
 }
 export type ServiceAction = "install" | "uninstall" | "status";
 export type ServiceTool = (args: string[], failure?: "throw" | "report" | "ignore") => Promise<ServiceResult>;
@@ -46,7 +46,7 @@ export interface ServiceContext extends CliRuntime {
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   stopLocalServer: () => Promise<string | undefined>;
-  waitForServer: (options: ServerReadyOptions) => Promise<{ url: string; pid: number } | null>;
+  waitForServer: (options: ServerReadyOptions) => Promise<ServerReady | null>;
 }
 export const unsupportedService =
   "recense service supports systemd on Linux and launchd on macOS; run recense serve yourself.";
@@ -151,6 +151,12 @@ export async function servicePending(stateDir: string) {
 
 export function clearServicePending(stateDir: string) {
   return removeIfPresent(join(stateDir, "service.pending"));
+}
+
+export function printServiceInstalled(io: Io, server: ServerReady) {
+  io.stdout("recense: service installed\n");
+  io.stdout(`recense: the service starts at login and serves ${escapeReference(server.publicUrl ?? server.url)}\n`);
+  io.stdout("To sign a browser in, run recense in a terminal.\n");
 }
 
 export function serviceStatus(io: Io, path: string, running: boolean) {
