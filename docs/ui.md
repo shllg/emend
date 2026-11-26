@@ -97,6 +97,9 @@ differs from a principle, that rule describes today's code and stays until an is
      reads "Approve". Approve waits for unsent comments and asks first: "Approve revision N?".
    - On the phone a Send takes two taps: the bar's **Send** opens the "Send feedback" sheet, whose
      button names the count and the revision ("Send N … on revision N").
+   - After a Send, a non-modal **Sent** notice appears above the Send bar inside the review pane.
+     Returning to that review in the same tab shows the notice until the reader closes it or it
+     closes itself after a pick-up.
    - A thread shows at its exact place, under **Unplaced**, or, on text the writeup no longer
      shows, under **Comments on hidden text** with the note "The writeup no longer shows the text
      this comment is on."; never at a guessed place.

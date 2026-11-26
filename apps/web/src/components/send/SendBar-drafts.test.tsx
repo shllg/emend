@@ -94,8 +94,10 @@ test.each(["Send", "Approve"].flatMap((action) => ["success", "failure"].map((ou
       else pending.reject(new Error("Synthetic failure"));
     });
     if (outcome === "success") {
-      // The server's answer frees the bar; the refetch is still pending.
-      await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3));
+      // The mutation refreshes all three queries even if the remounted notice also asks for a pick-up.
+      for (const queryKey of [["revision", id], ["review", id], ["inbox"]]) {
+        expect(invalidate).toHaveBeenCalledWith({ queryKey });
+      }
     }
     await waitFor(() => expect(button("Send").disabled).toBe(false));
     expect(button(/^Approve/).disabled).toBe(false);
