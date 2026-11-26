@@ -481,6 +481,12 @@ test("the writing reference traces a change to the callers and workflows it affe
   const section = (heading: string, next: string) =>
     (reference.split(`${heading}\n`)[1]?.split(`\n${next}`)[0] ?? "").replace(/\s+/g, " ");
   expect(section("## Why and Example", "## ")).toContain("### Callers and workflows");
+  expect(section("## Why and Example", "## ")).toContain(
+    "recense shows those lines as aligned rows, in the Example only.",
+  );
+  expect(section("## Why and Example", "## ")).toContain(
+    "A line that does not start with such a label continues the row above it.",
+  );
   const callers = section("### Callers and workflows", "## ");
   for (const rule of [
     "This applies to a review topic that changes code.",
@@ -490,7 +496,7 @@ test("the writing reference traces a change to the callers and workflows it affe
     "Name the caller in a few words, and keep a label under 50 characters.",
     "A label ends at its first colon, so a name such as `src/a.ts:12` splits it.",
     "The Example keeps its six lines, so show the callers that matter most there.",
-    "In `body`, give each other changed caller its own Before and After.",
+    "In `body`, list each remaining caller that changes as one item: what it did before and what it does now.",
     "Callers that behave the same go under Checked as one item, with the kind that shows how you know.",
     "Name every effect outside the stated goal, even one that looks harmless.",
     "Put it in a topic, never only under Context or Not checked.",
@@ -508,6 +514,9 @@ test("the writing reference traces a change to the callers and workflows it affe
   expect(whereToLook).toContain("A check you propose names its setup and what passing looks like.");
   expect(section("### Deviations", "## ")).toContain(
     "An effect outside the approved goal counts as a departure, such as a caller that now behaves differently.",
+  );
+  expect(section("### Worked examples", "## ")).toContain(
+    "`git grep fetchUser` over every tracked file finds it only in the changelog.",
   );
   expect(read("plugin/skills/recense-review/SKILL.md").replace(/\s+/g, " ")).toContain(
     "A topic that changes code names the callers and workflows that behave differently, as the writing reference says.",

@@ -64,8 +64,9 @@ Its `example` shows a concrete before/after case.
 Give every topic above Low risk (`skim`) an Example of at most six lines.
 Keep examples grounded in the actual change: use its real input and real output.
 Write a before/after case in one paragraph, with lines starting `Before:` and `After:`.
-recense shows those lines as aligned rows.
-A line without `Before:` or `After:` at its start continues the row above it.
+A short qualifier may sit before the colon, as in `After, on a second conflict:`.
+recense shows those lines as aligned rows, in the Example only.
+A line that does not start with such a label continues the row above it.
 Put any other note in its own paragraph.
 For two or more cases, you can use a table: `Input | Before | After`.
 A document that explains a change or a proposal gives the same why and a grounded example.
@@ -82,7 +83,7 @@ Name the caller in a few words, and keep a label under 50 characters.
 A label ends at its first colon, so a name such as `src/a.ts:12` splits it.
 For three or more, use a table: `Caller | Before | After`.
 The Example keeps its six lines, so show the callers that matter most there.
-In `body`, give each other changed caller its own Before and After.
+In `body`, list each remaining caller that changes as one item: what it did before and what it does now.
 Callers that behave the same go under Checked as one item, with the kind that shows how you know.
 
 Name every effect outside the stated goal, even one that looks harmless.
@@ -367,7 +368,7 @@ These cases are synthetic. Each shows a topic, the brief's lines and its proof.
 - Topic "User pages keep loading after the loader rename": Low. The undo is a revert.
 - **Biggest risk:** a call the type checker cannot see, such as a lookup by string, still asks
   for `fetchUser`, and that page fails to load.
-- `checked`, Ran: `rg fetchUser` over the whole repository finds it only in the changelog.
+- `checked`, Ran: `git grep fetchUser` over every tracked file finds it only in the changelog.
 - `notChecked`: plugins outside this repository; one that calls `fetchUser` breaks on upgrade.
 
 **Medium.** A change caps request retries at three.
