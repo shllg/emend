@@ -507,6 +507,23 @@ test("page reports a blob read failure after finding the tracked file in HEAD", 
   assert.ok(page?.markdown.includes("Could not read the file from the main checkout's HEAD."));
 });
 
+test("page reports a read failure when HEAD names a missing blob", () => {
+  const finding = showFinding(repo, addFinding(repo, input()).id);
+  const tree = spawnSync("git", ["mktree", "--missing"], {
+    cwd: fx.main,
+    input: `100644 blob ${"1".repeat(40)}\tREADME.md\n`,
+    encoding: "utf8",
+  });
+  assert.equal(tree.status, 0, tree.stderr);
+  const commit = gitIn(fx.main, "commit-tree", tree.stdout.trim(), "-p", "HEAD", "-m", "reference a missing blob");
+  gitIn(fx.main, "update-ref", "HEAD", commit);
+
+  const page = renderTriagePage(repo, [finding]);
+  assert.ok(page);
+  assert.ok(page.markdown.includes("Could not read the file from the main checkout's HEAD."));
+  assert.ok(!page.markdown.includes("Not tracked as a file in the main checkout's HEAD."));
+});
+
 test("page writes nothing without untriaged findings and returns a stable key per checkout", async () => {
   const empty = await triagePage();
   const key = `e-triage-${createHash("sha256").update(realpathSync(fx.main)).digest("hex").slice(0, 12)}`;

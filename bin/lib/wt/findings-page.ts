@@ -35,15 +35,18 @@ function shortenFindingIds(text: string): string {
 
 function excerpt(repo: Repo, { path, line, anchor }: Finding): string {
   const untracked = "Not tracked as a file in the main checkout's HEAD.";
+  const readFailure = "Could not read the file from the main checkout's HEAD.";
   const nonText = "The file is too large or not text.";
   const tree = gitBytes(repo, ["--literal-pathspecs", "ls-tree", "--long", "-z", "--full-tree", "HEAD", "--", path]);
   const tab = tree.stdout.indexOf(9);
   if (tree.code !== 0 || tab < 0 || !tree.stdout.subarray(tab + 1).equals(Buffer.from(`${path}\0`))) return untracked;
-  const entry = /^(?:100644|100755) blob ([0-9a-f]{40}) +(\d+)$/.exec(tree.stdout.subarray(0, tab).toString("ascii"));
+  const entry = /^(?:100644|100755) blob ([0-9a-f]{40}) +(\S+)$/.exec(tree.stdout.subarray(0, tab).toString("ascii"));
   if (!entry) return untracked;
-  if (Number(entry[2]) > 1024 * 1024) return nonText;
+  const size = entry[2] as string;
+  if (!/^\d+$/.test(size)) return readFailure;
+  if (Number(size) > 1024 * 1024) return nonText;
   const blob = gitBytes(repo, ["cat-file", "blob", entry[1] as string]);
-  if (blob.code !== 0) return "Could not read the file from the main checkout's HEAD.";
+  if (blob.code !== 0) return readFailure;
   if (blob.stdout.includes(0)) return nonText;
   let lines: string[];
   try {

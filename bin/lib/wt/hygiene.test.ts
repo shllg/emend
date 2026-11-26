@@ -137,6 +137,10 @@ test("e-triage validates the heading, checks before approve or skip and republis
   assert.ok(skill.includes("^e-triage-[0-9a-f]{12}$"));
   assert.ok(skill.includes(`recense publish '<main>/.wt/triage.md' --title "Findings triage" --key <key>`));
   assert.ok(skill.includes("targets the `### <id>` heading itself"));
+  const otherTarget = skill.indexOf("For any other target, answer the comment");
+  assert.ok(otherTarget >= 0);
+  assert.ok(skill.indexOf("For a comment on the security count, reply `explained`") > otherTarget);
+  assert.ok(skill.indexOf("Never put a security finding's id, title, detail, path or code in a reply.") > otherTarget);
   const mode = skill.indexOf("read the hand-off's `mode` first");
   const explain = skill.indexOf("In `explain`, change nothing in the registry");
   const show = skill.indexOf("<main>/bin/findings show <id>");
