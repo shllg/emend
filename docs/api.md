@@ -114,7 +114,7 @@ a machine token reaches only reviews from its own instance.
 | PUT | `/api/v1/reviews/:id/group` | Reviewer | Move a review or pub into a group, or remove it (204). |
 | PUT | `/api/v1/reviews/:id/pin` | Reviewer | Pin or unpin a review or pub (204). |
 | PUT | `/api/v1/reviews/:id/pin/place` | Reviewer | Move a pin directly before or after another pin (204). |
-| GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`; `?head=<sha>` keeps those whose approved or newest revision has that head; `?key=<key>` keeps the review with that stored review key. |
+| GET | `/api/v1/agent/reviews` | Agent | List the token's own instance's reviews, newest first, as `AgentReviewList`. `?head=<sha>` keeps those whose approved or newest revision has that head. `?key=<key>` keeps the review with that stored review key. `?diff=0` skips revision diffs. |
 | GET | `/api/v1/reviews/:id` | Reviewer | Read a review. |
 | GET | `/api/v1/reviews/:id/revisions/:seq` | Reviewer | Read one revision. |
 | GET | `/api/v1/reviews/:id/revisions/:seq/download` | Reviewer | Download one offline HTML file, or a ZIP with docs selected by repeated `doc` parameters. Optional `comments=1` adds sent comments and replies; an HTML pub with comments downloads as a ZIP. Optional `diff=1` adds the code diff after the writeup. Optional `theme=dark`, `theme=light` or `theme=<name>` sets the look of files recense draws. |
@@ -1659,10 +1659,10 @@ Every query is owner-scoped. Missing/foreign reviews return `404 unknown_review`
 invalid sequences of an owned review return `404 not_found`. Agent tokens receive `403 forbidden`.
 
 `GET /api/v1/agent/reviews` returns `AgentReviewList = { items: AgentReviewItem[] }` with
-`AgentReviewItem = { id, title, branch, state: ReviewState, turn, newest, approved, updatedAt, url }`.
+`AgentReviewItem = { id, title, branch, state: ReviewState, turn, answerWaiting, newest, approved, updatedAt, url }`.
 `branch` is the review's stored branch, `null` when the publish named none. `newest` is
-`{ revision, head }` for the review's newest revision (highest `seq`), or `null` for a review that
-has no revision. `approved` is `null` while no revision is approved, else `{ revision, head }` of the
+`{ revision, head, diff }` for the review's newest revision (highest `seq`), or `null` for a review that
+has no revision. `approved` is `null` while no revision is approved, else `{ revision, head, diff }` of the
 revision the approval points at. On an open review, `turn` is `agent` when a Send that is not set
 aside was made on the newest revision, else `reviewer`. It is `null` when the review is approved
 or settled, or has no revision. This matches the inbox's Answered group: a Send on the newest
@@ -1678,8 +1678,56 @@ stored `state` (`open`, `approved` or `settled`). `updatedAt` is an ISO 8601 UTC
 the review's address on this server. The list carries no comment bodies,
 writeup text, doc content, tokens or other ids. A reviewer session receives `403 forbidden`.
 
-The optional query `?head=<sha>` (`AgentReviewQuery = { head?: commit, key?: sha256 }`) keeps only reviews whose
-approved revision's head equals `<sha>` or whose newest revision's head equals `<sha>`. The match
+`diff` is `{ files, digest }` for that revision. `files` counts the owner's file rows for the
+revision with role `diff` (zero for docs or a plan alone). Consider each side independently.
+`added` includes only the new side, `deleted` only the old side, and all other statuses (including
+null) include both. The side's text hash is `old_blob` or `new_blob`. Its image, if present, is
+the corresponding `diff_images` row. The old side uses `oldPath ?? path` and the new side uses `path`.
+
+1. For an excluded side, omit the line unless a text hash or image exists. Either makes the value `unexpected`.
+2. For an included side with an image, use `oversized` if the image has that flag. Otherwise, a
+   text hash that differs from the image hash gives `unexpected`. If the side's path is SVG
+   (`diffImageType(sidePath) === "image/svg+xml"`) and it has no text hash, use the file's flag
+   (`binary` or `oversized`), or `unexpected` if it has none. Without the text hash the view
+   offers the SVG picture alone. The remaining cases use the image hash, including an SVG
+   whose text and image hashes agree.
+3. For an included side without an image, use the text hash if present, then the file's flag if
+   present. If neither exists, omit the line.
+
+Write each included line as `<sidePath>\t<side>\t<value>\n`, with literal tabs and a final newline.
+Sort the complete lines by their UTF-8 bytes and concatenate them without separators. `digest` is the
+lowercase hex SHA-256 of those bytes. With zero lines the digest is
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`.
+
+To compute the expected digest from a commit, use the SHA-256 of each side's bytes as its value.
+Enumerate the sides with `git diff-tree -r -z --no-renames <base> <head>`. A rename contributes
+its two paths separately. Decode every NUL-delimited path as strict UTF-8, preserving any leading
+BOM. If decoding fails or any path fails `FilePath`, the commit cannot match.
+`FilePath` requires a well-formed relative path of at most 4096 UTF-16 code units, with at most
+255 per segment. It rejects drive prefixes, backslashes, control characters (including tabs and
+line feeds), and certain invisible and bidirectional formatting characters. It rejects empty,
+`.` and `..` segments, and segments equal to `.git` or `git~1` after ignoring case and trimming
+trailing dots and spaces.
+
+For a committed regular file or symlink, hash the git blob's bytes. For an image side, these
+are the image's bytes. For a submodule (git mode `160000`), publish stores the UTF-8 text
+`Subproject commit <oid>` followed by a line feed, where `<oid>` is the submodule's commit id.
+Hash that text including the line feed. The markers `unexpected`, `binary` and `oversized`
+cannot equal the 64-character hex SHA-256 of any side's bytes.
+
+`answerWaiting` is true while the review holds a Send (`go` or `approve`) with `set_aside_at`
+null that still awaits confirmation. A Go or an approval of the newest revision counts when
+`delivery_id` is null or the delivery's `confirmed_at` is null, including after lease expiry.
+An approval of an older revision counts only while a delivery holds it with `confirmed_at` null
+and `lease_until >= now`. Take releases expired deliveries and sets unclaimed older approvals aside.
+It is false when no such Send exists. A snoozed or retired review's stop notice does not count.
+For both `answerWaiting` and `diff`, null means the server did not report a value. The schema
+defaults each to null when an older server or hub omits it. A local copy of a review moved to a
+hub reports null for both because its Sends and deliveries now live on the hub. If the revision
+disappears before the server reads its files, the server returns `diff: null`.
+
+The query is `AgentReviewQuery = { head?: commit, key?: sha256, diff?: "0" }`.
+`?head=<sha>` keeps only reviews whose approved or newest revision's head equals `<sha>`. The match
 is exact and case-sensitive on the stored value; an older, superseded revision's head does not
 match. `<sha>` is a full object id of exactly 40 or 64 lowercase hex characters: no prefix and no
 `worktree`. The filter is applied together with the owner and origin-instance conditions, before the
@@ -1694,20 +1742,41 @@ the cap. A malformed or repeated `key` is `400 invalid_request`. Capabilities li
 `agent-review-key` when the server applies `key`; an older server ignores `key` and returns the
 whole list, so a client checks that feature before it relies on the filter.
 
-`head` and `branch` are the values the publisher sent; the server stores them unverified, and a
-review without code files (docs or a plan only) shows the reviewer no diff of that commit. So
-`approved.head === sha` means the reviewer approved a revision that its publisher labelled with that
-commit, not that recense verified the commit's content was shown. A caller that gates on an approval
-should require all of: `approved` is not null, `approved.head === sha`,
-`approved.revision === newest.revision` (an import can carry an approval for an older revision) and
-the expected `branch`; it should also make sure itself that the approved review carried the commit's
-diff. `newest.head === sha` with `approved: null` means the commit is published but not approved.
+`?diff=0` returns null for every `newest.diff` and `approved.diff` and skips reading file rows
+for the digest. A repeated `diff` or any value other than `0` is `400 invalid_request`. A server
+that predates the `diff` field ignores `diff=0` and omits `diff`, which clients parse as `null`.
 
-This stays on the agent `publish` scope; it adds no scope. The new fields are metadata the same
-instance's agent published itself (branch, head, revision number) plus the approval pointer, which
-the agent already learns through the `approve` result of `wait`. The response still carries no
-comments, writeups or docs, keeps the owner and origin-instance filter, and the call is a
-read-only GET: it takes and confirms no delivery and writes no row.
+`head` and `branch` are the values the publisher sent. The server stores both unverified.
+A caller that gates on approval must require a non-null `approved`, `approved.head === sha`, the expected `branch`, and
+`approved.revision === newest.revision` (an import can carry an older approval). It must also
+require a non-null `approved.diff` whose `digest` equals the digest it computes by the rule above
+from its own merge base to `sha`, and `answerWaiting === false`. If either field is null, the
+server did not say and the gate refuses. A Send after an unconfirmed approval can still undo it:
+when take claims the approval together with a later Go, it sets the approval aside and reopens the
+review, and `approved` becomes null. A Send after a confirmed approval does not revoke it. Once
+that Send is confirmed too, the item reads as approved with `answerWaiting: false`, and the list
+cannot show that the Send happened. Any agent token of the same instance can take and confirm the
+review's deliveries. The gate must rely on a record of every delivery taken for the review on that
+instance, for example by letting one consumer take them all. It must not merge while any feedback
+taken after the approval is unhandled. Only a new revision clears the approval. A Go handled with
+replies alone, such as an `explain` Go, leaves it in place.
+
+The server computes the digest from the blob hashes stored
+with the revision and checks each blob's hash on upload. A match means the revision stored exactly
+those sides and offered them to the reviewer. It does not prove the reviewer read each one.
+An image side appears as a picture, lockfiles start collapsed, and a side represented by a flag
+shows no content. Recense neither stores nor shows file modes or types. A mode-only change
+contributes two lines with the same value, and a regular file and a symlink with the same path and
+bytes give the same lines. The publisher still chooses `base`, and a base that
+yields different sides yields a different digest. With `newest.head === sha` and `approved: null`,
+the commit is published but has no approval on this review.
+
+This stays on the agent `publish` scope. The list reports the same instance's published branch,
+head and revision number, plus the approval pointer the agent learns through `wait`. The diff
+summarizes only file metadata and blob hashes the same instance's agent uploaded. `answerWaiting`
+tells only whether a Send waits, which the agent learns from take anyway. The read-only GET
+keeps the owner and origin-instance filters and returns no comment, writeup or doc content.
+It takes and confirms no delivery and writes no row.
 
 Read-view bounds follow the write-side validators and rendering budgets; no history is truncated
 to make a read fit a per-Send or per-revision limit. The limits below apply to the schemas above.
@@ -1719,9 +1788,12 @@ to make a read fit a per-Send or per-revision limit. The limits below apply to t
 | `AgentReviewItem.title` | `titleChars` (200), as in `InboxItem.title` |
 | `AgentReviewItem.branch` | As `InboxItem.branch`: the stored branch or `null` |
 | `AgentReviewItem.turn` | `reviewer`, `agent` or `null`; defaults to `null` when omitted |
-| `AgentReviewItem.newest`, `.approved` | `{ revision, head }`: `revision` a positive integer, `head` a full commit id, `"worktree"` or `null` (as `RevisionView.head`); `newest` is `null` without any revision, `approved` while nothing is approved |
+| `AgentReviewItem.answerWaiting` | `true`, `false` or `null`. Defaults to `null` when omitted |
+| `AgentReviewItem.newest`, `.approved` | `{ revision, head, diff }` with a positive integer `revision` and a full commit id, `"worktree"` or `null` for `head` (as in `RevisionView.head`). `newest` is `null` without any revision, `approved` while nothing is approved |
+| `AgentReviewItem.newest.diff`, `AgentReviewItem.approved.diff` | `{ files, digest }` or `null`. `files` is an integer from 0 to `filesPerRevision` (10,000), and `digest` is 64 lowercase hex characters. Defaults to `null` when omitted |
 | `AgentReviewQuery.head` | Optional; exactly 40 or 64 lowercase hex characters, else `400 invalid_request` |
 | `AgentReviewQuery.key` | Optional; exactly 64 lowercase hex characters, else `400 invalid_request` |
+| `AgentReviewQuery.diff` | Optional. Accepts a single `0`. Any other value or a repeated parameter gives `400 invalid_request` |
 | `AgentReviewItem.updatedAt` | ISO 8601 UTC datetime string (`z.iso.datetime()`) |
 | `AgentReviewItem.url` | HTTP(S) URL of at most `pathChars` (4096) characters |
 | `InboxItem.title` | `titleChars` (200), including publish's nonblank requirement |

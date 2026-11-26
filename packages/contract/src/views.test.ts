@@ -2,6 +2,44 @@ import { expect, test } from "vitest";
 import { z } from "zod";
 import * as contract from "./index.ts";
 
+test("agent reviews default omitted diff and answer metadata to null and round-trip reported values", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const revision = { revision: 1, head: "a".repeat(40) };
+  const older = {
+    id,
+    title: "Synthetic",
+    branch: "feature",
+    state: "approved",
+    turn: null,
+    newest: revision,
+    approved: revision,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    url: `http://127.0.0.1:3636/r/${id}`,
+  };
+  expect(contract.AgentReviewItem.parse(older)).toEqual({
+    ...older,
+    answerWaiting: null,
+    newest: { ...revision, diff: null },
+    approved: { ...revision, diff: null },
+  });
+  const diff = { files: contract.LIMITS.filesPerRevision, digest: "ab".repeat(32) };
+  const full = { ...older, answerWaiting: true, newest: { ...revision, diff }, approved: { ...revision, diff } };
+  expect(contract.AgentReviewItem.parse(full)).toEqual(full);
+  expect(contract.AgentReviewItem.safeParse({ ...full, answerWaiting: 0 }).success).toBe(false);
+  for (const patch of [
+    { files: -1 },
+    { files: 0.5 },
+    { files: contract.LIMITS.filesPerRevision + 1 },
+    { digest: "a".repeat(63) },
+    { digest: "A".repeat(64) },
+    { digest: "g".repeat(64) },
+  ]) {
+    expect(
+      contract.AgentReviewItem.safeParse({ ...full, approved: { ...revision, diff: { ...diff, ...patch } } }).success,
+    ).toBe(false);
+  }
+});
+
 test("HTML doc images are optional, bounded asset paths", () => {
   const schema = contract.RevisionView.shape.docs;
   const doc = { path: "page.html", kind: "html", contentUrl: "/content/synthetic/page.html" };

@@ -84,8 +84,18 @@ export const InboxList = z.object({
   serverTime: z.iso.datetime(),
 });
 export type InboxList = z.infer<typeof InboxList>;
-/** A revision's number and the head it was published against. */
-export const AgentReviewRevision = z.object({ revision: z.int().positive(), head: revisionHead });
+/** The number of diff files and SHA-256 digest of their sorted old and new side lines. */
+export const AgentReviewDiff = z.object({
+  files: z.int().nonnegative().max(LIMITS.filesPerRevision),
+  digest: Sha256,
+});
+export type AgentReviewDiff = z.infer<typeof AgentReviewDiff>;
+/** A revision's number, published head and code diff summary. */
+export const AgentReviewRevision = z.object({
+  revision: z.int().positive(),
+  head: revisionHead,
+  diff: AgentReviewDiff.nullable().default(null),
+});
 export type AgentReviewRevision = z.infer<typeof AgentReviewRevision>;
 export const AgentReviewTurn = z.enum(["reviewer", "agent"]);
 export type AgentReviewTurn = z.infer<typeof AgentReviewTurn>;
@@ -94,8 +104,13 @@ export type AgentReviewTurn = z.infer<typeof AgentReviewTurn>;
  * `newest` is the review's newest revision, or null for a review without any revision.
  * `approved` is null while no revision is approved, else the approved revision.
  * On an open review, `turn` is `agent` when a Send that is not set aside was made on the newest
- * revision, else `reviewer`. It is null when approved, settled or without a revision. The default
- * lets clients read lists from older servers or hubs that omit `turn`.
+ * revision, else `reviewer`. It is null when approved, settled or without a revision.
+ * `answerWaiting` says whether a Send awaits confirmation and has not been set aside.
+ * An older revision's approval counts only while its delivery lease is live.
+ * Each revision's `diff` summarizes its code diff, including an empty one. A `diff=0` query
+ * skips that summary. A local copy moved to a hub reports null for both `answerWaiting` and `diff`.
+ * The null defaults for `turn`, `answerWaiting` and `diff` let clients read lists from older
+ * servers or hubs that omit these fields.
  */
 export const AgentReviewItem = z.object({
   id: z.uuid(),
@@ -103,6 +118,7 @@ export const AgentReviewItem = z.object({
   branch: PublishRequest.shape.branch,
   state: ReviewState,
   turn: AgentReviewTurn.nullable().default(null),
+  answerWaiting: z.boolean().nullable().default(null),
   newest: AgentReviewRevision.nullable(),
   approved: AgentReviewRevision.nullable(),
   updatedAt: z.iso.datetime(),
@@ -114,8 +130,13 @@ export type AgentReviewList = z.infer<typeof AgentReviewList>;
 /**
  * Query of `GET /api/v1/agent/reviews`: `head` is a full commit object id, no prefix or `worktree`.
  * `key` is a stored review key: 64 lowercase hex characters, the `reviewKey` recense publish sends.
+ * `diff=0` skips digest reads and returns null for each revision's diff.
  */
-export const AgentReviewQuery = z.object({ head: commit.optional(), key: Sha256.optional() });
+export const AgentReviewQuery = z.object({
+  head: commit.optional(),
+  key: Sha256.optional(),
+  diff: z.literal("0").optional(),
+});
 export type AgentReviewQuery = z.infer<typeof AgentReviewQuery>;
 export const ReviewView = InboxItem.extend({
   related: z

@@ -5,7 +5,7 @@ import type { AppDeps } from "./app.ts";
 import { type PacingPhase, pacing } from "./pacing.ts";
 import type { Work } from "./publish/work.ts";
 
-export type PacingUnit = "comment-bytes" | "changed-block-bytes" | "row-date";
+export type PacingUnit = "comment-bytes" | "changed-block-bytes" | "row-date" | "diff-row" | "hashed-line";
 
 export type PacingEvent =
   | { kind: "yield"; phase: PacingPhase }
@@ -75,10 +75,7 @@ function statement(sql: string, params: unknown[], method: string): PacingEvent 
   return { kind: "statement", sql, method, table, rows, checkedIds };
 }
 
-/** Observe real work independently of the probe, including SQL sent to the off-thread writer. */
-export function observePacing(deps: AppDeps) {
-  const execute = deps.publishExecutor;
-  if (!execute) throw new Error("Pacing tests require an explicit executor");
+export function observePacingTurns() {
   const events: PacingEvent[] = [];
   const markTurn = () => {
     events.push({ kind: "turn" });
@@ -87,6 +84,24 @@ export function observePacing(deps: AppDeps) {
   let turn = setImmediate(markTurn);
   const previousProbe = pacing.probe;
   pacing.probe = (phase) => events.push({ kind: "yield", phase });
+  return {
+    events,
+    record(unit: PacingUnit) {
+      events.push({ kind: "work", unit });
+    },
+    restore() {
+      clearImmediate(turn);
+      pacing.probe = previousProbe;
+    },
+  };
+}
+
+/** Observe real work independently of the probe, including SQL sent to the off-thread writer. */
+export function observePacing(deps: AppDeps) {
+  const execute = deps.publishExecutor;
+  if (!execute) throw new Error("Pacing tests require an explicit executor");
+  const log = observePacingTurns();
+  const { events } = log;
   const prepare = SQLiteRemoteSession.prototype.prepareQuery;
   const sqlSpy = vi.spyOn(SQLiteRemoteSession.prototype, "prepareQuery").mockImplementation(function (
     this: SQLiteRemoteSession<Record<string, never>, Record<string, never>>,
@@ -126,13 +141,9 @@ export function observePacing(deps: AppDeps) {
     return unlink(...args);
   });
   return {
-    events,
-    record(unit: PacingUnit) {
-      events.push({ kind: "work", unit });
-    },
+    ...log,
     restore() {
-      clearImmediate(turn);
-      pacing.probe = previousProbe;
+      log.restore();
       deps.publishExecutor = execute;
       sqlSpy.mockRestore();
       putSpy.mockRestore();

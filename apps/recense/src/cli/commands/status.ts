@@ -90,7 +90,7 @@ export async function statusLineCommand(
     }
     remaining();
     const result = AgentReviewList.safeParse(
-      await apiRequest(stateDir, target, `/agent/reviews?key=${key}`, {
+      await apiRequest(stateDir, target, `/agent/reviews?key=${key}&diff=0`, {
         method: "GET",
         signal,
         timeoutMs: 1500,

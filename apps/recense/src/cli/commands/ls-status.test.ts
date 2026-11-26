@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentReviewList } from "@recense/contract";
+import { type AgentReviewItem, AgentReviewList } from "@recense/contract";
 import { eq } from "drizzle-orm";
 import { beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import { reviews, revisions } from "../../db/schema.ts";
@@ -26,12 +26,13 @@ beforeEach(() => {
 const token = `em_${"a".repeat(43)}`;
 const hubToken = `em_${"b".repeat(43)}`;
 const reviewId = randomUUID();
-const item = {
+const item: AgentReviewItem = {
   id: reviewId,
   title: "Synthetic review",
   branch: null,
   state: "open",
   turn: null,
+  answerWaiting: false,
   newest: null,
   approved: null,
   updatedAt: "2026-01-01T00:10:00.000Z",
@@ -45,7 +46,7 @@ function attach(dir: string, hubUrl = "https://hub.example") {
 test("ls against a local server lists the instance's reviews, one tab-separated line each", async () => {
   const f = await commandFixture();
   f.setResponse(async (url, init) => {
-    expect(String(url)).toBe("http://127.0.0.1:3636/api/v1/agent/reviews");
+    expect(String(url)).toBe("http://127.0.0.1:3636/api/v1/agent/reviews?diff=0");
     expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${token}`);
     return Response.json({ items: [item] });
   });
@@ -54,12 +55,35 @@ test("ls against a local server lists the instance's reviews, one tab-separated 
   expect(f.stderr).toEqual([]);
 });
 
-test("ls --json prints one AgentReviewList line", async () => {
+test("ls --json prints the waiting answer and both revision diffs as reported", async () => {
   const f = await commandFixture();
-  f.setResponse(async () => Response.json({ items: [item] }));
+  const reported = {
+    ...item,
+    state: "approved",
+    answerWaiting: true,
+    newest: { revision: 2, head: "c".repeat(40), diff: { files: 3, digest: "a".repeat(64) } },
+    approved: { revision: 1, head: "d".repeat(40), diff: { files: 1, digest: "b".repeat(64) } },
+  };
+  f.setResponse(async (url) => {
+    expect(String(url)).toBe("http://127.0.0.1:3636/api/v1/agent/reviews");
+    return Response.json({ items: [reported] });
+  });
   expect(await run(["ls", "--json"], f.io)).toBe(0);
   expect(f.stdout).toHaveLength(1);
-  expect(AgentReviewList.parse(JSON.parse(f.stdout[0] ?? ""))).toEqual({ items: [item] });
+  expect(JSON.parse(f.stdout.join(""))).toEqual({ items: [reported] });
+});
+
+test("ls --json prints null for answerWaiting and revision diffs omitted by an older server", async () => {
+  const f = await commandFixture();
+  const revision = { revision: 1, head: "c".repeat(40) };
+  const older = { ...item, state: "approved", answerWaiting: undefined, newest: revision, approved: revision };
+  f.setResponse(async () => Response.json({ items: [older] }));
+  expect(await run(["ls", "--json"], f.io)).toBe(0);
+  expect(JSON.parse(f.stdout.join(""))).toEqual({
+    items: [
+      { ...older, answerWaiting: null, newest: { ...revision, diff: null }, approved: { ...revision, diff: null } },
+    ],
+  });
 });
 
 test("ls against an attached hub sends the hub token to the hub only", async () => {

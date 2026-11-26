@@ -237,20 +237,37 @@ the same. Diagrams remain source text when the file opens outside recense.
 `recense ls` lists the reviews this machine published, newest first, one line each: id, state, last
 update, title and URL. It also lists snoozed and finished reviews, and it never shows comments. The
 update time is UTC. Add `--json` for one JSON object with an `items` list. It shows at most the
-newest 100. Each JSON item also carries `branch`, `newest` (`{ revision, head }` of the newest
-revision, `null` without any) and `approved` (`null` while nothing is approved, else `{ revision,
-head }` of the approved revision). `head` is a full commit id, `worktree` or `null`.
+newest 100. Each JSON item also carries `branch`, the `newest` revision and the `approved`
+revision. Each revision is `{ revision, head, diff }`, or `null` when there is no such revision.
+`head` is a full commit id, `worktree` or `null`. The `diff` gives the number of code diff files
+and a digest of their old and new sides. A review of docs or a plan alone has zero diff files.
 `turn` is `agent` after a Send on the newest revision that has not been set aside, `reviewer`
 otherwise, or `null` for an approved or retired review or one without a revision.
+`answerWaiting` is true while a Send still awaits delivery confirmation and has not been set aside.
+An approval of an older revision counts only while a delivery holds it with a live lease.
+An older server or hub that omits `diff` or `answerWaiting` gives you `null` for that field.
+A local copy of a review moved to a hub reports `null` for both fields because its Sends and
+deliveries now live on the hub.
 
 To check which commit an approval covers, run `recense ls --json --head <sha>` with the full commit
 id (40 or 64 lowercase hex characters). It lists only reviews whose approved or newest revision has
-that head. `head` and `branch` are what the publisher sent and are not verified, and a review of docs
-or a plan alone shows no diff, so `approved.head` equal to `<sha>` means the reviewer approved a
-revision labelled with that commit, not that its content was shown. To rely on it, also require
-`approved.revision` equal to `newest.revision` and the expected `branch`, and check that the review
-carried the diff. An item with `newest.head` equal to `<sha>` and `approved: null` is published but
-not approved. It reads only, takes no comments and changes nothing.
+that head. The publisher supplies the head and branch. To rely on an approval, require
+`approved.head` equal to `<sha>`, `approved.revision` equal to `newest.revision` and the expected
+`branch`. Require `approved.diff.digest` to equal the digest of your change from its merge base
+to `<sha>`, using the rule in [docs/api.md](api.md). A match means the revision held exactly those
+file versions, without proving the reviewer opened each one or checking file modes. Also require
+`answerWaiting` to be `false`. If your agent takes an approval that is not yet confirmed together
+with a later Go, the approval is set aside and the review reopens. A Send after a confirmed
+approval does not revoke it. Once that Send is confirmed too, the item still reads as approved with
+`answerWaiting: false`, and the list cannot show that the Send happened. Any agent on the same
+machine can take and confirm the review's answers. Keep a record of every answer taken for the
+review, for example by letting one agent take them all. Do not merge while any feedback taken
+after the approval is unhandled. Only a new revision clears the approval. A Go answered with
+replies alone, such as an `explain` Go, leaves it in place.
+
+An item with `newest.head` equal to `<sha>` and `approved: null` means the commit is published
+but has no approval on this review.
+Listing reads only, takes no comments and changes nothing.
 
 `recense status` shows whether this machine is `local` or `attached`, the server or hub address,
 the hub name when attached, this machine's instance name, whether the server or hub answers, and
