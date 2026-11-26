@@ -168,6 +168,8 @@ export function SentNotice({
     const ask = async () => {
       const current = getHandoffNotice(reviewId);
       if (!live || current?.id !== id || current.pickedUp || (current.asked && !current.lost)) return;
+      const queryKey = ["review", reviewId];
+      const before = client.getQueryState(queryKey);
       markHandoffNotice(reviewId, id, { asked: true });
       // The first ask can finish across visits. A retry belongs to this visit because the next can retry too.
       const stillPending = () => {
@@ -193,10 +195,7 @@ export function SentNotice({
       try {
         // Only the review decides "cannot reach": a slow inbox says nothing about the server.
         await Promise.race([
-          client.invalidateQueries(
-            { queryKey: ["review", reviewId], refetchType: "all" },
-            { ...options, throwOnError: true },
-          ),
+          client.invalidateQueries({ queryKey, refetchType: "all" }, { ...options, throwOnError: true }),
           new Promise<never>((_, reject) => {
             slow = window.setTimeout(() => reject(TOO_SLOW), HANDOFF_REFETCH_MS);
           }),
@@ -206,7 +205,23 @@ export function SentNotice({
         connectionLost = error === TOO_SLOW || error instanceof TypeError;
       }
       window.clearTimeout(slow);
-      if (stillPending()) markHandoffNotice(reviewId, id, { lost: connectionLost });
+      if (!stillPending()) return;
+      const after = client.getQueryState(queryKey);
+      if (connectionLost || after?.fetchStatus === "paused") {
+        markHandoffNotice(reviewId, id, { lost: true });
+      } else if (
+        after &&
+        (after.dataUpdatedAt > (before?.dataUpdatedAt ?? 0) ||
+          after.errorUpdatedAt > (before?.errorUpdatedAt ?? 0) ||
+          // Two fetches can finish in the same millisecond. Cancellation reverts the counts too.
+          after.dataUpdateCount > (before?.dataUpdateCount ?? 0) ||
+          after.errorUpdateCount > (before?.errorUpdateCount ?? 0))
+      ) {
+        markHandoffNotice(reviewId, id, { lost: false });
+      } else if (!current.asked) {
+        // A cancelled or removed query gave no answer. The next visit can make the first ask again.
+        markHandoffNotice(reviewId, id, { asked: false });
+      }
     };
     // A StrictMode cleanup or an immediate unmount can cancel the ask before it starts.
     queueMicrotask(() => void ask());

@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider, type QueryFunction, useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -568,11 +568,11 @@ function fetchProbeReview(): Promise<null> {
   if (probe.mode === "fail") return Promise.reject(new TypeError("Failed to fetch"));
   return Promise.resolve(null);
 }
-function Probe({ queryFn }: { queryFn: typeof fetchProbeReview }) {
+function Probe({ queryFn }: { queryFn: QueryFunction<null> }) {
   useQuery({ queryKey: ["review", reviewId], queryFn });
   return null;
 }
-function mountProbe(queryFn = fetchProbeReview) {
+function mountProbe(queryFn: QueryFunction<null> = fetchProbeReview) {
   return render(
     <QueryClientProvider client={client}>
       <Probe queryFn={queryFn} />
@@ -717,6 +717,7 @@ test("returning before the fallback deadline waits only the time left since Send
 });
 
 test("returning after the fallback asked keeps the notice without reconnecting or invalidating queries", async () => {
+  mountProbe();
   const first = mount({ agent: waiting });
   await send();
   await settle(HANDOFF_WAIT_MS);
@@ -731,6 +732,7 @@ test("returning after the fallback asked keeps the notice without reconnecting o
 });
 
 test("leaving before the fallback ask starts lets the next visit ask once", async () => {
+  mountProbe();
   const first = mount({ agent: waiting });
   await send();
   first.unmount();
@@ -939,6 +941,65 @@ test("returning while the server is unreachable keeps the warning through one re
   expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
   expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
   expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+});
+
+test("an offline retry keeps the warning until the paused review fetch succeeds", async () => {
+  const fetchReview = vi.fn(fetchProbeReview);
+  mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "fail";
+  await settle(HANDOFF_WAIT_MS);
+  expect(getHandoffNotice(reviewId)?.lost).toBe(true);
+  first.unmount();
+
+  const wasOnline = onlineManager.isOnline();
+  try {
+    onlineManager.setOnline(false);
+    probe.mode = "ok";
+    fetchReview.mockClear();
+    mount({ agent: waiting });
+    await settle();
+    expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+    expect(client.getQueryState(["review", reviewId])?.fetchStatus).toBe("paused");
+    expect(fetchReview).not.toHaveBeenCalled();
+    expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+    expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+
+    await act(async () => onlineManager.setOnline(true));
+    expect(fetchReview).toHaveBeenCalledOnce();
+    expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+    expect(getHandoffNotice(reviewId)?.lost).toBe(false);
+  } finally {
+    onlineManager.setOnline(wasOnline);
+  }
+});
+
+test("leaving during the first review fetch cancels it and lets the next visit ask again", async () => {
+  const fetchReview = vi.fn<QueryFunction<null>>().mockResolvedValue(null);
+  const observer = mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await send();
+  fetchReview.mockClear();
+  fetchReview.mockImplementationOnce(
+    ({ signal }) => new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))),
+  );
+  await settle(HANDOFF_WAIT_MS);
+  expect(fetchReview).toHaveBeenCalledOnce();
+  expect(getHandoffNotice(reviewId)?.asked).toBe(true);
+  first.unmount();
+  observer.unmount();
+  await settle();
+  expect(fetchReview.mock.calls[0]?.[0].signal.aborted).toBe(true);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: false, lost: false });
+
+  invalidate.mockClear();
+  mount({ agent: waiting });
+  await settle();
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(reviewRefetches()).toBe(1);
+  expect(fetchReview).toHaveBeenCalledTimes(2);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
 });
 
 test("a fallback refetch that times out while the reader is away records the failure for the next visit", async () => {

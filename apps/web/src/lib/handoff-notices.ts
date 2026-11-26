@@ -56,7 +56,7 @@ export function openHandoffNotice(reviewId: string, baseline: SendBaseline) {
 export function markHandoffNotice(
   reviewId: string,
   id: number,
-  patch: { pickedUp?: true; held?: true; asked?: true; lost?: boolean },
+  patch: { pickedUp?: true; held?: true; asked?: boolean; lost?: boolean },
 ) {
   const entry = notices.get(reviewId);
   if (entry?.id !== id) return;
