@@ -406,8 +406,7 @@ export function checkDocs(root: string, tracked: TrackedEntries): string[] {
     return cache.get(rel) ?? null;
   };
   const folders = new Set<string>();
-  for (const [path, kind] of tracked) {
-    if (kind === "link" && path.startsWith("docs/images/")) add(path, 1, "an image must be a tracked regular file");
+  for (const path of tracked.keys()) {
     let dir = posix.dirname(path);
     while (!folders.has(dir)) {
       folders.add(dir);
@@ -427,7 +426,10 @@ export function checkDocs(root: string, tracked: TrackedEntries): string[] {
       return;
     }
     const hash = url.indexOf("#");
-    const rawPath = (hash < 0 ? url : url.slice(0, hash)).split("?")[0] ?? "";
+    const pathAndQuery = hash < 0 ? url : url.slice(0, hash);
+    const queryStart = pathAndQuery.indexOf("?");
+    const rawPath = queryStart < 0 ? pathAndQuery : pathAndQuery.slice(0, queryStart);
+    const query = queryStart < 0 ? undefined : pathAndQuery.slice(queryStart + 1);
     let decoded: string;
     let fragment: string | undefined;
     try {
@@ -447,7 +449,7 @@ export function checkDocs(root: string, tracked: TrackedEntries): string[] {
       add(file, line, `the target "${url}" is not a tracked file or a folder containing one`);
       return;
     }
-    return { rel, fragment, folder };
+    return { rel, query, fragment, folder };
   };
 
   for (const { path, title } of listed) {
@@ -485,7 +487,7 @@ export function checkDocs(root: string, tracked: TrackedEntries): string[] {
         add(file, line, `the image "${url}" must be a .png file in docs/images/`);
       if (target?.fragment === undefined) return;
       if (target.folder) add(file, line, `the link "${url}" cannot have a fragment on a folder`);
-      else if (target.rel.endsWith(".md")) {
+      else if (target.rel.endsWith(".md") && target.query !== "plain=1") {
         if (target.fragment && !pageAt(target.rel)?.anchors.has(target.fragment))
           add(file, line, `the link "${url}" has no matching heading anchor in ${target.rel}`);
       } else {
@@ -511,9 +513,9 @@ export function checkDocs(root: string, tracked: TrackedEntries): string[] {
         const info = [node.lang, node.meta].filter((part) => part).join(" ");
         const firstLine = (node.value ?? "").split("\n")[0] ?? "";
         if (info === "") add(file, line, "every code block needs an info string");
-        else if (info.includes("prompt") && info !== "text prompt")
+        if (info.includes("prompt") && info !== "text prompt")
           add(file, line, `the info string "${info}" must be exactly "text prompt" for a prompt`);
-        else if (node.lang === "text" && info !== "text prompt" && firstLine.startsWith("Rules:"))
+        else if (info !== "text prompt" && firstLine.startsWith("Rules:"))
           add(file, line, 'a prompt starting with "Rules:" must use the info string "text prompt"');
         if (node.lang === "sh")
           (node.value ?? "").split("\n").forEach((codeLine, offset) => {
@@ -553,14 +555,27 @@ export function checkDocs(root: string, tracked: TrackedEntries): string[] {
     });
   }
 
+  // Read each tracked image header once, including images outside the screenshot manifest.
+  const imageSizes = new Map<string, ReturnType<typeof pngSize>>();
+  for (const path of tracked.keys()) {
+    if (!path.startsWith("docs/images/")) continue;
+    if (!isTrackedFile(root, tracked, path)) add(path, 1, "an image must be a tracked regular file");
+    else if (!path.endsWith(".png")) add(path, 1, "an image file name must end in .png");
+    else {
+      const size = pngSize(join(root, path));
+      imageSizes.set(path, size);
+      if (typeof size === "string") add(path, 1, size);
+    }
+  }
+
   // Rule 9: screenshots.
   for (const { file, width, height, index } of shots) {
     const path = `docs/${file}`;
-    if (!isTrackedFile(root, tracked, path)) {
+    const size = imageSizes.get(path);
+    if (size === undefined) {
       manifestViolation(`screenshots.${index}.file`, `the screenshot docs/${file} is not a tracked file`);
       continue;
     }
-    const size = pngSize(join(root, path));
     if (typeof size === "string") manifestViolation(`screenshots.${index}.file`, `docs/${file} ${size}`);
     else {
       if (typeof width === "number" && size.width !== width)

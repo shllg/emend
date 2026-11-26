@@ -402,6 +402,18 @@ test("a fragment link into the page itself must match a heading", () => {
   expect(found).toEqual(['docs/setup/a.md:3: the link "#gone" has no matching heading anchor in docs/setup/a.md']);
 });
 
+test("a Markdown link with ?plain=1 accepts an existing line", () => {
+  const found = check(edit("docs/setup.md", "setup/a.md#undo", "setup/a.md?plain=1#L1"));
+  expect(found).toEqual([]);
+});
+
+test("a Markdown link with ?plain=1 refuses an out-of-range line", () => {
+  const found = check(edit("docs/setup.md", "setup/a.md#undo", "setup/a.md?plain=1#L999999"));
+  expect(found).toEqual([
+    'docs/setup.md:3: the link "setup/a.md?plain=1#L999999" needs a valid line fragment in docs/setup/a.md',
+  ]);
+});
+
 test("a link that leaves the repository is refused", () => {
   const found = check(edit("docs/setup.md", "(usage.md)", "(../../outside.md)"));
   expect(found).toEqual([
@@ -460,6 +472,11 @@ test("prompt in an info string must be exactly text prompt", () => {
 
 test("a text fence that starts with Rules: must be text prompt", () => {
   const found = check(edit("docs/setup/a.md", "```text prompt", "```text"));
+  expect(found).toEqual(['docs/setup/a.md:7: a prompt starting with "Rules:" must use the info string "text prompt"']);
+});
+
+test("an sh fence that starts with Rules: must be text prompt", () => {
+  const found = check(edit("docs/setup/a.md", "```text prompt", "```sh"));
   expect(found).toEqual(['docs/setup/a.md:7: a prompt starting with "Rules:" must use the info string "text prompt"']);
 });
 
@@ -532,7 +549,20 @@ test("a screenshot whose size differs from the manifest is refused", () => {
 
 test("a screenshot that is not a PNG is refused", () => {
   const found = check(put("docs/images/review-desktop.png", Buffer.alloc(40)));
-  expect(found).toEqual(["docs/site.json:25: docs/images/review-desktop.png is not a PNG file (bad signature)"]);
+  expect(found).toEqual([
+    "docs/images/review-desktop.png:1: is not a PNG file (bad signature)",
+    "docs/site.json:25: docs/images/review-desktop.png is not a PNG file (bad signature)",
+  ]);
+});
+
+test("an unused .png file in docs/images must have a PNG header", () => {
+  const found = check(put("docs/images/unused.png", ""));
+  expect(found).toEqual(["docs/images/unused.png:1: is not a PNG file (bad signature)"]);
+});
+
+test("an unused file in docs/images must have a .png extension", () => {
+  const found = check(put("docs/images/unused.dat", png(10, 10)));
+  expect(found).toEqual(["docs/images/unused.dat:1: an image file name must end in .png"]);
 });
 
 test("a screenshot file that does not exist is refused", () => {
@@ -563,7 +593,7 @@ test("inline, reference and HTML images resolve queries and require alt text and
       "[folder]: images/folder.png",
       "[other]: setup.md",
     ].join("\n");
-    files["docs/images/folder.png/child"] = "";
+    files["docs/images/folder.png/child.png"] = png(10, 10);
   });
   expect(found).toEqual([
     "docs/usage.md:11: an image needs alt text",
@@ -711,6 +741,7 @@ test("the first PNG chunk must have the 13-byte IHDR length", () => {
   const header = png(100, 50);
   header.writeUInt32BE(12, 8);
   expect(check(put("docs/images/review-desktop.png", header))).toEqual([
+    "docs/images/review-desktop.png:1: is not a PNG file (IHDR length must be 13)",
     "docs/site.json:25: docs/images/review-desktop.png is not a PNG file (IHDR length must be 13)",
   ]);
 });
