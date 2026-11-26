@@ -1,4 +1,4 @@
-import { type BlockId, LIMITS } from "@recense/contract";
+import { type BlockId, LIMITS, type RenderedBlockKind } from "@recense/contract";
 import { fromHtml } from "hast-util-from-html";
 import { toString as hastText } from "hast-util-to-string";
 import { blockHash } from "./hash.ts";
@@ -7,7 +7,7 @@ import { normalizeText } from "./normalize.ts";
 export type Block = {
   id: BlockId;
   section: string;
-  kind: "heading" | "paragraph" | "item" | "code" | "table" | "quote" | "diagram" | "chart";
+  kind: RenderedBlockKind;
   html: string;
   text: string;
   source?: string;

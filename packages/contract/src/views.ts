@@ -179,11 +179,15 @@ const sectionKey = z.union([
   z.templateLiteral(["t-", TopicSlug, "-", z.enum(["why", "example", "body"])]),
 ]);
 
+/** The single list of rendered block kinds, also used by core's Block type. */
+export const RenderedBlockKind = z.enum(["heading", "paragraph", "item", "code", "table", "quote", "diagram", "chart"]);
+export type RenderedBlockKind = z.infer<typeof RenderedBlockKind>;
+
 /** Wire representation of core's server-rendered Markdown blocks. */
 export const RenderedBlock = z.object({
   id: BlockId,
   section: z.union([sectionKey, z.string().regex(/^doc-[0-9a-f]{8}$/)]),
-  kind: z.enum(["heading", "paragraph", "item", "code", "table", "quote", "diagram", "chart"]),
+  kind: RenderedBlockKind,
   html: renderedText,
   text: renderedText,
   source: renderedText.optional(),
