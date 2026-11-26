@@ -160,7 +160,7 @@ export async function printServiceInstalled(io: Io, stateDir: string, server: Se
   const attachment = await readAttachment(stateDir).catch(() => null);
   io.stdout(
     attachment
-      ? "This machine publishes to a hub; pair a browser from the hub with recense pair.\n"
+      ? "This machine publishes to a hub; to pair a browser, run recense pair in your own terminal on the hub.\n"
       : "To sign a browser in, run recense in your own terminal.\n",
   );
 }

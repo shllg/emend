@@ -245,7 +245,7 @@ recense service status
 You should see `recense: keeping the service options ...` when the service has options, then
 `recense: service installed` and `recense: the service starts at login and serves <address>`.
 The next line says `To sign a browser in, run recense in your own terminal.` On an attached machine,
-it tells you to run `recense pair` on the hub. Then `recense service status` prints
+it tells you to run `recense pair` in your own terminal on the hub. Then `recense service status` prints
 `recense: service running (<path>)`.
 
 Run it again after every Node.js upgrade, as the note at the top says.

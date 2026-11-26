@@ -545,23 +545,36 @@ describe.each(["linux", "darwin"])("%s service lifecycle", (platform) => {
     expect(output.endsWith("To sign a browser in, run recense in your own terminal.\n")).toBe(true);
   });
 
+  const validAttachment = JSON.stringify({
+    hubId: "11111111-1111-4111-8111-111111111111",
+    hubName: "Synthetic hub",
+    hubUrl: "https://hub.example.test",
+  });
+
   test("an attached machine prints the hub pairing command without a sign-in link or code", async () => {
-    stateFiles.writeSecretFile(
-      join(state, "attach.json"),
-      JSON.stringify({
-        hubId: "11111111-1111-4111-8111-111111111111",
-        hubName: "Synthetic hub",
-        hubUrl: "https://hub.example.test",
-      }),
-    );
+    stateFiles.writeSecretFile(join(state, "attach.json"), validAttachment);
     expect(await invoke("install")).toBe(0);
     expect(stdout).toEqual([
       ...installedOutput().slice(0, 2),
-      "This machine publishes to a hub; pair a browser from the hub with recense pair.\n",
+      "This machine publishes to a hub; to pair a browser, run recense pair in your own terminal on the hub.\n",
     ]);
     const output = stdout.join("");
     expect(output).not.toContain("/pair");
     expect(output).not.toContain("#");
+  });
+
+  test.each(["invalid JSON", "a symlink"])("install prints local sign-in help when attach.json is %s", async (kind) => {
+    const attachment = join(state, "attach.json");
+    if (kind === "invalid JSON") {
+      stateFiles.writeSecretFile(attachment, "{");
+    } else {
+      const target = join(root, "valid-attachment.json");
+      stateFiles.writeSecretFile(target, validAttachment);
+      await symlink(target, attachment);
+    }
+    expect(await invoke("install")).toBe(0);
+    expect(stdout).toEqual(installedOutput());
+    expect(stderr).toEqual([]);
   });
 
   test("stops the service and detached server before starting and confirming the replacement", async () => {
