@@ -31,7 +31,10 @@ test("the CLI carries manifest notes into resolved and re-keyed publish requests
   const root = join(dir, "repo");
   try {
     await mkdir(join(root, ".git"), { recursive: true });
-    const notes = [{ side: "new" as const, start: 1, end: 1, summary: "A boundary.", ref: "A" }];
+    const notes = [
+      { side: "new" as const, start: 1, end: 1, summary: "A boundary.", ref: "A" },
+      { side: "new" as const, quote: "new", summary: "The added line." },
+    ];
     const result = await resolvePublish(
       {
         version: 1,
@@ -58,7 +61,7 @@ test("the CLI carries manifest notes into resolved and re-keyed publish requests
           ...result.forInstance(id),
           files: result.request.files.map((file) => ({
             ...file,
-            notes: file.notes?.map((note) => ({ ...note, end: 2 })),
+            notes: file.notes?.map((note) => (note.start === undefined ? note : { ...note, end: 2 })),
           })),
         }),
       }),
@@ -75,6 +78,13 @@ test("publish diagnostics preserve note context without terminal control charact
   expect(line).toContain("Agent note 0 in a.ts");
   expect(line.trim()).not.toContain("\n");
   expect(line).not.toContain("\u001b");
+});
+
+test("publish prints escaped note details for a timeout and only the code for other size errors", () => {
+  const reason = "matching the note's quote or range took too long.";
+  const timeout = new CliApiError("too_large", `Agent note 0 in a\n.ts: ${reason}`);
+  expect(errorLine(timeout, "publish")).toBe(`recense: too_large: Agent note 0 in a\\u{a}.ts: ${reason}\n`);
+  expect(errorLine(new CliApiError("too_large", "The request is too large."), "publish")).toBe("recense: too_large\n");
 });
 
 test("a refused note exits 1 with one stderr line and no stdout", async () => {

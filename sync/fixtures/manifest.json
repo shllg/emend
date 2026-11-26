@@ -26,8 +26,7 @@
       "notes": [
         {
           "side": "new",
-          "start": 38,
-          "end": 44,
+          "quote": "for (let attempt = 1; attempt <= 3; attempt++) {",
           "summary": "The first call consumes one attempt, keeping the retry budget finite.",
           "rationale": "Counting only retries would allow a fourth call.",
           "ref": "A"

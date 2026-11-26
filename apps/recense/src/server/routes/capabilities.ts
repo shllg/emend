@@ -1,4 +1,5 @@
 import {
+  AGENT_NOTE_QUOTES_FEATURE,
   AGENT_REVIEW_KEY_FEATURE,
   Capabilities,
   DIFF_IMAGES_FEATURE,
@@ -44,6 +45,7 @@ export function capabilitiesRoutes(app: Hono<AppEnv>, key: string, canStop = fal
           REVIEW_PIN_ORDER_FEATURE,
           AGENT_REVIEW_KEY_FEATURE,
           DIFF_IMAGES_FEATURE,
+          AGENT_NOTE_QUOTES_FEATURE,
           ...(canStop ? ["server-stop"] : []),
         ],
       }),

@@ -544,7 +544,7 @@ test("render failure spends no diff counting work", async () => {
   expect(executor.mock.calls.filter(([work]) => work.kind === "diff-counts")).toHaveLength(0);
 });
 
-test("a thread created during computation retries with cached rendering, counts and transferred IDs", async () => {
+test("a thread created during computation retries with cached rendering, counts, note ranges and transferred IDs", async () => {
   const worker = workerExecutor();
   try {
     const first = await publish(input());
@@ -553,10 +553,12 @@ test("a thread created during computation retries with cached rendering, counts 
     let computations = 0;
     let docComputations = 0;
     let countComputations = 0;
+    let quoteComputations = 0;
     const hash = await blobs.put(f.ownerId, Buffer.from("# Cached doc"), "text/markdown");
     const executor: Executor = async (work) => {
       if (work.kind === "doc") docComputations++;
       if (work.kind === "diff-counts") countComputations++;
+      if (work.kind === "note-quotes") quoteComputations++;
       if (work.kind === "writeup" && ++computations === 1)
         await f.db.query((q) =>
           q.insert(threads).values({
@@ -582,6 +584,7 @@ test("a thread created during computation retries with cached rendering, counts 
               oldBlob: null,
               newBlob: hash,
               flag: null,
+              notes: [{ side: "new", quote: "# Cached doc", summary: "Cached heading." }],
             },
           ],
         },
@@ -593,6 +596,7 @@ test("a thread created during computation retries with cached rendering, counts 
     expect(computations).toBe(1);
     expect(docComputations).toBe(1);
     expect(countComputations).toBe(1);
+    expect(quoteComputations).toBe(1);
     const counted = await f.db.read((q) =>
       q
         .select()

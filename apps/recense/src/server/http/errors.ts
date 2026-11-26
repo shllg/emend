@@ -56,6 +56,10 @@ const DETAILS = {
 const NOTE_REASONS = {
   range: "the range must exist on a stored, unflagged file side.",
   unchanged: "the file's content does not change.",
+  quote_missing: "the quote matches no lines on the note's side.",
+  quote_ambiguous: "the quote matches more than one place; quote more lines.",
+  quote_range: "the quote and the start and end name different lines.",
+  timeout: "matching the note's quote or range took too long.",
 } as const;
 type NoteDetail = { kind: "agent_note"; path: string; index: number; reason: keyof typeof NOTE_REASONS };
 type Detail = keyof typeof DETAILS | NoteDetail;
@@ -63,7 +67,11 @@ export function agentNoteDetail(path: string, index: number, reason: NoteDetail[
   return { kind: "agent_note", path, index, reason };
 }
 function detailMessage(code: ErrorCode, detail?: Detail): string {
-  if (typeof detail === "object" && detail.kind === "agent_note" && code === "invalid_request") {
+  if (
+    typeof detail === "object" &&
+    detail.kind === "agent_note" &&
+    (code === "invalid_request" || code === "too_large")
+  ) {
     const prefix = `Agent note ${detail.index} in `;
     const suffix = `: ${NOTE_REASONS[detail.reason]}`;
     const budget = LIMITS.errorMessageChars - prefix.length - suffix.length;

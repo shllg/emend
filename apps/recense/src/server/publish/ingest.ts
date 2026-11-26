@@ -38,7 +38,7 @@ import { WorkTimeout, workerExecutor } from "./executor.ts";
 import { abortable, checkPublishSignal, PublishAborted, publishSlots } from "./lifecycle.ts";
 import { fileMediaType } from "./media.ts";
 import { ownerHead } from "./media-head.ts";
-import { validateNoteRanges } from "./notes.ts";
+import { resolveNoteRanges } from "./notes.ts";
 import { renderRevision } from "./render.ts";
 import { revisionTransition } from "./transitions.ts";
 import { type Executor, packIds, previousHtmlIds, type SharedSides, type Work, type WorkLast } from "./work.ts";
@@ -126,6 +126,7 @@ async function computePublish(
   };
   deps.signal?.addEventListener("abort", stop, { once: true });
   let prepared: Awaited<ReturnType<typeof renderRevision>> | undefined;
+  let resolvedNotes: Awaited<ReturnType<typeof resolveNoteRanges>> | undefined;
   let counted: Awaited<ReturnType<typeof countDiffFiles>> | undefined;
   const attempt = async () => {
     checkPublishSignal(deps.signal);
@@ -322,7 +323,8 @@ async function computePublish(
           throw new ApiError("invalid_request");
         }
       }
-    if (!prepared) await validateNoteRanges(input.files, read, execute);
+    resolvedNotes ??= await resolveNoteRanges(input.files, read, execute);
+    const notesByFile = resolvedNotes;
     prepared ??= await renderRevision(
       input,
       execute,
@@ -621,7 +623,7 @@ async function computePublish(
               look: wireHtmlLook(look ?? "custom"),
               ...(colorScheme === "light" ? { colorScheme } : {}),
             });
-          for (const [noteOrd, note] of (file.notes ?? []).entries())
+          for (const [noteOrd, note] of (notesByFile.get(file) ?? []).entries())
             await q.insert(agentNotes).values({
               ownerId,
               fileId,
@@ -717,7 +719,10 @@ async function computePublish(
         )
           throw error;
         // The rendered and source blobs may be the ones the delete removed: render and put them again.
-        if (foreignKeyFailure(error)) prepared = undefined;
+        if (foreignKeyFailure(error)) {
+          prepared = undefined;
+          resolvedNotes = undefined;
+        }
       }
     }
     throw new ApiError("publish_conflict");

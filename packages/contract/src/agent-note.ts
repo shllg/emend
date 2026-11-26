@@ -2,31 +2,53 @@ import { z } from "zod";
 import { LIMITS } from "./limits.ts";
 import { OTHER_TOPIC } from "./review.ts";
 
-export const AgentNote = z
-  .object({
-    side: z.enum(["old", "new"]),
-    start: z.int().positive(),
-    end: z.int().positive(),
-    summary: z
+export const AGENT_NOTE_QUOTES_FEATURE = "note-quotes";
+
+const rangedNote = z.object({
+  side: z.enum(["old", "new"]),
+  start: z.int().positive(),
+  end: z.int().positive(),
+  summary: z
+    .string()
+    .min(1)
+    .max(160)
+    .refine((text) => text.trim().length > 0, "summary must not be blank")
+    .refine((text) => !/[\r\n\u0085\u2028\u2029]/.test(text), "summary must be one line"),
+  rationale: z
+    .string()
+    .max(1200)
+    .refine((text) => text.trim().length > 0, "rationale must not be blank")
+    .optional(),
+  ref: z
+    .string()
+    .length(1)
+    .regex(/^[A-Z]$/)
+    .optional(),
+});
+
+export const AgentNote = rangedNote
+  .partial({ start: true, end: true })
+  .extend({
+    quote: z
       .string()
       .min(1)
-      .max(160)
-      .refine((text) => text.trim().length > 0, "summary must not be blank")
-      .refine((text) => !/[\r\n\u0085\u2028\u2029]/.test(text), "summary must be one line"),
-    rationale: z
-      .string()
-      .max(1200)
-      .refine((text) => text.trim().length > 0, "rationale must not be blank")
-      .optional(),
-    ref: z
-      .string()
-      .length(1)
-      .regex(/^[A-Z]$/)
+      .max(2000)
+      .refine((text) => text.trim().length > 0, "quote must not be blank")
       .optional(),
   })
-  .refine((note) => note.end >= note.start, { path: ["end"], message: "end must not precede start" });
+  .refine((note) => (note.start === undefined) === (note.end === undefined), "start and end go together")
+  .refine(
+    (note) => note.quote !== undefined || (note.start !== undefined && note.end !== undefined),
+    "a note needs a quote, or start and end",
+  )
+  .refine((note) => note.start === undefined || note.end === undefined || note.end >= note.start, {
+    path: ["end"],
+    message: "end must not precede start",
+  });
 export type AgentNote = z.infer<typeof AgentNote>;
-export const AgentNoteView = AgentNote.safeExtend({ id: z.uuid() });
+export const AgentNoteView = rangedNote
+  .extend({ id: z.uuid() })
+  .refine((note) => note.end >= note.start, { path: ["end"], message: "end must not precede start" });
 export type AgentNoteView = z.infer<typeof AgentNoteView>;
 export const AgentNotes = z.array(AgentNote).max(LIMITS.agentNotesPerFile);
 
