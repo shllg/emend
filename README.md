@@ -19,9 +19,6 @@
 
 </div>
 
-recense was called emend until this release. The `emend` command still works for now; see
-[Coming from emend](docs/usage.md#coming-from-emend).
-
 Open-source, local-first review for work done by coding agents: plans, docs and code. Read the
 agent's writeup next to its diff, comment on any of it, press Send, and the waiting agent gets your
 feedback. recense starts on your machine with one command. Machines can attach to a hub, so that you
@@ -31,12 +28,6 @@ review from any device, your phone included.
   <img src="https://raw.githubusercontent.com/shllg/recense/main/docs/images/review-desktop.png" alt="A recense review on a desktop: the agent's writeup and topics next to the diff, with a reviewer comment and the agent's reply" width="73%"
   >&emsp;<img src="https://raw.githubusercontent.com/shllg/recense/main/docs/images/review-phone.png" alt="The same review on a phone" width="21%">
 </p>
-
-[VISION.md](https://github.com/shllg/recense/blob/main/VISION.md) says what recense is for, and what it
-is not.
-
-recense grew out of [hunk-review-skill](https://github.com/vendis-ai/hunk-review-skill), which stays
-maintained alongside it.
 
 ## Requirements
 
@@ -139,6 +130,14 @@ covers installing from a checkout, the plugin from a checkout and the checks.
 [AGENTS.md](https://github.com/shllg/recense/blob/main/AGENTS.md) holds the working rules.
 Maintainers: [docs/releasing.md](https://github.com/shllg/recense/blob/main/docs/releasing.md) holds
 the release policy and checklist.
+
+## About
+
+[VISION.md](https://github.com/shllg/recense/blob/main/VISION.md) says what recense is for, and what it
+is not.
+
+recense grew out of [hunk-review-skill](https://github.com/vendis-ai/hunk-review-skill), which stays
+maintained alongside it.
 
 ## License
 
