@@ -2401,7 +2401,7 @@ const roundEighteen = [
       ["for p in a b; do bash -c 'GIT_PAGER=cat git log; GIT_PAGER=cat git log'; done", "tamper", r18Locations.worker],
     ],
     disable: [
-      ['state.homeConsumer ||= ["git", "gh", "wt"].includes(command);', 'state.homeConsumer ||= command === "git";'],
+      ['state.homeConsumer ||= ["git", "gh", "wt", "findings"].includes(command);', 'state.homeConsumer ||= command === "git";'],
     ],
   },
   {
@@ -2519,6 +2519,24 @@ test("R18 OP9 bound roots require actual bindings", () => {
     ]),
   );
   assert.equal(mutant(cases[0][0]), undefined);
+});
+
+test("OP9 findings is a HOME consumer like wt", () => {
+  const cases: RoundSixteenCase[] = [
+    ["HOME=/tmp/h bin/findings list", "tamper"],
+    ["env HOME=/tmp/h command /usr/bin/findings list", "tamper"],
+    ["XDG_CONFIG_HOME=/tmp/x bin/findings spawn f-0123456789ab --slug x", "tamper"],
+    ["HOME=/tmp/h node bin/lib/wt/findings-main.ts list", undefined],
+    ["HOME=/tmp/h bin/findings list", "tamper", r18Locations.worker],
+    ["bin/findings list", undefined, r18Locations.worker],
+  ];
+  for (const [command, expected, locations] of cases) assert.equal(classify(command, locations), expected, command);
+  const mutant = classifier(
+    mutate(hookSource, [
+      ['["git", "gh", "wt", "findings"].includes(command)', '["git", "gh", "wt"].includes(command)'],
+    ]),
+  );
+  assert.notEqual(mutant(cases[0][0]), "tamper");
 });
 
 for (const [name, command, from, to] of [
