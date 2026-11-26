@@ -104,6 +104,29 @@ test("every lifecycle skill exists with a matching name and a description", () =
   }
 });
 
+function fixerBuildItem(): string {
+  const skill = readFileSync(join(root, ".claude/skills/e-work/SKILL.md"), "utf8");
+  const build = skill.split("## 2. Build\n")[1] ?? "";
+  const item = /^1\. [\s\S]*?(?=^2\. )/m.exec(build);
+  assert.ok(item, "missing e-work build item 1");
+  return item[0];
+}
+
+test("e-work reads each claim before its first resolve in build item 1", () => {
+  const item = fixerBuildItem();
+  const show = item.indexOf("<main>/bin/wt findings show <id>");
+  const firstResolve = item.indexOf("<main>/bin/wt findings resolve");
+  assert.ok(show >= 0 && show < firstResolve);
+});
+
+test("e-work records a security finding before dismissing the original", () => {
+  const bullet = /^ {3}- [^\n]*security problem.*(?:\n {5}.*)*/m.exec(fixerBuildItem());
+  assert.ok(bullet, "missing security bullet");
+  const add = bullet[0].indexOf("<main>/bin/wt findings add --file");
+  const dismiss = bullet[0].indexOf("--dismissed");
+  assert.ok(add >= 0 && add < dismiss);
+});
+
 test("e-work and e-pr use the same private security dismissal reason", () => {
   for (const name of ["e-work", "e-pr"]) {
     const skill = readFileSync(join(root, ".claude", "skills", name, "SKILL.md"), "utf8");

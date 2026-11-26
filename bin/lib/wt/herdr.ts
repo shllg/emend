@@ -15,7 +15,7 @@ import {
 } from "./issues.ts";
 import { run } from "./proc.ts";
 import { allocatePort, busyPorts, readRegistry, type WorktreeEntry, withRegistry } from "./registry.ts";
-import { gitTry, listGitWorktrees, type Repo, refExists } from "./repo.ts";
+import { listGitWorktrees, type Repo, refExists } from "./repo.ts";
 import {
   BRANCH_PREFIX,
   branchName,
@@ -28,7 +28,7 @@ import {
   requireIssueBranch,
   WtError,
 } from "./validate.ts";
-import { isInside, type SetupResult, setup, worktreeDirName } from "./worktree.ts";
+import { isInside, originHasBranch, type SetupResult, setup, worktreeDirName } from "./worktree.ts";
 
 // ---------------------------------------------------------------------------------------------
 // Agent list
@@ -862,9 +862,7 @@ export async function spawn(repo: Repo, o: SpawnOptions, clock: SpawnClock = spa
     ) {
       throw new WtError(3, "The branch already exists locally or has a worktree.");
     }
-    const remote = gitTry(repo, ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`]);
-    if (remote.code === 0) throw new WtError(3, "The branch already exists on origin.");
-    if (remote.code !== 2) throw new WtError(69, "Could not reach origin to check the branch.");
+    if (originHasBranch(repo, branch)) throw new WtError(3, "The branch already exists on origin.");
     if (agents.some((a) => a.name === agent))
       throw new WtError(
         3,

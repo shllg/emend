@@ -531,7 +531,7 @@ test("resolve and release implement state transitions and clear claims", async (
   const stale = addFinding(repo, input({ rule: "stale" })).id;
   const dismissed = addFinding(repo, input({ rule: "dismissed" })).id;
   claimFindings(repo, [fixed, released], target());
-  const commit = gitIn(fx.main, "rev-parse", "HEAD");
+  const commit = commitFile(fx.main, "fix.md", "local fix\n");
   assert.equal((await cli("resolve", fixed, "--fixed", commit)).code, 0);
   assert.equal((await cli("release", released)).code, 0);
   assert.equal((await cli("resolve", stale, "--stale")).code, 0);
@@ -594,6 +594,41 @@ test("a linked worktree can release and resolve only its own claims", async () =
   assert.equal((await cli("release", otherBranch)).code, 0);
   assert.equal((await cli("resolve", otherPath, "--stale")).code, 0);
   assert.equal((await cli("resolve", open, "--stale")).code, 0);
+});
+
+test("a linked worktree can resolve its claim as fixed only with a commit on origin/main", async () => {
+  const branch = "recense-linked";
+  const worktree = join(env.root, "linked");
+  gitIn(fx.main, "worktree", "add", "--quiet", "-b", branch, worktree);
+  const id = addFinding(repo, input()).id;
+  claimFindings(repo, [id], { branch, worktree });
+  const claimed = showFinding(repo, id);
+  const commit = commitFile(worktree, "fix.md", "local fix\n");
+  const resolveFixed = () =>
+    runWt(join(fx.main, "bin/wt"), ["findings", "resolve", id, "--fixed", commit], { cwd: worktree });
+
+  const local = await resolveFixed();
+  assert.equal(local.code, 1, local.stderr);
+  assert.equal(
+    local.stderr.trim(),
+    "A worktree may resolve a finding as fixed only with a commit on origin/main. Run bin/wt fetch first. Nothing was changed.",
+  );
+  assert.deepEqual(showFinding(repo, id), claimed);
+
+  gitIn(fx.main, "update-ref", "-d", "refs/remotes/origin/main");
+  const missing = await resolveFixed();
+  assert.equal(missing.code, 2, missing.stderr);
+  assert.deepEqual(showFinding(repo, id), claimed);
+
+  commitFile(worktree, "later.md", "later change\n");
+  gitIn(worktree, "push", "--quiet", "origin", "HEAD:refs/heads/main");
+  gitIn(fx.main, "fetch", "--quiet", "origin");
+  const merged = await resolveFixed();
+  assert.equal(merged.code, 0, merged.stderr);
+  const fixed = showFinding(repo, id);
+  assert.equal(fixed.state, "fixed");
+  assert.equal(fixed.resolution?.commit, commit);
+  assert.equal(fixed.claim, undefined);
 });
 
 test("release validates the whole batch before writing", () => {

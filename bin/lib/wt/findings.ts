@@ -600,6 +600,23 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution,
       const result = run("git", [...GIT_BASE, "cat-file", "-t", detail.commit], gitOptions(repo));
       gitResult(result.code, 2, "The fixed commit does not exist.");
       if (result.stdout.trim() !== "commit") invalid("fixed commit");
+      if (owner) {
+        const ancestry = run(
+          "git",
+          [...GIT_BASE, "merge-base", "--is-ancestor", detail.commit, "refs/remotes/origin/main"],
+          gitOptions(repo),
+        );
+        if (ancestry.code === 1)
+          throw new WtError(
+            1,
+            "A worktree may resolve a finding as fixed only with a commit on origin/main. Run bin/wt fetch first. Nothing was changed.",
+          );
+        if (ancestry.code !== 0)
+          throw new WtError(
+            2,
+            "Could not check the fixed commit against origin/main. Run bin/wt fetch first. Nothing was changed.",
+          );
+      }
     }
     delete finding.claim;
     writeFindings(repo, [{ ...finding, state, resolution: detail }]);

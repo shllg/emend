@@ -291,6 +291,13 @@ function fromLinkedWorktree(repo: Repo): boolean {
   return repo.callerTop !== null && repo.callerTop !== repo.mainRoot;
 }
 
+export function originHasBranch(repo: Repo, branch: string): boolean {
+  const remote = gitTry(repo, ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`]);
+  if (remote.code === 0) return true;
+  if (remote.code === 2) return false;
+  throw new WtError(69, "Could not reach origin to check the branch.");
+}
+
 /** Creates a worktree for `branch` with a port and a private RECENSE_HOME. Exit 3 when the branch or directory is taken. */
 export function setup(repo: Repo, o: SetupOptions): SetupResult {
   if (o.issue !== undefined && o.findings !== undefined)
@@ -315,7 +322,8 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
   let originExists = false;
   if (!localExists) {
     fetchOrigin(repo);
-    originExists = issue === undefined && refExists(repo, `refs/remotes/origin/${branch}`);
+    if (issue === undefined)
+      originExists = ids ? originHasBranch(repo, branch) : refExists(repo, `refs/remotes/origin/${branch}`);
   }
   if (ids && (localExists || originExists)) throw new WtError(3, "The branch already exists. Nothing was created.");
   if ((localExists || originExists) && from !== undefined) {

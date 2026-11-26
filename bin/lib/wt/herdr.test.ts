@@ -308,6 +308,22 @@ test("spawn --findings refuses a taken finding or branch", () =>
     }),
   ));
 
+test("fixer setup refuses a live origin branch and accepts a stale tracking ref", () =>
+  scenario({}, ({ fx, repo }) => {
+    const finding = showFinding(repo, recordFinding(repo));
+    const start = () => setup(repo, { branch: FIXER_BRANCH, findings: [finding] });
+    const remoteHead = `refs/heads/${FIXER_BRANCH}`;
+    gitIn(fx.origin, "update-ref", remoteHead, "refs/heads/main");
+    assert.throws(start, { code: 3, message: "The branch already exists. Nothing was created." });
+    assert.deepEqual(readRegistry(repo).worktrees, {});
+
+    gitIn(fx.origin, "update-ref", "-d", remoteHead);
+    gitIn(fx.main, "update-ref", `refs/remotes/origin/${FIXER_BRANCH}`, "HEAD");
+    const wt = start();
+    assert.equal(gitIn(wt.path, "symbolic-ref", "--short", "HEAD"), FIXER_BRANCH);
+    assert.deepEqual(readRegistry(repo).worktrees[FIXER_BRANCH]?.findings, [finding.id]);
+  }));
+
 test("spawn --findings reports a refused claim without a release command", () =>
   scenario({}, ({ env, fx, repo }) =>
     inHerdr(async () => {

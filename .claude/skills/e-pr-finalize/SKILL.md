@@ -106,6 +106,7 @@ the PR head. Run `pnpm bundle:diff --json <top>/.wt/bundle-diff.json` first when
 
 After a fix commit or rebase in a fixer run, re-check the findings as in `/e-work` step 4.
 Update the Summary from the registry as in `/e-pr` step 3.
+If a PR body named a finding before its dismissal, follow `/e-work`'s private rule for the PR's edit history.
 
 ## 4. Fetch the whole feedback surface
 

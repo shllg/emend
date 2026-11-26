@@ -68,15 +68,27 @@ stop.
 
 Follow `AGENTS.md`, "Who does what", and name that route in your plan; do not restate it here.
 
-1. For a fixer run, first re-check each finding on the worktree's base from local main.
+1. On every fixer pass, run `<main>/bin/wt findings show <id>` from this worktree for each id in `.wt/bundle.json`.
+   If a read fails, run `<main>/bin/wt notify blocked` and stop.
+   Skip any finding this branch no longer holds. Keep its earlier outcome.
    Only `bin/wt spawn` claims findings. After spawn, this branch's set of claims can only shrink.
-   Settle findings as you work. Run the following commands from this worktree.
+   Re-check only findings still claimed by this branch on the worktree's base from local main.
+   Settle them from this worktree as follows.
 
    - If a finding turns out to be a security problem, follow the `private` rule in `.claude/rules/review-rounds.md`.
+     Use the Write tool to create a JSON file under `<top>/.wt/`, where `<top>` is this worktree's root.
+     Copy `title`, `detail`, `path`, `line`, `severity`, `size` and `source` from `findings show`.
+     Include `rule` when present. Set `kind` to `security`.
+     Run `<main>/bin/wt findings add --file <file>` from this worktree.
+     Exit 0 or 3 means the security finding is recorded.
+     On any other exit, name the failure in the private report and continue with the dismissal.
      Run `<main>/bin/wt findings resolve <id> --dismissed "needs a private security report"`.
      Run `<main>/bin/wt notify question`.
      Report it only in the final report to the owner and the local recense hand-off writeup.
      Keep its id, title and reason out of all PR text, commits, Follow-ups and issues.
+     If a PR body already named the finding, give the owner the PR number in the private report.
+     Tell the owner that earlier body revisions in the PR's edit history name the finding.
+     Tell them that only they can delete those revisions.
    - Resolve each finding that no longer holds with `<main>/bin/wt findings resolve <id> --stale`.
    - Use `not fixed` only when the fix needs a large change or goes outside the findings bundle's area.
      Run `<main>/bin/wt findings release <id>` right away. List its id and reason under "Follow-ups".
