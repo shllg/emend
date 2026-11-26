@@ -377,6 +377,18 @@ export function SendBar({
   );
   return (
     <section aria-label="Send and approve" className="relative shrink-0 border-t border-line-1 bg-surface">
+      {notice && (
+        <SentNotice
+          key={notice.id}
+          reviewId={reviewId}
+          entry={notice}
+          agent={
+            agent ?? { agentWaiting: false, pendingSend: true, pickedUpAt: null, releasedAt: null, newestRevision: 0 }
+          }
+          phone={phone}
+          returnFocus={noticeReturnFocus}
+        />
+      )}
       {readOnly && <p className="px-4 pt-2 text-13 text-fg-3">This is a sample. Nothing is sent.</p>}
       {phone ? (
         <div className="flex min-h-13 flex-nowrap items-center gap-[0.625rem] py-1.5 pr-[0.625rem] pl-[0.875rem]">
@@ -581,18 +593,6 @@ export function SendBar({
       >
         {feedback && <div className="mt-2">{feedback}</div>}
       </Dialog>
-      {notice && (
-        <SentNotice
-          key={notice.id}
-          reviewId={reviewId}
-          entry={notice}
-          agent={
-            agent ?? { agentWaiting: false, pendingSend: true, pickedUpAt: null, releasedAt: null, newestRevision: 0 }
-          }
-          phone={phone}
-          returnFocus={noticeReturnFocus}
-        />
-      )}
       {(!phone || !sheetOpen) &&
         (unavailable ||
           (phone && (approveBlocked || olderReason || unsavedReason || retiredReason)) ||

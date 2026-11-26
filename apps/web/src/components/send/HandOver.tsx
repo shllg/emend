@@ -253,7 +253,7 @@ export function SentNotice({
               : "No agent has picked this up yet. recense keeps it until one does."
             : "Waiting for the agent to pick this up…"}
       </p>
-      {!pickedUp && fallback && <ResumeCommand reviewId={reviewId} />}
+      {!pickedUp && fallback && <ResumeCommand reviewId={reviewId} buttonSize={phone ? "lg" : "sm"} />}
     </section>
   );
 }
