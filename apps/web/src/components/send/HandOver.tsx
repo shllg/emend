@@ -111,6 +111,9 @@ export function HandOverNote({
   );
 }
 
+/** The notice's buttons keep a 40x40 px hit area on a touch screen at every width. */
+const COARSE_TARGET = "[@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:min-w-10";
+
 /**
  * The notice after a Send. "Picked up" means a review snapshot fetched after the Send shows a
  * `pickedUpAt` that is set and differs from the one at Send time, or a newer revision with no Send
@@ -306,7 +309,7 @@ export function SentNotice({
     >
       <div className="flex shrink-0 items-center justify-between gap-3">
         <h2 className="m-0 text-fg-1 [font:var(--type-h3)]">Sent</h2>
-        <Button ref={closeButton} variant="ghost" size={phone ? "lg" : "sm"} onClick={close}>
+        <Button ref={closeButton} variant="ghost" size={phone ? "lg" : "sm"} className={COARSE_TARGET} onClick={close}>
           Close
         </Button>
       </div>
@@ -324,7 +327,7 @@ export function SentNotice({
         </p>
         {showsCommand && (
           <div ref={commandRef}>
-            <ResumeCommand reviewId={reviewId} buttonSize={phone ? "lg" : "sm"} />
+            <ResumeCommand reviewId={reviewId} buttonSize={phone ? "lg" : "sm"} buttonClassName={COARSE_TARGET} />
           </div>
         )}
       </div>

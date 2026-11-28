@@ -8,10 +8,12 @@ export function ResumeCommand({
   reviewId,
   compact = false,
   buttonSize = "sm",
+  buttonClassName,
 }: {
   reviewId: string;
   compact?: boolean;
   buttonSize?: "sm" | "lg";
+  buttonClassName?: string;
 }) {
   const command = `/recense:recense-feedback ${reviewId}`;
   const { text, copy, result, status } = useCopyText(command, "command");
@@ -24,7 +26,7 @@ export function ResumeCommand({
         >
           {command}
         </code>
-        <Button size={buttonSize} icon={Copy} onClick={copy}>
+        <Button size={buttonSize} icon={Copy} className={buttonClassName} onClick={copy}>
           {result === "copied" ? "Copied" : "Copy"}
         </Button>
         <span role="status" className={cn("text-fg-3 [font:var(--type-meta)]", result !== "failed" && "sr-only")}>
