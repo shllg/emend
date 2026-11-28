@@ -1002,6 +1002,75 @@ test("leaving during the first review fetch cancels it and lets the next visit a
   expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
 });
 
+test("a Send fetch failure during reconnect lets the next visit retry a cancelled first ask", async () => {
+  const queryKey = ["review", reviewId];
+  const fetchReview = vi.fn<QueryFunction<null>>().mockResolvedValue(null);
+  const observer = mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await settle();
+
+  const background = Promise.withResolvers<null>();
+  const reconnect = Promise.withResolvers<boolean>();
+  vi.mocked(reconnectReviewEvents).mockReturnValueOnce(reconnect.promise);
+  fetchReview
+    .mockClear()
+    .mockReturnValueOnce(background.promise)
+    .mockImplementationOnce(
+      ({ signal }) => new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))),
+    );
+  await send();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  expect(fetchReview).toHaveBeenCalledOnce();
+  const error = new TypeError("Failed to fetch");
+  await act(async () => background.reject(error));
+  expect(client.getQueryState(queryKey)?.error).toBe(error);
+
+  await act(async () => reconnect.resolve(false));
+  expect(fetchReview).toHaveBeenCalledTimes(2);
+  first.unmount();
+  observer.unmount();
+  await settle();
+  expect(fetchReview.mock.calls[1]?.[0].signal.aborted).toBe(true);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: false, lost: false });
+
+  fetchReview.mockRejectedValueOnce(error);
+  mount({ agent: waiting });
+  await settle();
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+});
+
+test("a newer cached TypeError alone keeps the warning when the retry resolves", async () => {
+  const queryKey = ["review", reviewId];
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "fail";
+  await settle(HANDOFF_WAIT_MS);
+  expect(getHandoffNotice(reviewId)?.lost).toBe(true);
+  first.unmount();
+
+  // Let the retry resolve normally while a separate review fetch updates only the cached error.
+  const retry = Promise.withResolvers<void>();
+  invalidate.mockClear().mockReturnValue(retry.promise);
+  mount({ agent: waiting });
+  await settle();
+  expect(reviewRefetches()).toBe(1);
+  const before = client.getQueryState(queryKey);
+  await act(async () => {
+    await client.refetchQueries({ queryKey });
+    retry.resolve();
+  });
+  expect(client.getQueryState(queryKey)).toMatchObject({
+    dataUpdateCount: before?.dataUpdateCount,
+    errorUpdateCount: (before?.errorUpdateCount ?? 0) + 1,
+    error: expect.any(TypeError),
+  });
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+});
+
 test("a fallback refetch that times out while the reader is away records the failure for the next visit", async () => {
   mountProbe();
   const first = mount({ agent: waiting });

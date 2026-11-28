@@ -32,6 +32,10 @@ export const HANDOFF_REFETCH_MS = 3_000;
 /** How long the notice stays open after a pick-up. */
 export const HANDOFF_CLOSE_MS = 3_000;
 
+function isNetworkFailure(error: unknown): boolean {
+  return error === TOO_SLOW || error instanceof TypeError;
+}
+
 /** Whether the hand-over note shows: an approved review has nothing left to hand over; a retired one only says when the agent stopped waiting. */
 export function showsHandOver(review: { approved: boolean; retired: boolean; releasedAt: string | null }): boolean {
   return !review.approved && (!review.retired || !!review.releasedAt);
@@ -169,7 +173,6 @@ export function SentNotice({
       const current = getHandoffNotice(reviewId);
       if (!live || current?.id !== id || current.pickedUp || (current.asked && !current.lost)) return;
       const queryKey = ["review", reviewId];
-      const before = client.getQueryState(queryKey);
       markHandoffNotice(reviewId, id, { asked: true });
       // The first ask can finish across visits. A retry belongs to this visit because the next can retry too.
       const stillPending = () => {
@@ -192,6 +195,7 @@ export function SentNotice({
       void client.invalidateQueries({ queryKey: ["inbox"] }, options).catch(() => undefined);
       let slow: number | undefined;
       let connectionLost = false;
+      const before = client.getQueryState(queryKey);
       try {
         // Only the review decides "cannot reach": a slow inbox says nothing about the server.
         await Promise.race([
@@ -202,21 +206,23 @@ export function SentNotice({
         ]);
       } catch (error) {
         // A network failure or a fetch still unfinished counts; an HTTP error means the server answered.
-        connectionLost = error === TOO_SLOW || error instanceof TypeError;
+        connectionLost = isNetworkFailure(error);
       }
       window.clearTimeout(slow);
       if (!stillPending()) return;
       const after = client.getQueryState(queryKey);
+      // Two fetches can finish in the same millisecond. Cancellation reverts the counts too.
+      const dataAdvanced =
+        after &&
+        (after.dataUpdatedAt > (before?.dataUpdatedAt ?? 0) || after.dataUpdateCount > (before?.dataUpdateCount ?? 0));
+      const serverErrorAdvanced =
+        after &&
+        !isNetworkFailure(after.error) &&
+        (after.errorUpdatedAt > (before?.errorUpdatedAt ?? 0) ||
+          after.errorUpdateCount > (before?.errorUpdateCount ?? 0));
       if (connectionLost || after?.fetchStatus === "paused") {
         markHandoffNotice(reviewId, id, { lost: true });
-      } else if (
-        after &&
-        (after.dataUpdatedAt > (before?.dataUpdatedAt ?? 0) ||
-          after.errorUpdatedAt > (before?.errorUpdatedAt ?? 0) ||
-          // Two fetches can finish in the same millisecond. Cancellation reverts the counts too.
-          after.dataUpdateCount > (before?.dataUpdateCount ?? 0) ||
-          after.errorUpdateCount > (before?.errorUpdateCount ?? 0))
-      ) {
+      } else if (dataAdvanced || serverErrorAdvanced) {
         markHandoffNotice(reviewId, id, { lost: false });
       } else if (!current.asked) {
         // A cancelled or removed query gave no answer. The next visit can make the first ask again.
