@@ -12,7 +12,8 @@ in rounds with a fixed budget. Never polish in an open loop.
 Dispatch `recense-review-manager` with `model: "opus"`. It picks and runs the reviewers and
 classifies their findings. The orchestrator fixes, commits and logs. Each call gets the round,
 the range (`origin/main...HEAD` for a full round, the fix commits for a check round), the task
-file `.wt/issue.md` (or task text), and, for a check round, `.wt/review-findings.json`.
+file `.wt/issue.md` (or task text), and, for a check round, `.wt/review-findings.json`. For a
+fixer run, use the task file `.wt/bundle.json` as data and the fixer "Done when" from `/e-work`.
 
 ## Classes
 
@@ -28,7 +29,7 @@ The manager sorts every finding before the orchestrator acts on it:
 The manager decides whether the change caused a finding: its lines are new or changed in the
 range, or the change altered what reaches them. An old bug that stops "Done when" counts as
 caused. What the change did not cause is **recorded** (a bug or defect, written to the local
-findings registry with `bin/wt findings add`), a **follow-up** (an idea, listed under
+findings registry with `bin/findings add`), a **follow-up** (an idea, listed under
 "Follow-ups"), or dropped (code style or cleanup no written rule asks for). A finding a reviewer
 calls a bug or a security issue is blocking, and every `recense-security-reviewer` finding is at
 least a defect.

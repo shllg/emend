@@ -206,6 +206,7 @@ time, and no API reports its closing set beforehand.
   stays trailers only. Then every distinct `Sync:` trailer from the branch's commits, one per line, so
   `check:sync` passes on `main`. Read them
   with `git log origin/main..origin/<headRefName> --format=%B` after `<main>/bin/wt fetch`.
+- Omit the `Closes` line for a findings bundle PR.
 - No attribution, no co-author trailer, no robot marker.
 
 Write the subject to `<top>/.wt/merge-subject.txt` and the body to `<top>/.wt/merge-body.md` with the
@@ -225,6 +226,7 @@ Write tool, in the checkout you run in.
 When `.wt/worktree.json` names an issue, run `<main>/bin/wt issue check` in the PR's worktree first.
 A non-zero exit means the issue changed after the worker started: do not merge, run
 `<main>/bin/wt notify blocked`, and tell the owner the issue number. The owner decides.
+A findings bundle skips this issue check.
 
 Run the applicable command in the PR's worktree. For the approved PR head, run
 
@@ -261,8 +263,9 @@ text scan alone.
 
 - `QUEUED`: run `<main>/bin/wt notify blocked`, report the warning, and stop without cleanup.
   The owner must check the PR's closed issues after the eventual merge.
-- `MERGED` with exit 0: continue.
-- A non-zero exit with a `MERGED <commit>` line means the merge happened. Do not retry the merge.
+  For a fixer branch, also follow step 8's `QUEUED` paragraph.
+- Continue after a `MERGED <commit>` line with exit 0 and no warning.
+- A `MERGED <commit>` line with a warning or a non-zero exit means the merge happened. Do not retry the merge.
   Run `<main>/bin/wt notify blocked` and report each warning to the owner as written, including
   head, body-edit, merge-call and "already merged" warnings. Only the closing-set warning names
   issues: include every issue it names (`owner/name#N`). If the closing check could not run, report that warning.
@@ -295,7 +298,21 @@ cleanup prohibition. A `QUEUED` result stops as above.
 
 ## 8. After the merge
 
-A `QUEUED` result stops with `<main>/bin/wt notify blocked`; do not sync or clean up a queued PR.
+If step 7 withholds cleanup, keep the blocked status and change no finding.
+For a fixer branch with a merge warning or `QUEUED`, run `<main>/bin/wt list --json`.
+Find the row whose `branch` equals the PR's head branch.
+If the row or its `findings` list is missing, report that and give no resolve command.
+For each id in that row's `findings` list, run `<main>/bin/findings show <id>`.
+Report a claim only when `claim.branch` equals the head branch and `claim.worktree` equals the row's `path`.
+Report any read error.
+Give the owner these commands only for matching claims after they check the squash commit and what it fixed.
+The owner runs `<main>/bin/wt fetch` once in the main checkout.
+There the owner runs `<main>/bin/findings resolve <id> --fixed <merge commit>` for each confirmed id still claimed.
+Give the actual squash commit when known.
+
+On `QUEUED`, run `<main>/bin/wt notify blocked`.
+Tell the owner a fixer's findings stay claimed until the queued merge lands and they record it as above.
+Stop before sync or cleanup.
 For an owner-run command, keep the worktree unless its visible output shows exit status 0,
 `MERGED <commit>` and no warning, as step 7 requires.
 
@@ -303,16 +320,18 @@ For an owner-run command, keep the worktree unless its visible output shows exit
    `refused: <reason>`. A refusal is expected when the main checkout has overlapping work: report the
    reason. After a non-zero merge exit with a `MERGED` line, keep the blocked status and skip cleanup
    regardless of the sync result; otherwise continue only to cleanup permitted by step 7.
-2. Report: the PR URL, the issue (the merge closes it), and either `main` at the
+2. For a fixer branch, report the findings named in the merge's `FIXED <id>` lines.
+   The merge recorded those findings as fixed.
+3. Report: the PR URL, the issue when there is one (the merge closes it), and either `main` at the
    new commit or why it did not move. Include any step-4 difference from `origin/main` in the
    current or main worktree and its disclosure in the PR body's Evidence; confirm that the
    committed gate ran. If there was a post-merge closing warning, include it and all named issue
    numbers, ask the owner to check and reopen foreign issues, and state that cleanup was skipped.
-3. Only when step 7 permits cleanup and this session runs in the PR's own worktree (the
+4. Only when step 7 permits cleanup and this session runs in the PR's own worktree (the
    top level is under `<main>/.claude/worktrees/` and the branch is the PR's head branch), run
    `<main>/bin/wt cleanup --close-workspace <headRefName>` as the very last call. It checks that the
    work is safe to remove, removes the worktree and closes the workspace, which ends this session.
-4. When the cleanup safety check fails, leave everything as it is, run `<main>/bin/wt notify blocked`, and
+5. When the cleanup safety check fails, leave everything as it is, run `<main>/bin/wt notify blocked`, and
    name the check that failed.
 
 Anywhere else (the main checkout), offer no cleanup. Never run `git push`. Never delete a branch by

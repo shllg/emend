@@ -44,7 +44,7 @@
 // into the same destination deny even when they would only copy ordinary files.
 // This includes pnpm --dir /tmp/out test, node /tmp/out/x.js, cd/pushd into a temporary copy,
 // and echo > /tmp/out/marker after a copy. Read-only cat/diff/grep/wc/head/git diff stay free.
-// HOME/XDG bindings with git/gh/wt, duplicated or non-prefix safe pager/editor bindings,
+// HOME/XDG bindings with git/gh/wt/findings, duplicated or non-prefix safe pager/editor bindings,
 // opaque path segments cancelled by .., HOME parameter operators treated as HOME, and global
 // config names under unknown cwd or unknown HOME/XDG bindings are intentionally conservative.
 // cd /tmp && echo x > ../.gitconfig is conservative even when cd would succeed.
@@ -1515,7 +1515,7 @@ function recordGitBindings(words: string[], state: GitBindings, statement = word
   const resolved = resolveCommand(words.map((word) => word.replace(/^([A-Za-z_]\w*)\+=/, "$1=")));
   const command = path.basename(words[resolved.index] ?? "");
   state.runsGit ||= command === "git";
-  state.homeConsumer ||= ["git", "gh", "wt"].includes(command);
+  state.homeConsumer ||= ["git", "gh", "wt", "findings"].includes(command);
   const add = (word: string, position: number, prefix: boolean, unset = false) => {
     const match = word.match(/^([A-Za-z_]\w*)(?:(=|\+=)([\s\S]*))?$/);
     if (match && names.test(match[1])) {

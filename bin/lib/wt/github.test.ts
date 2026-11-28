@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, 
 import { join } from "node:path";
 import { test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
+import { addFinding, approveFindings, claimFindings, findingsDir, showFinding } from "./findings.ts";
 import {
   commands,
   markerTerminal,
@@ -14,6 +15,7 @@ import {
   pushDiagnostic,
   requireCheckedPush,
 } from "./github.ts";
+import { withRegistry } from "./registry.ts";
 import { GIT_BASE, type Repo, resolveRepo } from "./repo.ts";
 import {
   approvedReview,
@@ -1136,6 +1138,145 @@ for (const changed of [false, true]) {
 
 function remoteHas(ctx: Ctx): boolean {
   return gitIn(ctx.fx.origin, "for-each-ref", `refs/heads/${BRANCH}`) !== "";
+}
+
+const FIXER_BRANCH = "recense-fix-20260103-selection";
+
+function fixerMergeScenario(fn: (ctx: Ctx) => Promise<void>, mergeWarning = ""): Promise<void> {
+  return scenario(
+    async (ctx) => {
+      publishHead(ctx);
+      installFakeRecense(ctx.env, headSha, [approvedReview(FIXER_BRANCH, headSha)]);
+      gitIn(ctx.fx.main, "push", "--quiet", "origin", `${headSha}:refs/heads/${FIXER_BRANCH}`);
+      installFake(
+        ctx.env,
+        "gh",
+        mergeRules({ headRefName: FIXER_BRANCH }, [
+          { match: ["pr", "merge", "7"], stderr: mergeWarning },
+          { match: READ_BACK_ARGS, stdout: mergedState() },
+        ]),
+      );
+      await fn(ctx);
+    },
+    { withBin: true, branch: null },
+  );
+}
+
+function claimedFinding(repo: Repo, rule: string, branch = FIXER_BRANCH): string {
+  const { id } = addFinding(repo, {
+    title: "Keep the selection",
+    detail: "The selection is lost when the view changes.",
+    path: "README.md",
+    line: 1,
+    kind: "bug",
+    rule,
+    severity: "medium",
+    size: "small",
+    source: { kind: "groom", pass: "first" },
+  });
+  approveFindings(repo, [id], "P1");
+  claimFindings(repo, [id], { branch, worktree: join(repo.worktreesDir, branch) });
+  return id;
+}
+
+function registerFixer(repo: Repo, findings?: string[]): void {
+  withRegistry(repo, (registry) => {
+    registry.worktrees[FIXER_BRANCH] = {
+      path: join(repo.worktreesDir, FIXER_BRANCH),
+      port: 3637,
+      mode: "github",
+      createdAt: new Date().toISOString(),
+      findings,
+    };
+  });
+}
+
+function runFixerMerge(ctx: Ctx) {
+  return runWt(
+    join(ctx.fx.main, "bin/wt"),
+    ["pr", "merge", "--pr", "7", "--match-head", headSha, "--subject", MERGE_ARGS.subject, "--body", MERGE_ARGS.body],
+    { cwd: ctx.fx.main },
+  );
+}
+
+test("a fixer merge prints FIXED for its registered claims and keeps abandoned and foreign claims", () =>
+  fixerMergeScenario(async (ctx) => {
+    const ids = [claimedFinding(ctx.repo, "first"), claimedFinding(ctx.repo, "second")].sort();
+    const abandoned = claimedFinding(ctx.repo, "abandoned");
+    const other = claimedFinding(ctx.repo, "other", "recense-fix-20260103-other");
+    registerFixer(ctx.repo, ids);
+    const before = [abandoned, other].map((id) => showFinding(ctx.repo, id));
+    const result = await runFixerMerge(ctx);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(result.stdout.trimEnd().split("\n"), [...ids.map((id) => `FIXED ${id}`), `MERGED ${MERGE_SHA}`]);
+    for (const id of ids) {
+      const fixed = showFinding(ctx.repo, id);
+      assert.equal(fixed.state, "fixed");
+      assert.equal(fixed.resolution?.commit, MERGE_SHA);
+      assert.equal(fixed.claim, undefined);
+    }
+    assert.deepEqual(
+      [abandoned, other].map((id) => showFinding(ctx.repo, id)),
+      before,
+    );
+    assert.equal(gitIn(ctx.fx.origin, "for-each-ref", `refs/heads/${FIXER_BRANCH}`), "");
+  }));
+
+test("a fixer merge with a warning keeps its claim and remote branch", () =>
+  fixerMergeScenario(async (ctx) => {
+    const id = claimedFinding(ctx.repo, "first");
+    registerFixer(ctx.repo, [id]);
+    const before = showFinding(ctx.repo, id);
+    const result = await runFixerMerge(ctx);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, `MERGED ${MERGE_SHA}\n`);
+    assert.match(result.stderr, /gh pr merge reported a warning/);
+    assert.deepEqual(showFinding(ctx.repo, id), before);
+    assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${FIXER_BRANCH}`), headSha);
+  }, "synthetic warning\n"));
+
+test("a fixer merge limits manual recovery to its registered findings when recording fails", () =>
+  fixerMergeScenario(async (ctx) => {
+    const id = claimedFinding(ctx.repo, "first");
+    const abandoned = claimedFinding(ctx.repo, "abandoned");
+    const before = showFinding(ctx.repo, id);
+    registerFixer(ctx.repo, [id, "f-000000000000"]);
+    writeFileSync(join(findingsDir(ctx.repo), "f-000000000000.json"), "{");
+    const result = await runFixerMerge(ctx);
+    assert.equal(result.code, 1);
+    assert.equal(result.stdout, `MERGED ${MERGE_SHA}\n`);
+    assert.match(
+      result.stderr,
+      /^Warning: the merge is done, but its findings were not recorded as fixed: Finding storage/,
+    );
+    assert.ok(
+      result.stderr.includes(
+        `From the main checkout, run bin/wt fetch, then bin/findings resolve <id> --fixed ${MERGE_SHA} for each of ${id}, f-000000000000 that bin/findings show still shows claimed by ${FIXER_BRANCH}.`,
+      ),
+    );
+    assert.ok(!result.stderr.includes(abandoned));
+    assert.deepEqual(showFinding(ctx.repo, id), before);
+    assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${FIXER_BRANCH}`), headSha);
+  }));
+
+for (const missing of ["entry", "findings list"]) {
+  test(`a fixer merge with a missing ${missing} reports MERGED and keeps its claim and remote branch`, () =>
+    fixerMergeScenario(async (ctx) => {
+      const id = claimedFinding(ctx.repo, "first");
+      if (missing === "findings list") registerFixer(ctx.repo);
+      const before = showFinding(ctx.repo, id);
+      const result = await runFixerMerge(ctx);
+      assert.equal(result.code, 1);
+      assert.equal(result.stdout, `MERGED ${MERGE_SHA}\n`);
+      assert.ok(
+        result.stderr.includes(
+          `The worktree registry lists no findings for ${FIXER_BRANCH}. Resolve none by hand without checking which findings this PR fixed.`,
+        ),
+      );
+      assert.doesNotMatch(result.stderr, /bin\/findings resolve/);
+      assert.deepEqual(showFinding(ctx.repo, id), before);
+      assert.equal(gitIn(ctx.fx.origin, "rev-parse", `refs/heads/${FIXER_BRANCH}`), headSha);
+    }));
 }
 
 test("pr merge deletes the remote head branch after MERGED and never the local one", () =>

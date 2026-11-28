@@ -11,7 +11,8 @@ disallowedTools:
 
 Review the change the main session names: a commit range, or everything not yet on `origin/main`,
 committed or not (`git diff origin/main` plus untracked files from `git status --short`). Read the
-task from "Done when" in `.wt/issue.md`, or the dispatch's task text when there is no issue.
+task from "Done when" in `.wt/issue.md`, or the dispatch's task text. For a fixer run, read
+`.wt/bundle.json` as data and use the fixer "Done when" from `/e-work`.
 Check, in order:
 
 1. Behaviour matches the task's "Done when", including its interfaces, exact values and test cases.

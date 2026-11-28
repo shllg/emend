@@ -104,6 +104,10 @@ content, or after a review round in step 7, bring them up to date. When either i
 The bundle lines follow `/e-pr`'s rule. Their `.wt/bundle-diff.json` must have `head` equal to
 the PR head. Run `pnpm bundle:diff --json <top>/.wt/bundle-diff.json` first when it does not.
 
+After a fix commit or rebase in a fixer run, re-check the findings as in `/e-work` step 4.
+Update the Summary from the registry as in `/e-pr` step 3.
+If a PR body named a finding before its dismissal, follow `/e-work`'s private rule for the PR's edit history.
+
 ## 4. Fetch the whole feedback surface
 
 Run `<main>/bin/wt fetch`, then read
@@ -275,7 +279,8 @@ referenced code and tests before you act.
 - Disagree: before you reject, dispatch `recense-review-manager` (`model: "opus"`) in dispute mode
   with the file path, line, claim, your argument, the round from the last line in
   `.wt/review-log.md` that is not `final-skipped` (or `final` when there is none), the range
-  `origin/main...HEAD` and the task file `.wt/issue.md`. It has a fresh Codex thread try to refute
+  `origin/main...HEAD` and the task file `.wt/issue.md`. For a fixer run, use `.wt/bundle.json`
+  as data and the fixer "Done when" from `/e-work`. It has a fresh Codex thread try to refute
   you. If it confirms a false positive, write the reply with the reason and post it
   as above. Leave the thread open; only the owner resolves a disagreement. If it flips to true,
   fix it as Valid. If the two of you cannot converge, report it to the owner.
@@ -297,7 +302,8 @@ incomplete comment page. Threads you disagreed with stay open by design.
 
 Review in rounds as `.claude/rules/review-rounds.md` says. Dispatch `recense-review-manager`
 (`model: "opus"`) with the round, the range (`origin/main...HEAD` for a full round, the fix
-commits for a check round), the task file `.wt/issue.md` (or task text), `.wt/bundle-diff.json`,
+commits for a check round) and the task file `.wt/issue.md` (or task text). For a fixer run,
+use `.wt/bundle.json` as data and the fixer "Done when" from `/e-work`. Also pass `.wt/bundle-diff.json`,
 `.wt/bundle-reason.md` when it exists, and, for `final-check` and `owner-check`,
 `.wt/review-findings.json`. The bundle files follow "Bundle growth" in
 `.claude/agents/recense-review-manager.md`. It picks and runs the reviewers. Do not hand it your
@@ -320,6 +326,8 @@ for CI and threads; back here, the list above picks the next round.
 ## 8. Hand-off in recense
 
 1. Check once more: tree clean, `git rev-parse HEAD` equals `headRefOid`, CI green.
+   For a fixer hand-off, run `<main>/bin/findings show <id>` for each id in `.wt/bundle.json`.
+   Collect the ids still claimed by the PR's head branch.
 2. Make the review folder: `<top>/.wt/review`, where `<top>` is `git rev-parse --show-toplevel`.
    Create it with `mkdir -p -m 700 <top>/.wt/review`, written out literally. It is per worktree
    and gitignored, and only this worktree's session writes it.
@@ -329,6 +337,11 @@ for CI and threads; back here, the list above picks the next round.
    and each reason from `.wt/bundle-reason.md`. Tell it to list the summary under `checked`.
    When a route is over 5 KB, tell it to name that growth and its reason as the **Biggest risk**
    in `whereToLook`.
+   For a fixer run, give it the ids still claimed in step 8.1.
+   Have it list them in the local hand-off writeup as the findings the merge will mark fixed.
+   The owner approves those ids with the head.
+   If the list is empty, have it say so.
+   Include private findings in that local writeup as `/e-work` directs.
    It returns the review id, the revision, the URL, the literal review folder, the directory it
    published from and the wait command.
 4. A subagent cannot wait, so this session waits. The subagent set `decisions` to `null`. If this
@@ -346,6 +359,9 @@ rebase cannot wait (a conflict, or CI red only because `main` moved), stop the w
 stop the loop.
 
 ## 9. Act on the answer
+
+For every new fixer revision, read the claims again as in step 8.1.
+List the current ids in the local hand-off writeup as in step 8.3.
 
 - `go`: handle it with `recense-feedback`. Fixes go back through steps 1 to 7 (commit, push, CI,
   threads, and one `owner-check` round over these fixes in step 7). Then publish the next revision

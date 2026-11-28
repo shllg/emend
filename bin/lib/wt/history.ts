@@ -23,6 +23,7 @@ import {
 import {
   oneLine as checkOneLine,
   commitSha,
+  isFixerBranch,
   issueFromBranch,
   parseFlags,
   refName,
@@ -403,6 +404,7 @@ export function land(
   requireGlobalIdentity(repo, top);
   const branch = currentBranch(repo, top);
   if (issueFromBranch(branch) !== null) throw new WtError(1, "Issue branches must land through a pull request.");
+  if (isFixerBranch(branch)) throw new WtError(1, "Fixer branches must land through a pull request.");
   commitSha(matchHead);
   const head = requireRef(repo, top, "HEAD");
   if (head !== matchHead) throw new WtError(1, "HEAD is not the approved head commit.");

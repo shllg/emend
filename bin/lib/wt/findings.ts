@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -8,6 +8,7 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -16,15 +17,17 @@ import {
 import { isAbsolute, join } from "node:path";
 import { checkText } from "../../../scripts/check-public.ts";
 import type { CommandTable } from "./command.ts";
+import { renderTriagePage } from "./findings-page.ts";
+import { findingAnchor, findingLines, sha256 } from "./findings-source.ts";
 import { run, runBytes } from "./proc.ts";
-import { stateDir, withStateLock } from "./registry.ts";
+import { isFindingId, stateDir, withStateLock } from "./registry.ts";
 import { GIT_BASE, type Repo } from "./repo.ts";
 import { branchName, commitSha, parseFlags, readFileBytes, readTextFile, WtError } from "./validate.ts";
 
 const KINDS = ["bug", "defect", "test", "docs", "ux", "react-perf", "react-style", "architecture", "security"] as const;
 const STATES = ["open", "claimed", "fixed", "dismissed", "stale"] as const;
+const PRIORITIES = ["P0", "P1", "P2"] as const;
 const INPUT_KEYS = ["title", "detail", "path", "line", "kind", "severity", "size", "source"];
-const ID = /^f-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const CONTROLS = /\p{Cc}/u;
 const BLOB = /^[0-9a-f]{40}$/;
@@ -50,17 +53,22 @@ export interface Finding extends FindingInput {
   anchor: string;
   state: (typeof STATES)[number];
   createdAt: string;
+  approval?: { priority: (typeof PRIORITIES)[number]; at: string };
   claim?: { branch: string; worktree: string; at: string };
   resolution?: { at: string; commit?: string; reason?: string };
 }
 
 export interface FindingFilters {
   state?: string;
+  triage?: string;
   kind?: string;
   path?: string;
 }
 
+export type BundleFinding = Omit<FindingInput, "source"> & Pick<Finding, "id" | "commit" | "createdAt">;
+
 export type FindingResolution = { fixed: string } | { dismissed: string } | { stale: true };
+type ClaimOwner = { branch: string; worktree: string };
 
 function invalid(field: string): never {
   throw new WtError(2, `Invalid finding ${field}.`);
@@ -166,7 +174,7 @@ function parseInput(value: unknown): FindingInput {
 }
 
 function findingId(value: string): string {
-  if (typeof value !== "string" || !ID.test(value)) invalid("id");
+  if (!isFindingId(value)) invalid("id");
   return value;
 }
 
@@ -175,7 +183,7 @@ function timestamp(value: unknown): void {
     invalid("timestamp");
 }
 
-function claimTarget(value: unknown): { branch: string; worktree: string } {
+function claimTarget(value: unknown): ClaimOwner {
   const data = object(value, ["branch", "worktree"]);
   const branch = checkedBranch(data.branch);
   const worktree = data.worktree;
@@ -195,10 +203,6 @@ function claimTarget(value: unknown): { branch: string; worktree: string } {
   return { branch, worktree };
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
 function fingerprint(input: FindingInput, anchor: string): string {
   return sha256([input.path, input.kind, input.rule ?? "", anchor].join("\n"));
 }
@@ -207,7 +211,7 @@ function parseStored(value: unknown, id: string): Finding {
   const data = object(
     value,
     [...INPUT_KEYS, "version", "id", "fingerprint", "commit", "anchor", "state", "createdAt"],
-    ["rule", "claim", "resolution"],
+    ["rule", "approval", "claim", "resolution"],
   );
   const input = parseInput(
     Object.fromEntries(
@@ -220,6 +224,11 @@ function parseStored(value: unknown, id: string): Finding {
     invalid("fingerprint");
   commitSha(data.commit as string);
   timestamp(data.createdAt);
+  if (Object.hasOwn(data, "approval")) {
+    const approval = object(data.approval, ["priority", "at"]);
+    choice(approval.priority, PRIORITIES, "priority");
+    timestamp(approval.at);
+  }
   const state = choice(data.state, STATES, "state");
   if (state === "claimed") {
     const claim = object(data.claim, ["branch", "worktree", "at"]);
@@ -266,8 +275,8 @@ function storageDirectory(repo: Repo, create = false, store: Store = "findings")
   }
 }
 
-function readFinding(repo: Repo, id: string): Finding {
-  if (!storageDirectory(repo)) throw new WtError(1, "Unknown finding.");
+function readFindingIfPresent(repo: Repo, id: string): Finding | undefined {
+  if (!storageDirectory(repo)) return undefined;
   try {
     return parseStored(
       JSON.parse(
@@ -276,9 +285,15 @@ function readFinding(repo: Repo, id: string): Finding {
       id,
     );
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === "ENOENT") throw new WtError(1, "Unknown finding.");
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     return storageError();
   }
+}
+
+function readFinding(repo: Repo, id: string, missingCode: 1 | 2 = 1): Finding {
+  const finding = readFindingIfPresent(repo, id);
+  if (!finding) throw new WtError(missingCode, "Unknown finding.");
+  return finding;
 }
 
 function stageFile(directory: string, id: string, content: string | Buffer, temps: Set<string>): string {
@@ -292,6 +307,17 @@ function stageFile(directory: string, id: string, content: string | Buffer, temp
     closeSync(fd);
   }
   return temp;
+}
+
+function replaceFile(directory: string, name: string, content: string): void {
+  const temps = new Set<string>();
+  try {
+    const temp = stageFile(directory, name, content, temps);
+    renameSync(temp, join(directory, name));
+    temps.delete(temp);
+  } finally {
+    for (const temp of temps) unlinkSync(temp);
+  }
 }
 
 function writeFindings(repo: Repo, findings: Finding[]): void {
@@ -340,7 +366,7 @@ function writeFindings(repo: Repo, findings: Finding[]): void {
     }
   }
   if (failed) {
-    if (!restored) throw new WtError(1, "Some findings may have changed; run `bin/wt findings list`.");
+    if (!restored) throw new WtError(1, "Some findings may have changed; run `bin/findings list`.");
     storageError();
   }
 }
@@ -385,17 +411,15 @@ export function addFinding(repo: Repo, value: unknown): { id: string; created: b
     if (!entry || entry[3] !== input.path) invalid("path: expected a regular file tracked at HEAD");
     const blob = runBytes("git", [...GIT_BASE, "cat-file", "blob", entry[2] as string], gitOptions(repo));
     gitResult(blob.code, 2, "Could not read finding blob at HEAD.");
-    let text: string;
+    let lines: string[];
     try {
-      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(blob.stdout);
+      lines = findingLines(blob.stdout);
     } catch {
       invalid("path: expected UTF-8");
     }
-    const lines = text === "" ? [] : text.split("\n");
-    if (text.endsWith("\n")) lines.pop();
     const line = lines[input.line - 1];
     if (line === undefined) invalid("line");
-    const anchor = sha256(line.trim());
+    const anchor = findingAnchor(line);
     const hash = fingerprint(input, anchor);
     const id = `f-${hash.slice(0, 12)}`;
     storageDirectory(repo, true);
@@ -436,44 +460,54 @@ export function showFinding(repo: Repo, id: string): Finding & { orphaned: boole
   return withOrphaned(readFinding(repo, findingId(id)));
 }
 
+/** Read under the findings lock. Report each unreadable record skipped by the listing. */
+function readStoredFindings(repo: Repo, onSkipped?: (message: string) => void): Finding[] {
+  if (!storageDirectory(repo)) return [];
+  let names: string[];
+  try {
+    names = readdirSync(findingsDir(repo));
+  } catch {
+    return storageError();
+  }
+  const findings: Finding[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    const id = name.slice(0, -5);
+    if (!isFindingId(id)) {
+      onSkipped?.("Skipped a finding file with an invalid name.");
+      continue;
+    }
+    try {
+      findings.push(readFinding(repo, id));
+    } catch {
+      storageDirectory(repo);
+      onSkipped?.(`Skipped unreadable finding ${id}.`);
+    }
+  }
+  return findings;
+}
+
+function triageStatus(finding: Finding): "approved" | "untriaged" | undefined {
+  if (finding.approval) return "approved";
+  if (finding.state === "open") return "untriaged";
+}
+
 export function listFindings(
   repo: Repo,
   filters: FindingFilters = {},
   onSkipped?: (message: string) => void,
 ): (Finding & { orphaned: boolean })[] {
   if (filters.state !== undefined) choice(filters.state, STATES, "state");
+  if (filters.triage !== undefined) choice(filters.triage, ["approved", "untriaged"], "triage");
   if (filters.kind !== undefined) choice(filters.kind, KINDS, "kind");
   if (filters.path !== undefined) inputPath(filters.path);
   if (!storageDirectory(repo)) return [];
-  const findings = withStateLock(repo, "findings", () => {
-    let names: string[];
-    try {
-      names = readdirSync(findingsDir(repo));
-    } catch {
-      return storageError();
-    }
-    const findings: Finding[] = [];
-    for (const name of names) {
-      if (!name.endsWith(".json")) continue;
-      const id = name.slice(0, -5);
-      if (!ID.test(id)) {
-        onSkipped?.("Skipped a finding file with an invalid name.");
-        continue;
-      }
-      try {
-        findings.push(readFinding(repo, id));
-      } catch {
-        // A bad record is skippable; an unsafe storage directory still fails the call.
-        storageDirectory(repo);
-        onSkipped?.(`Skipped unreadable finding ${id}.`);
-      }
-    }
-    return findings;
-  });
+  const findings = withStateLock(repo, "findings", () => readStoredFindings(repo, onSkipped));
   return findings
     .filter(
       (finding) =>
         (filters.state === undefined || finding.state === filters.state) &&
+        (filters.triage === undefined || filters.triage === triageStatus(finding)) &&
         (filters.kind === undefined || finding.kind === filters.kind) &&
         (filters.path === undefined || finding.path === filters.path || finding.path.startsWith(`${filters.path}/`)),
     )
@@ -481,18 +515,95 @@ export function listFindings(
     .map(withOrphaned);
 }
 
-function checkedIds(ids: string[]): string[] {
+function writeTriagePage(repo: Repo): { page: string | null; key: string; findings: string[] } {
+  if (repo.callerTop !== repo.mainRoot)
+    throw new WtError(2, "Only the main checkout writes the triage page. Nothing was changed.");
+  const key = `e-triage-${sha256(realpathSync(repo.mainRoot)).slice(0, 12)}`;
+  const open = listFindings(repo, { state: "open" }, (message) => process.stderr.write(`${message}\n`));
+  const directory = join(repo.mainRoot, ".wt");
+  const folderError = "The main checkout's .wt must be a real folder. Nothing was changed.";
+  const rendered = renderTriagePage(repo, open);
+  if (rendered) {
+    try {
+      mkdirSync(directory, { mode: 0o700 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw new WtError(2, folderError);
+    }
+  }
+  const entry = lstatSync(directory, { throwIfNoEntry: false });
+  if (entry?.isDirectory() === false || (!entry && rendered)) throw new WtError(2, folderError);
+  if (!rendered) return { page: null, key, findings: [] };
+  replaceFile(directory, "triage.md", rendered.markdown);
+  return { page: join(directory, "triage.md"), key, findings: rendered.ids };
+}
+
+export function checkedFindingIds(ids: string[]): string[] {
   if (ids.length === 0) invalid("ids");
   return [...new Set(ids.map(findingId))];
 }
 
-export function claimFindings(repo: Repo, ids: string[], target: { branch: string; worktree: string }): void {
-  const validIds = checkedIds(ids);
+function triageIds(repo: Repo, ids: string[], action: "approves" | "skips"): string[] {
+  if (repo.callerTop !== repo.mainRoot)
+    throw new WtError(2, `Only the main checkout ${action} findings. Nothing was changed.`);
+  const validIds = checkedFindingIds(ids);
+  if (validIds.length !== ids.length) invalid("ids: duplicates");
+  return validIds;
+}
+
+export function approveFindings(repo: Repo, ids: string[], priority: unknown): void {
+  const validIds = triageIds(repo, ids, "approves");
+  const checkedPriority = choice(priority, PRIORITIES, "priority");
+  mutate(repo, () => {
+    const approval = { priority: checkedPriority, at: new Date().toISOString() };
+    const findings = validIds.map((id) => {
+      const finding = readFinding(repo, id);
+      if (finding.state !== "open") throw new WtError(1, `Finding ${id} is claimed or resolved. Nothing was changed.`);
+      if (finding.kind === "security" || finding.size === "large")
+        throw new WtError(2, "/e-fix does not take security or large findings. Nothing was changed.");
+      return { ...finding, approval };
+    });
+    writeFindings(repo, findings);
+  });
+}
+
+function skipFindings(repo: Repo, ids: string[]): void {
+  const validIds = triageIds(repo, ids, "skips");
+  mutate(repo, () => {
+    const resolution = { at: new Date().toISOString(), reason: "skipped by the owner in triage" };
+    const findings = validIds.map((id) => {
+      const finding = readFinding(repo, id);
+      if (finding.state !== "open" || finding.approval)
+        throw new WtError(1, `Finding ${id} is claimed, resolved or approved. Nothing was changed.`);
+      return { ...finding, state: "dismissed" as const, resolution };
+    });
+    writeFindings(repo, findings);
+  });
+}
+
+function requireFindingApproval(finding: Finding): void {
+  if (!finding.approval)
+    throw new WtError(2, `Finding ${finding.id} is not approved for fixing. Run /e-triage first. Nothing was changed.`);
+}
+
+export function readBundleFindings(repo: Repo, ids: string[]): BundleFinding[] {
+  return checkedFindingIds(ids).map((id) => {
+    const finding = readFinding(repo, id, 2);
+    if (finding.state !== "open") throw new WtError(3, `Finding ${id} is already claimed or resolved.`);
+    if (finding.kind === "security" || finding.size === "large")
+      throw new WtError(2, `Finding ${id} needs an issue. Only small, non-security findings can be bundled.`);
+    requireFindingApproval(finding);
+    return finding;
+  });
+}
+
+export function claimFindings(repo: Repo, ids: string[], target: ClaimOwner): void {
+  const validIds = checkedFindingIds(ids);
   const claim = { ...claimTarget(target), at: new Date().toISOString() };
   mutate(repo, () => {
     const findings = validIds.map((id) => readFinding(repo, id));
     if (findings.some((finding) => finding.state !== "open" || finding.kind === "security" || finding.size === "large"))
       throw new WtError(1, "Only open, small, non-security findings can be claimed. Nothing was changed.");
+    for (const finding of findings) requireFindingApproval(finding);
     writeFindings(
       repo,
       findings.map((finding) => ({ ...finding, state: "claimed", claim })),
@@ -500,29 +611,100 @@ export function claimFindings(repo: Repo, ids: string[], target: { branch: strin
   });
 }
 
-export function releaseFindings(repo: Repo, ids: string[]): void {
-  const validIds = checkedIds(ids);
+function refuseClaimOwner(): never {
+  throw new WtError(1, "A worktree may only resolve or release findings it claimed. Nothing was changed.");
+}
+
+function callerOwner(repo: Repo): ClaimOwner | undefined {
+  if (repo.callerTop === repo.mainRoot) return undefined;
+  if (!repo.callerBranch || !repo.callerTop) return refuseClaimOwner();
+  return { branch: repo.callerBranch, worktree: repo.callerTop };
+}
+
+/** Called under the findings lock, before writing any member of a batch. */
+function findingToSettle(repo: Repo, id: string, owner?: ClaimOwner): Finding {
+  if (!owner) return readFinding(repo, id);
+  const finding = readFindingIfPresent(repo, id);
+  if (finding?.state === "claimed" && finding.claim?.branch === owner.branch) {
+    try {
+      if (realpathSync(finding.claim.worktree) === realpathSync(owner.worktree)) return finding;
+    } catch {
+      // A missing or unreadable path cannot establish ownership.
+    }
+  }
+  return refuseClaimOwner();
+}
+
+export function releaseFindings(repo: Repo, ids: string[], owner?: ClaimOwner): void {
+  const validIds = checkedFindingIds(ids);
   mutate(repo, () => {
-    const findings = validIds.map((id) => readFinding(repo, id));
+    const findings = validIds.map((id) => findingToSettle(repo, id, owner));
     if (findings.some((finding) => finding.state !== "claimed"))
       throw new WtError(1, "Only claimed findings can be released. Nothing was changed.");
-    writeFindings(
-      repo,
-      findings.map((finding) => {
-        delete finding.claim;
-        return { ...finding, state: "open" };
-      }),
-    );
+    writeFindings(repo, findings.map(reopened));
   });
 }
 
-export function resolveFinding(repo: Repo, id: string, value: FindingResolution): void {
+function reopened(finding: Finding): Finding {
+  delete finding.claim;
+  return { ...finding, state: "open" };
+}
+
+export function releaseOrphanedClaim(
+  repo: Repo,
+  id: string,
+  seen: NonNullable<Finding["claim"]>,
+  isLocked: (worktree: string) => boolean,
+): boolean {
+  findingId(id);
+  return mutate(repo, () => {
+    const finding = readFindingIfPresent(repo, id);
+    const claim = finding?.claim;
+    if (finding?.state !== "claimed" || !claim) return false;
+    if (claim.branch !== seen.branch || claim.worktree !== seen.worktree || claim.at !== seen.at) return false;
+    if (!withOrphaned(finding).orphaned || isLocked(claim.worktree)) return false;
+    writeFindings(repo, [reopened(finding)]);
+    return true;
+  });
+}
+
+export function resolveMergedFindings(repo: Repo, ids: string[], target: ClaimOwner, commit: string): string[] {
+  commitSha(commit);
+  const owner = claimTarget(target);
+  const validIds = checkedFindingIds(ids);
+  return mutate(repo, () => {
+    const findings = validIds
+      .map((id) => readFinding(repo, id))
+      .filter(
+        (finding) =>
+          finding.state === "claimed" &&
+          finding.claim?.branch === owner.branch &&
+          finding.claim.worktree === owner.worktree,
+      );
+    if (!findings.length) return [];
+    const resolution = { at: new Date().toISOString(), commit };
+    for (const finding of findings) {
+      delete finding.claim;
+      finding.state = "fixed";
+      finding.resolution = resolution;
+    }
+    writeFindings(repo, findings);
+    return findings.map((finding) => finding.id).sort();
+  });
+}
+
+export function resolveFinding(repo: Repo, id: string, value: FindingResolution, owner?: ClaimOwner): void {
   findingId(id);
   const resolution = object(value, [], ["fixed", "dismissed", "stale"]);
   if (Object.keys(resolution).length !== 1) invalid("resolution");
   let state: "fixed" | "dismissed" | "stale";
   const detail: NonNullable<Finding["resolution"]> = { at: new Date().toISOString() };
   if (Object.hasOwn(resolution, "fixed")) {
+    if (owner || repo.callerTop !== repo.mainRoot)
+      throw new WtError(
+        2,
+        "A fixer's merge records its findings as fixed. A worktree cannot resolve a finding as fixed. Nothing was changed.",
+      );
     state = "fixed";
     detail.commit = commitSha(resolution.fixed as string);
   } else if (Object.hasOwn(resolution, "dismissed")) {
@@ -532,8 +714,9 @@ export function resolveFinding(repo: Repo, id: string, value: FindingResolution)
     state = "stale";
     if (resolution.stale !== true) invalid("resolution");
   }
+  const caller = owner ?? callerOwner(repo);
   mutate(repo, () => {
-    const finding = readFinding(repo, id);
+    const finding = findingToSettle(repo, id, caller);
     if (finding.state !== "open" && finding.state !== "claimed")
       throw new WtError(1, "The finding is already resolved.");
     if (detail.commit) {
@@ -629,16 +812,10 @@ function writeVisits(repo: Repo, visits: Map<string, GroomVisit>): void {
   // Never write a file that the bounded reader would refuse on the next pass.
   if (Buffer.byteLength(content) > 1024 * 1024) storageError("groom");
   storageDirectory(repo, true, "groom");
-  const directory = join(stateDir(repo), "groom");
-  const temps = new Set<string>();
   try {
-    const temp = stageFile(directory, "visits", content, temps);
-    renameSync(temp, join(directory, "visits.json"));
-    temps.delete(temp);
+    replaceFile(join(stateDir(repo), "groom"), "visits.json", content);
   } catch {
     storageError("groom");
-  } finally {
-    for (const temp of temps) unlinkSync(temp);
   }
 }
 
@@ -726,53 +903,77 @@ export const commands: CommandTable = {
       groomVisited(repo, positionals[0] as string, flags.blob, Number(flags.findings));
       return 0;
     }
-    throw new WtError(2, "Unknown groom action. Run bin/wt help.");
+    throw new WtError(2, "Unknown groom action. Run bin/findings help.");
   },
-  findings({ repo, args }) {
-    const [action, ...rest] = args;
-    if (action === "add") {
-      const { flags } = options(rest, { file: "string" });
-      if (typeof flags.file !== "string") invalid("file option");
-      let input: unknown;
-      try {
-        input = JSON.parse(readTextFile(flags.file));
-      } catch {
-        throw new WtError(2, "The finding file must be regular UTF-8 JSON of at most 1 MiB (no symlinks).");
-      }
-      const result = addFinding(repo, input);
-      process.stdout.write(`${result.id}\n`);
-      return result.created ? 0 : 3;
+  add({ repo, args }) {
+    const { flags } = options(args, { file: "string" });
+    if (typeof flags.file !== "string") invalid("file option");
+    let input: unknown;
+    try {
+      input = JSON.parse(readTextFile(flags.file));
+    } catch {
+      throw new WtError(2, "The finding file must be regular UTF-8 JSON of at most 1 MiB (no symlinks).");
     }
-    if (action === "list") {
-      const { flags } = options(rest, { state: "string", kind: "string", path: "string", json: "boolean" });
-      const findings = listFindings(
-        repo,
-        {
-          state: flags.state as string | undefined,
-          kind: flags.kind as string | undefined,
-          path: flags.path as string | undefined,
-        },
-        (message) => process.stderr.write(`${message}\n`),
-      );
-      if (flags.json) process.stdout.write(`${JSON.stringify(findings, null, 2)}\n`);
-      else
-        for (const finding of findings)
-          process.stdout.write(
-            `${finding.id}\t${finding.state}${finding.orphaned ? " orphaned" : ""}\t${finding.kind}\t${finding.severity}\t${finding.path}:${finding.line}\t${finding.title}\n`,
-          );
-      return 0;
-    }
-    if (action === "show" || action === "release" || action === "resolve") {
-      const spec: Parameters<typeof parseFlags>[1] =
-        action === "resolve" ? { fixed: "string", dismissed: "string", stale: "boolean" } : {};
-      const { flags, positionals } = options(rest, spec, action === "release" ? rest.length : 1);
-      const ids = checkedIds(positionals);
-      const id = ids[0] as string;
-      if (action === "show") process.stdout.write(`${JSON.stringify(showFinding(repo, id), null, 2)}\n`);
-      else if (action === "release") releaseFindings(repo, ids);
-      else resolveFinding(repo, id, flags as FindingResolution);
-      return 0;
-    }
-    throw new WtError(2, "Unknown findings action. Run bin/wt help.");
+    const result = addFinding(repo, input);
+    process.stdout.write(`${result.id}\n`);
+    return result.created ? 0 : 3;
+  },
+  list({ repo, args }) {
+    const { flags } = options(args, {
+      state: "string",
+      kind: "string",
+      path: "string",
+      triage: "string",
+      json: "boolean",
+    });
+    const findings = listFindings(
+      repo,
+      {
+        state: flags.state as string | undefined,
+        triage: flags.triage as string | undefined,
+        kind: flags.kind as string | undefined,
+        path: flags.path as string | undefined,
+      },
+      (message) => process.stderr.write(`${message}\n`),
+    );
+    if (flags.json) process.stdout.write(`${JSON.stringify(findings, null, 2)}\n`);
+    else
+      for (const finding of findings)
+        process.stdout.write(
+          `${finding.id}\t${finding.state}${finding.orphaned ? " orphaned" : ""}\t${finding.approval?.priority ?? "-"}\t${finding.kind}\t${finding.severity}\t${finding.path}:${finding.line}\t${finding.title}\n`,
+        );
+    return 0;
+  },
+  page({ repo, args }) {
+    options(args, {});
+    process.stdout.write(`${JSON.stringify(writeTriagePage(repo))}\n`);
+    return 0;
+  },
+  show({ repo, args }) {
+    const { positionals } = options(args, {}, 1);
+    const id = checkedFindingIds(positionals)[0] as string;
+    process.stdout.write(`${JSON.stringify(showFinding(repo, id), null, 2)}\n`);
+    return 0;
+  },
+  approve({ repo, args }) {
+    const { flags, positionals } = options(args, { priority: "string" }, args.length);
+    approveFindings(repo, positionals, flags.priority);
+    return 0;
+  },
+  skip({ repo, args }) {
+    const { positionals } = options(args, {}, args.length);
+    skipFindings(repo, positionals);
+    return 0;
+  },
+  release({ repo, args }) {
+    const { positionals } = options(args, {}, args.length);
+    releaseFindings(repo, checkedFindingIds(positionals), callerOwner(repo));
+    return 0;
+  },
+  resolve({ repo, args }) {
+    const { flags, positionals } = options(args, { fixed: "string", dismissed: "string", stale: "boolean" }, 1);
+    const id = checkedFindingIds(positionals)[0] as string;
+    resolveFinding(repo, id, flags as FindingResolution);
+    return 0;
   },
 };

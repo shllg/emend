@@ -1,9 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { CommandTable } from "./command.ts";
-import { run } from "./proc.ts";
-import { assertNoLocalHooksPath, type Repo, resolveRepo } from "./repo.ts";
+import { type CommandTable, EXIT_CODES, runMain } from "./command.ts";
+import { assertNoLocalHooksPath, resolveRepo } from "./repo.ts";
 import { WtError } from "./validate.ts";
 
 /**
@@ -33,8 +32,6 @@ const OWNERS: Record<string, string> = {
   land: "history.ts",
   "sync-main": "history.ts",
   digest: "history.ts",
-  findings: "findings.ts",
-  groom: "findings.ts",
 };
 
 const HELP = `bin/wt: worktrees and the pull request lifecycle
@@ -50,13 +47,6 @@ Local:
   cleanup [--discard] [--close-workspace] [<branch|path>]
   gc [--prune]                                     report or remove orphans
   repo                                            print origin's GitHub owner/name
-  findings add --file <file>                       record a local finding (3 when already recorded)
-  findings list [--state <s>] [--kind <k>] [--path <p>] [--json]
-  findings show <id>
-  findings release <id>...
-  findings resolve <id> (--fixed <sha> | --dismissed <reason> | --stale)
-  groom next [--count N]                           the files the groomer reads next (JSON; N from 1 to 50, default 5)
-  groom visited <path> --blob <sha> --findings N     record a groom visit (2 when the blob is not HEAD's)
 
 herdr / herdr desktop:
   spawn --issue <n> [--mode github] [--model <m>] [--effort <e>]
@@ -77,6 +67,7 @@ Remote:
   pr edit [--pr <n>] [--title <text> | --title-file <path>] [--body <text> | --body-file <path>]
   pr merge [--pr <n>] --match-head <sha> [--approved-head <sha>] (--subject <text> | --subject-file <path>)
            (--body <text> | --body-file <path>)
+                                                   a fixer's merge prints FIXED <id> for each claim it records as fixed
 
 History:
   rebase  restack  sync-main  digest
@@ -86,8 +77,7 @@ History:
 pr merge, land and approval ask recense for the approval: recense on PATH, or the absolute path in RECENSE_BIN.
 
 No arguments: an action menu on a terminal with fzf, otherwise "list".
-Exit codes: 0 done, 1 failed or unconfirmed, 2 invalid input, 3 already exists,
-69 dependency, remote or slot unavailable, 124 herdr or herdr desktop timeout.
+${EXIT_CODES}
 `;
 
 function fail(code: 1 | 2 | 69, message: string): never {
@@ -111,17 +101,7 @@ async function main(argv: string[]): Promise<number> {
     fail(2, "Unknown subcommand. Run bin/wt help.");
   }
 
-  let repo: Repo;
-  try {
-    repo = resolveRepo(process.cwd());
-  } catch (e) {
-    if (
-      (sub === "findings" || sub === "groom") &&
-      run("git", ["--version"], { cwd: process.cwd(), gitNoLazyFetch: true }).code === 127
-    )
-      fail(69, "Git is unavailable.");
-    throw e;
-  }
+  const repo = resolveRepo(process.cwd());
   assertNoLocalHooksPath(repo);
 
   if (sub === undefined) {
@@ -139,14 +119,4 @@ async function main(argv: string[]): Promise<number> {
   return (await command({ repo, args: argv.slice(1) })) ?? 0;
 }
 
-try {
-  process.exitCode = await main(process.argv.slice(2));
-} catch (e) {
-  if (e instanceof WtError) {
-    process.stderr.write(`${e.message}\n`);
-    process.exitCode = e.code;
-  } else {
-    process.stderr.write(`bin/wt failed unexpectedly: ${e instanceof Error ? e.message : "unknown error"}\n`);
-    process.exitCode = 1;
-  }
-}
+await runMain("bin/wt", main);

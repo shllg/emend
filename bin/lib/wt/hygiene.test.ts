@@ -8,6 +8,8 @@ const root = resolve(import.meta.dirname, "..", "..", "..");
 
 const SKILLS = [
   "e-spawn",
+  "e-triage",
+  "e-fix",
   "e-work",
   "e-pr",
   "e-pr-finalize",
@@ -92,6 +94,15 @@ test("no file in the repo contains a real home path", () => {
   assert.deepEqual(hits, []);
 });
 
+test("tracked agent instructions use bin/findings for registry commands", () => {
+  const paths = [".claude/", "AGENTS.md", ":(exclude).claude/worktrees/**"];
+  const files = execFileSync("git", ["ls-files", "-z", "--", ...paths], { cwd: root, encoding: "utf8" });
+  const oldCommand = /bin\/wt\s+(?:findings\b|groom\b|spawn\s+--findings\b)/;
+  for (const path of files.split("\0").filter(Boolean)) {
+    assert.doesNotMatch(readFileSync(join(root, path), "utf8"), oldCommand, path);
+  }
+});
+
 test("every lifecycle skill exists with a matching name and a description", () => {
   for (const name of SKILLS) {
     const text = readFileSync(join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
@@ -101,6 +112,101 @@ test("every lifecycle skill exists with a matching name and a description", () =
     assert.match(front, new RegExp(`^name: ${name}$`, "m"), `${name}: name mismatch`);
     assert.match(front, /^description: \S/m, `${name}: description missing`);
   }
+});
+
+function fixerBuildItem(): string {
+  const skill = readFileSync(join(root, ".claude/skills/e-work/SKILL.md"), "utf8");
+  const build = skill.split("## 2. Build\n")[1] ?? "";
+  const item = /^1\. [\s\S]*?(?=^2\. )/m.exec(build);
+  assert.ok(item, "missing e-work build item 1");
+  return item[0];
+}
+
+test("e-fix selects approved findings by priority and counts those waiting for triage", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-fix/SKILL.md"), "utf8");
+  assert.match(skill, /bin\/findings list --state open --triage approved --json/);
+  assert.match(skill, /priority: \.approval\.priority/);
+  assert.match(skill, /sort_by\(\.priority, \.createdAt, \.id\)/);
+  assert.match(skill, /bin\/findings list --state open --triage untriaged --json/);
+});
+
+test("e-triage validates the heading, checks before approve or skip and republishes only after a change", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-triage/SKILL.md"), "utf8");
+  assert.match(skill, /^disable-model-invocation: true$/m);
+  assert.ok(skill.includes("^f-[0-9a-f]{12}$"));
+  assert.ok(skill.includes("^e-triage-[0-9a-f]{12}$"));
+  assert.ok(skill.includes(`recense publish '<main>/.wt/triage.md' --title "Findings triage" --key <key>`));
+  assert.ok(skill.includes("targets the `### <id>` heading itself"));
+  const otherTarget = skill.indexOf("For any other target, answer the comment");
+  assert.ok(otherTarget >= 0);
+  assert.ok(skill.indexOf("For a comment on the security count, reply `explained`") > otherTarget);
+  assert.ok(skill.indexOf("Put nothing about security findings in a reply but the page's count.") > otherTarget);
+  assert.ok(skill.indexOf("Never read security findings to answer a comment.") > otherTarget);
+  const mode = skill.indexOf("read the hand-off's `mode` first");
+  const explain = skill.indexOf("In `explain`, change nothing in the registry");
+  const show = skill.indexOf("<main>/bin/findings show <id>");
+  assert.ok(mode >= 0 && mode < explain && explain < show);
+  assert.ok(skill.includes("still `open` and has no approval"));
+  assert.ok(skill.includes("a literal priority from `P0`, `P1`, `P2`"));
+  const commands = [...skill.matchAll(/<main>\/bin\/findings ([^`\n]+)/g)].map((match) => match[1]);
+  assert.deepEqual(commands, ["page", "show <id>", "approve <id> --priority <P>", "skip <id>", "page"]);
+  assert.ok(skill.includes("After the replies, run `<main>/bin/findings page`"));
+  assert.ok(skill.includes("Republish only if this delivery recorded at least one approve or skip"));
+  assert.ok(skill.includes("and the returned `findings` list is non-empty"));
+  assert.ok(skill.includes("Otherwise keep the published page and its ids.\nWait again"));
+});
+
+test("e-pr-merge reports FIXED lines and checks the registered ids and worktree for manual recovery", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-pr-merge/SKILL.md"), "utf8");
+  const recovery = skill.split("## 8. After the merge")[1] ?? "";
+  assert.ok(recovery.includes("with a merge warning or `QUEUED`, run `<main>/bin/wt list --json`"));
+  assert.ok(recovery.includes("row whose `branch` equals the PR's head branch"));
+  assert.ok(recovery.includes("row or its `findings` list is missing, report that and give no resolve command"));
+  assert.ok(recovery.includes("For each id in that row's `findings` list, run `<main>/bin/findings show <id>`"));
+  assert.ok(recovery.includes("`claim.branch` equals the head branch and `claim.worktree` equals the row's `path`"));
+  assert.ok(!recovery.includes("bin/findings list --state claimed"));
+  const manual = skill.split("\n").filter((line) => line.includes("--fixed"));
+  assert.equal(manual.length, 1);
+  assert.match(manual[0] ?? "", /the owner runs `<main>\/bin\/findings resolve <id> --fixed <merge commit>`/);
+  assert.ok(skill.includes("report the findings named in the merge's `FIXED <id>` lines"));
+});
+
+test("e-work reads each claim before its first resolve in build item 1", () => {
+  const item = fixerBuildItem();
+  const show = item.indexOf("<main>/bin/findings show <id>");
+  const firstResolve = item.indexOf("<main>/bin/findings resolve");
+  assert.ok(show >= 0 && show < firstResolve);
+});
+
+test("e-work records a security finding before dismissing the original", () => {
+  const bullet = /^ {3}- [^\n]*security problem.*(?:\n {5}.*)*/m.exec(fixerBuildItem());
+  assert.ok(bullet, "missing security bullet");
+  assert.match(bullet[0], /Use the `path` and `line` of the problem at this worktree's `HEAD`/);
+  const add = bullet[0].indexOf("<main>/bin/findings add --file");
+  const dismiss = bullet[0].indexOf("--dismissed");
+  assert.ok(add >= 0 && add < dismiss);
+});
+
+test("e-work and e-pr use the same private security dismissal reason", () => {
+  for (const name of ["e-work", "e-pr"]) {
+    const skill = readFileSync(join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
+    assert.ok(skill.includes("needs a private security report"), name);
+  }
+});
+
+test("e-work and e-pr count released findings as not fixed unless stale or dismissed", () => {
+  const rule = "A finding this branch no longer holds, other than a stale or dismissed one, is not fixed.";
+  for (const name of ["e-work", "e-pr"]) {
+    const skill = readFileSync(join(root, ".claude", "skills", name, "SKILL.md"), "utf8");
+    assert.ok(skill.includes(rule), name);
+    assert.doesNotMatch(skill, /stale, dismissed or open|For any other state or claim/, name);
+  }
+});
+
+test("e-pr omits every dismissed finding from PR text", () => {
+  const skill = readFileSync(join(root, ".claude/skills/e-pr/SKILL.md"), "utf8");
+  assert.ok(skill.includes("Omit every dismissed finding from all PR text."));
+  assert.doesNotMatch(skill, /Use `stale` or `dismissed`/);
 });
 
 test("the merge skill checks the approved review for late feedback before restarting the gates", () => {

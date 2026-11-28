@@ -1,10 +1,22 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { mock, test } from "node:test";
 import {
+  addFinding,
+  approveFindings,
+  claimFindings,
+  type FindingInput,
+  findingsDir,
+  listFindings,
+  releaseFindings,
+  showFinding,
+} from "./findings.ts";
+import {
   agentName,
   closeWorkspace,
+  fixerAgentName,
   HerdrError,
   herdrCall,
   herdrLocatedAgents,
@@ -37,7 +49,7 @@ import {
   type TestEnv,
 } from "./test-support.ts";
 import { WtError } from "./validate.ts";
-import { cleanup, safetyGuard, setup, terminal } from "./worktree.ts";
+import { cleanup, safetyGuard, setBeforeWorktreeAddHookForTests, setup, terminal } from "./worktree.ts";
 
 async function scenario(
   o: { withBin?: boolean },
@@ -132,6 +144,297 @@ function herdrRules(agent: string, extra: FakeRule[] = []): FakeRule[] {
 }
 
 const SPAWN_ARGS = ["spawn", "--issue", "42"];
+
+const FIXER_BRANCH = "recense-fix-20260103-readme-md";
+const FIXER_AGENT = "wt-fix-20260103-readme-md";
+const fixerClock = () => ({ ...fakeClock(), date: () => new Date("2026-01-02T19:15:00-05:00") });
+
+function recordFinding(repo: Repo, overrides: Partial<FindingInput> = {}): string {
+  return addFinding(repo, {
+    title: "Keep the selection",
+    detail: "The selection is lost when the view changes.",
+    path: "README.md",
+    line: 1,
+    kind: "bug",
+    severity: "medium",
+    size: "small",
+    source: { kind: "groom", pass: "first" },
+    ...overrides,
+  }).id;
+}
+
+test("bin/findings spawn claims, snapshots and prompts", () =>
+  scenario({}, ({ env, repo }) =>
+    inHerdr(async () => {
+      const first = recordFinding(repo, { rule: "selection" });
+      const second = recordFinding(repo, { kind: "docs" });
+      const ids = [second, first];
+      approveFindings(repo, ids, "P0");
+      const expected = ids.map((id) => {
+        const { title, detail, path, line, kind, rule, severity, size, commit, createdAt } = showFinding(repo, id);
+        return { id, title, detail, path, line, kind, rule, severity, size, commit, createdAt };
+      });
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
+      const r = await spawn(repo, { findings: [...ids, second], slug: "readme-md", mode: "github" }, fixerClock());
+      assert.equal(r.branch, FIXER_BRANCH);
+      assert.equal(r.agent, FIXER_AGENT);
+      assert.deepEqual(r.findings, ids);
+      assert.equal(r.issue, undefined);
+      const wt = join(r.path, ".wt");
+      assert.deepEqual(JSON.parse(readFileSync(join(wt, "worktree.json"), "utf8")), {
+        branch: FIXER_BRANCH,
+        port: r.port,
+        recenseHome: r.recenseHome,
+        mode: "github",
+        findings: ids,
+      });
+      assert.deepEqual(readRegistry(repo).worktrees[FIXER_BRANCH]?.findings, ids);
+      assert.equal(
+        readFileSync(join(wt, "bundle.json"), "utf8"),
+        `${JSON.stringify({ version: 1, findings: expected }, null, 2)}\n`,
+      );
+      assert.equal(statSync(join(wt, "bundle.json")).mode & 0o777, 0o600);
+      assert.equal(readFileSync(join(wt, "brief.md"), "utf8"), ".wt/bundle.json\n");
+      for (const id of ids) {
+        const finding = showFinding(repo, id);
+        assert.equal(finding.state, "claimed");
+        assert.equal(finding.claim?.branch, FIXER_BRANCH);
+        assert.equal(finding.claim?.worktree, r.path);
+      }
+      const prompts = fakeCalls(env, "herdr").filter((call) => call[1] === "prompt");
+      assert.equal(prompts.length, 1);
+      assert.equal(
+        prompts[0]?.[3],
+        "/loop /e-work .wt/bundle.json Closing answer from /e-spawn: Open a ready PR and finalize it.",
+      );
+    }),
+  ));
+
+test("bin/findings spawn labels the hc terminal and prints the selected ids", () =>
+  scenario({ withBin: true }, async ({ env, fx, repo }) => {
+    const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
+    approveFindings(repo, ids, "P2");
+    installFake(env, "claude", []);
+    installFake(env, "hc", [
+      { match: ["ls", "--json"], stdout: JSON.stringify({ terminals: [] }) },
+      { match: ["run"], stdout: JSON.stringify({ address: "t2", state: "live" }) },
+      { match: ["get", "t2"], stdout: JSON.stringify({ address: "t2", status: { state: "working" } }) },
+    ]);
+    const args = ["spawn", ids.join(","), "--slug", "readme-md", "--model", "opus", "--effort", "high"];
+    const r = await runWt(join(fx.main, "bin/findings"), args, {
+      cwd: fx.main,
+      env: { HC_TERMINAL_ID: "t1" },
+    });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout.split("\n")[0], `Findings: ${ids.join(", ")}`);
+    assert.doesNotMatch(r.stdout, /^Issue:/m);
+    const launch = fakeCalls(env, "hc").find((call) => call[0] === "run");
+    assert.ok(launch);
+    assert.ok(launch.includes(`recense.findings=${ids.join(",")}`));
+    assert.ok(!launch.some((arg) => arg.startsWith("recense.issue=")));
+    assert.deepEqual(launch.slice(-5, -1), ["--model", "opus", "--effort", "high"]);
+    assert.equal(launch.at(-1), spawnPrompt(".wt/bundle.json", "github"));
+  }));
+
+test("bin/findings spawn refuses an unapproved finding before creating anything", () =>
+  scenario({ withBin: true }, async ({ env, fx, repo }) => {
+    const approved = recordFinding(repo);
+    approveFindings(repo, [approved], "P1");
+    const untriaged = recordFinding(repo, { rule: "untriaged" });
+    const before = listFindings(repo);
+    installFake(env, "herdr", herdrRules(FIXER_AGENT));
+    const result = await runWt(
+      join(fx.main, "bin/findings"),
+      ["spawn", `${approved},${untriaged}`, "--slug", "readme"],
+      {
+        cwd: fx.main,
+        env: { HERDR_ENV: "1" },
+      },
+    );
+    assert.equal(result.code, 2);
+    assert.ok(result.stderr.includes(`Finding ${untriaged} is not approved for fixing. Run /e-triage first.`));
+    assert.deepEqual(listFindings(repo), before);
+    assert.deepEqual(readRegistry(repo).worktrees, {});
+    assert.equal(existsSync(repo.worktreesDir), false);
+    assert.equal(gitIn(fx.main, "branch", "--list", "recense-*"), "");
+    assert.deepEqual(fakeCalls(env, "herdr"), []);
+  }));
+
+test("bin/findings spawn refuses invalid requests before setup", () =>
+  scenario({ withBin: true }, async ({ env, fx, repo }) => {
+    const open = recordFinding(repo);
+    const security = recordFinding(repo, { kind: "security" });
+    const large = recordFinding(repo, { size: "large", rule: "large" });
+    approveFindings(repo, [open], "P1");
+    const before = listFindings(repo);
+    installFake(env, "herdr", herdrRules("unused"));
+    const flags = [open, "--slug", "readme-md"];
+    for (const args of [
+      [...flags, "--issue", "42"],
+      [...flags, "--mode", "local"],
+      ["--slug", "readme"],
+      [open],
+      [open, open, "--slug", "readme"],
+      ...["", `${open},`, `,${open}`, "bad", `${open},f-000000000000`, `${open},${security}`, `${open},${large}`].map(
+        (ids) => [ids, "--slug", "readme"],
+      ),
+      ...["", "UPPER", "double--dash", "a".repeat(64)].map((slug) => [open, "--slug", slug]),
+    ]) {
+      const r = await runWt(join(fx.main, "bin/findings"), ["spawn", ...args], {
+        cwd: fx.main,
+        env: { HERDR_ENV: "1" },
+      });
+      assert.equal(r.code, 2, r.stderr);
+      assert.match(r.stderr, /Nothing was created\./);
+    }
+    assert.deepEqual(readRegistry(repo).worktrees, {});
+    assert.equal(existsSync(repo.worktreesDir), false);
+    assert.equal(gitIn(fx.main, "branch", "--list", "recense-*"), "");
+    assert.deepEqual(listFindings(repo), before);
+    assert.deepEqual(fakeCalls(env, "herdr"), []);
+  }));
+
+test("bin/findings spawn refuses a non-GitHub origin before setup or claims", () =>
+  scenario({}, ({ env, fx, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      approveFindings(repo, [id], "P1");
+      const before = showFinding(repo, id);
+      gitIn(fx.main, "remote", "set-url", "origin", fx.main);
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
+      await assert.rejects(spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock()), {
+        code: 2,
+        message: /origin must identify a github\.com repository.*Nothing was created\./,
+      });
+      assert.deepEqual(showFinding(repo, id), before);
+      assert.deepEqual(readRegistry(repo).worktrees, {});
+      assert.equal(existsSync(repo.worktreesDir), false);
+      assert.equal(gitIn(fx.main, "branch", "--list", FIXER_BRANCH), "");
+      assert.deepEqual(fakeCalls(env, "herdr"), []);
+    }),
+  ));
+
+test("bin/findings spawn refuses a taken finding or branch", () =>
+  scenario({}, ({ env, fx, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      approveFindings(repo, [id], "P1");
+      const start = () => spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock());
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
+      const pending = start();
+      // The first read saw an open finding. Claim it while spawn is waiting for its port probes.
+      claimFindings(repo, [id], { branch: "other-worker", worktree: fx.main });
+      const before = showFinding(repo, id);
+      const taken = (e: unknown) =>
+        e instanceof WtError && e.code === 3 && /already claimed or resolved.*Nothing was created/.test(e.message);
+      await assert.rejects(pending, taken);
+      await assert.rejects(start, taken);
+      assert.deepEqual(showFinding(repo, id), before);
+      assert.equal(gitIn(fx.main, "branch", "--list", FIXER_BRANCH), "");
+      releaseFindings(repo, [id]);
+      gitIn(fx.main, "branch", FIXER_BRANCH);
+      await assert.rejects(
+        start,
+        (e) => e instanceof WtError && e.code === 3 && /branch already exists.*Nothing was created/.test(e.message),
+      );
+      assert.equal(showFinding(repo, id).state, "open");
+      assert.deepEqual(readRegistry(repo).worktrees, {});
+      assert.equal(existsSync(repo.worktreesDir), false);
+      assert.ok(!fakeCalls(env, "herdr").some((call) => call[0] === "worktree"));
+    }),
+  ));
+
+test("fixer setup refuses a live origin branch and accepts a stale tracking ref", () =>
+  scenario({}, ({ fx, repo }) => {
+    const id = recordFinding(repo);
+    approveFindings(repo, [id], "P1");
+    const finding = showFinding(repo, id);
+    const start = () => setup(repo, { branch: FIXER_BRANCH, findings: [finding] });
+    const remoteHead = `refs/heads/${FIXER_BRANCH}`;
+    gitIn(fx.origin, "update-ref", remoteHead, "refs/heads/main");
+    assert.throws(start, { code: 3, message: "The branch already exists. Nothing was created." });
+    assert.deepEqual(readRegistry(repo).worktrees, {});
+
+    gitIn(fx.origin, "update-ref", "-d", remoteHead);
+    gitIn(fx.main, "update-ref", `refs/remotes/origin/${FIXER_BRANCH}`, "HEAD");
+    const wt = start();
+    assert.equal(gitIn(wt.path, "symbolic-ref", "--short", "HEAD"), FIXER_BRANCH);
+    assert.deepEqual(readRegistry(repo).worktrees[FIXER_BRANCH]?.findings, [finding.id]);
+  }));
+
+test("bin/findings spawn reports a refused claim without a release command", () =>
+  scenario({}, ({ env, fx, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      const ids = [id, recordFinding(repo, { kind: "docs" })];
+      approveFindings(repo, ids, "P1");
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
+      setBeforeWorktreeAddHookForTests(() => claimFindings(repo, [id], { branch: "other-worker", worktree: fx.main }));
+      try {
+        await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
+          assert.ok(e instanceof WtError);
+          const findings = join(repo.mainRoot, "bin/findings");
+          assert.match(e.message, /findings were not claimed by this run/);
+          for (const id of ids) assert.ok(e.message.includes(`Check each with: ${findings} show ${id}`));
+          assert.match(e.message, /Optional teardown:/);
+          assert.doesNotMatch(e.message, /findings release|stay claimed|failed write/);
+          return true;
+        });
+      } finally {
+        setBeforeWorktreeAddHookForTests(null);
+      }
+      assert.equal(showFinding(repo, id).claim?.branch, "other-worker");
+      assert.ok(readRegistry(repo).worktrees[FIXER_BRANCH]);
+      assert.equal(existsSync(join(repo.worktreesDir, FIXER_BRANCH, ".wt/brief.md")), false);
+      assert.deepEqual(fakeCalls(env, "herdr"), [["agent", "list"]]);
+    }),
+  ));
+
+test("bin/findings spawn scopes the release command to its worktree after an uncertain claim failure", () =>
+  scenario({}, ({ env, repo }) =>
+    inHerdr(async () => {
+      const id = recordFinding(repo);
+      approveFindings(repo, [id], "P1");
+      installFake(env, "herdr", herdrRules(FIXER_AGENT));
+      setBeforeWorktreeAddHookForTests(() => rmSync(join(findingsDir(repo), `${id}.json`)));
+      try {
+        await assert.rejects(spawn(repo, { findings: [id], slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
+          assert.ok(e instanceof WtError);
+          assert.match(e.message, /Unknown finding\./);
+          const findings = join(repo.mainRoot, "bin/findings");
+          assert.ok(e.message.includes(`Check each with: ${findings} show ${id}`));
+          const release = `cd ${join(repo.worktreesDir, FIXER_BRANCH)} && ${findings} release ${id}`;
+          assert.ok(e.message.includes(`Release any claimed by ${FIXER_BRANCH} with: ${release}`));
+          return true;
+        });
+      } finally {
+        setBeforeWorktreeAddHookForTests(null);
+      }
+    }),
+  ));
+
+test("bin/findings spawn keeps claims after a workspace failure", () =>
+  scenario({}, ({ env, repo }) =>
+    inHerdr(async () => {
+      const ids = [recordFinding(repo), recordFinding(repo, { kind: "docs" })];
+      approveFindings(repo, ids, "P1");
+      installFake(env, "herdr", herdrRules(FIXER_AGENT, [{ match: ["worktree", "open"], code: 1 }]));
+      await assert.rejects(spawn(repo, { findings: ids, slug: "readme-md", mode: "github" }, fixerClock()), (e) => {
+        assert.ok(e instanceof WtError);
+        const path = join(repo.worktreesDir, FIXER_BRANCH);
+        const release = `cd ${path} && ${repo.mainRoot}/bin/findings release ${ids.join(" ")}`;
+        const notice = `Findings ${ids.join(", ")} stay claimed by ${FIXER_BRANCH}. Release them before any teardown with: ${release}`;
+        const releaseIndex = e.message.indexOf(notice);
+        assert.ok(releaseIndex >= 0 && releaseIndex < e.message.indexOf("Optional teardown:"));
+        return true;
+      });
+      for (const id of ids) {
+        const finding = showFinding(repo, id);
+        assert.equal(finding.state, "claimed");
+        assert.equal(finding.claim?.branch, FIXER_BRANCH);
+      }
+    }),
+  ));
 
 function processInfo(pids: number[], shell = 10): FakeRule {
   return {
@@ -371,6 +674,22 @@ test("agent name from a slashed branch", () => {
   assert.equal(agentName("014-add-thing"), "wt-014-add-thing");
   assert.equal(agentName("a".repeat(60)).length, 32);
   assert.equal(agentName("feat//x..y"), "wt-feat-x-y");
+});
+
+test("fixer agent names keep short slugs and distinguish long slugs on the same day", () => {
+  const prefix = "wt-fix-20260103-";
+  const name = (slug: string) => fixerAgentName(`recense-fix-20260103-${slug}`);
+  assert.equal(name("packages-core"), `${prefix}packages-core`);
+  assert.equal(name("abcdefghijklmnop"), `${prefix}abcdefghijklmnop`);
+  const slugs = ["packages-contract", "packages-contracts", "abcdefghijklmnopq"];
+  for (const slug of slugs) {
+    const hash = createHash("sha256").update(`recense-fix-20260103-${slug}`).digest("hex").slice(0, 6);
+    const shortened = slug.startsWith("packages-") ? "packages" : "abcdefghi";
+    assert.equal(name(slug), `${prefix}${shortened}-${hash}`);
+  }
+  const names = ["packages-core", ...slugs].map(name);
+  assert.equal(new Set(names).size, names.length);
+  for (const name of names) assert.match(name, /^[a-z][a-z0-9_-]{0,31}$/);
 });
 
 test("the prompt names the issue and the closing answer", () => {

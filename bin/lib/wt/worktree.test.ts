@@ -230,7 +230,7 @@ test("local hooksPath refuses", () =>
     gitIn(fx.main, "config", "--local", "core.hooksPath", "x");
     const refused = await runWt(wt, ["list"], { cwd: fx.main });
     assert.equal(refused.code, 69);
-    assert.match(refused.stderr, /core\.hooksPath/);
+    assert.equal(refused.stderr.trim(), "core.hooksPath is set for this repository. Nothing was changed.");
   }));
 
 test("a worktree's own copy works from that worktree", () =>
@@ -284,6 +284,22 @@ test("a refused option is not echoed", () =>
     const out = await runWt(join(fx.main, "bin", "wt"), ["list", "--repo", "evil/secret"], { cwd: fx.main });
     assert.equal(out.code, 2);
     assert.equal(out.stderr.includes("evil/secret"), false);
+  }));
+
+test("list --json includes each row's registered findings or null", () =>
+  scenario({ withBin: true }, async ({ repo, fx }) => {
+    const ids = ["f-222222222222", "f-111111111111"];
+    const branch = "recense-fix-20260103-selection";
+    withRegistry(repo, (registry) => {
+      const entry = { mode: "github" as const, createdAt: new Date().toISOString() };
+      registry.worktrees[branch] = { ...entry, path: join(repo.worktreesDir, branch), port: P0, findings: ids };
+      registry.worktrees.other = { ...entry, path: join(repo.worktreesDir, "other"), port: P1 };
+    });
+    const result = await runWt(join(fx.main, "bin/wt"), ["list", "--json"], { cwd: fx.main });
+    assert.equal(result.code, 0, result.stderr);
+    const rows = JSON.parse(result.stdout) as { branch: string; findings: string[] | null }[];
+    assert.deepEqual(rows.find((row) => row.branch === branch)?.findings, ids);
+    assert.equal(rows.find((row) => row.branch === "other")?.findings, null);
   }));
 
 test("list reports ahead, behind, dirty, PR and agent", () =>
@@ -568,7 +584,8 @@ test("the removed run subcommand is unknown and help does not list it", () =>
     assert.equal(bad.code, 2);
     const help = await runWt(wt, ["help"], { cwd: fx.main });
     assert.doesNotMatch(help.stdout, /run view/);
-    assert.doesNotMatch(help.stdout, /--brief|--task|--slug|\btasks?\b|reserv/i);
+    assert.doesNotMatch(help.stdout, /--brief|--task|\btasks?\b|reserv/i);
+    assert.doesNotMatch(help.stdout, /findings|groom|--slug/);
     assert.match(help.stdout, /issues \[--json\]/);
     assert.match(help.stdout, /spawn --issue <n>/);
   }));
@@ -591,6 +608,7 @@ test("list and gc output carry no control character from outside", () => {
     {
       branch: "a\u0085b",
       path: "/p",
+      findings: null,
       port: 1,
       mode: "github" as const,
       ahead: null,

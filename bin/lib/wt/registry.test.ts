@@ -113,7 +113,7 @@ test("a symlinked registry lock is never read through or reaped", (t) => {
       (error) =>
         error instanceof WtError &&
         error.code === 69 &&
-        error.message === "Another bin/wt call holds the registry lock. Try again in a moment.",
+        error.message === "Another bin/wt or bin/findings call holds the registry lock. Try again in a moment.",
     );
     assert.equal(read.mock.callCount(), 0);
     assert.equal(lstatSync(lock).isSymbolicLink(), true);
@@ -157,7 +157,10 @@ test("a FIFO registry lock times out without blocking", async (t) => {
       timeoutMs: 5000,
     });
     assert.equal(result.code, 69, result.stderr);
-    assert.equal(result.stderr, "Another bin/wt call holds the registry lock. Try again in a moment.\n");
+    assert.equal(
+      result.stderr,
+      "Another bin/wt or bin/findings call holds the registry lock. Try again in a moment.\n",
+    );
     assert.equal(lstatSync(lock).isFIFO(), true);
     assert.deepEqual(readdirSync(dirname(lock)).sort(), [...before, "lock"].sort());
   } finally {
@@ -216,6 +219,22 @@ test("a legacy registry with reservations and task keys loads, and a write keeps
   writeFileSync(registryPath(repo), JSON.stringify({ version: 1, worktrees: {} }));
   assert.deepEqual(readRegistry(repo).worktrees, {});
   writeFileSync(registryPath(repo), JSON.stringify({ version: 1, worktrees: {} }));
+});
+
+test("registry refuses invalid finding id lists", () => {
+  const isolated = { ...repo, commonDir: join(env.root, "invalid-finding-ids") };
+  const path = registryPath(isolated);
+  mkdirSync(dirname(path), { recursive: true });
+  const id = "f-0123456789ab";
+  for (const findings of [null, id, [], [42], ["f-ABCDEF012345"], [id, id]]) {
+    const data = JSON.stringify({ version: 1, worktrees: { fixer: { ...entry(PORT_MIN), findings } } });
+    writeFileSync(path, data);
+    assert.throws(
+      () => readRegistry(isolated),
+      (e) => e instanceof WtError && e.code === 1 && e.message.includes("Nothing was changed."),
+    );
+    assert.equal(readFileSync(path, "utf8"), data);
+  }
 });
 
 test("allocatePort takes the lowest port neither registered nor busy", () => {

@@ -128,6 +128,12 @@ export function issueFromBranch(branch: string): number | null {
   return n !== undefined && Number.isSafeInteger(Number(n)) ? Number(n) : null;
 }
 
+const FIXER_BRANCH_RE = /^recense-fix-[0-9]{8}-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export function isFixerBranch(branch: string): boolean {
+  return FIXER_BRANCH_RE.test(branch);
+}
+
 /** Numeric recense names are reserved for explicitly registered issues, including padded numbers. */
 export function requireIssueBranch(branch: string, issue?: number): void {
   if (NUMERIC_BRANCH.test(branch) && issue === undefined)

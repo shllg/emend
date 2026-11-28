@@ -13,14 +13,17 @@ import type { Command, CommandTable } from "./command.ts";
 import { gitLocalDiagnostic, repoDiagnostic } from "./diagnostics.ts";
 import { changeDigest } from "./digest.ts";
 import { htmlEntityNames, legacyEntities, legacyEntityNames, namedEntities } from "./entities.ts";
+import { resolveMergedFindings } from "./findings.ts";
 import { checkIssue, githubRepository, originRepository } from "./issues.ts";
 import { type RunResult, run } from "./proc.ts";
 import { requirePublic, requirePublicText } from "./public.ts";
+import { readRegistry } from "./registry.ts";
 import { assertNoHistoryOverrides, fetchOrigin, gitTry, type Repo, requireGlobalIdentity } from "./repo.ts";
 import { hasTerminal, readTerminalLine } from "./terminal.ts";
 import {
   branchName,
   commitSha,
+  isFixerBranch,
   issueFromBranch,
   NUMERIC_BRANCH,
   oneLine,
@@ -1308,6 +1311,26 @@ export function prMerge(
     if (warnings.length) {
       print(`MERGED ${oid}`);
       throw new WtError(1, warnings.join("\n"));
+    }
+    if (isFixerBranch(branch)) {
+      let fixed: string[];
+      let recovery = "Resolve none by hand without checking which findings this PR fixed.";
+      try {
+        const entry = readRegistry(repo).worktrees[branch];
+        if (!entry?.findings) throw new WtError(1, `The worktree registry lists no findings for ${branch}.`);
+        recovery =
+          `From the main checkout, run bin/wt fetch, then bin/findings resolve <id> --fixed ${oid} ` +
+          `for each of ${entry.findings.join(", ")} that bin/findings show still shows claimed by ${branch}.`;
+        fixed = resolveMergedFindings(repo, entry.findings, { branch, worktree: entry.path }, oid);
+      } catch (error) {
+        print(`MERGED ${oid}`);
+        const reason = error instanceof Error ? error.message.replace(/\.$/, "") : "unknown error";
+        throw new WtError(
+          1,
+          `Warning: the merge is done, but its findings were not recorded as fixed: ${reason}. ${recovery}`,
+        );
+      }
+      for (const id of fixed) print(`FIXED ${id}`);
     }
     deleteRemoteBranch(repo, pr.headRefName, sha, identity.nameWithOwner);
     return `MERGED ${oid}`;

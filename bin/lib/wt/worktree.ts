@@ -18,6 +18,7 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import { isatty } from "node:tty";
 import { pathToFileURL } from "node:url";
 import type { Command, CommandTable } from "./command.ts";
+import { type BundleFinding, listFindings, releaseOrphanedClaim } from "./findings.ts";
 import { PrLookupPrivacyError, prForBranch } from "./github.ts";
 import {
   agentInside,
@@ -25,11 +26,19 @@ import {
   closeWorkspace,
   detectedBackend,
   locatedAgents,
+  writeFindingsBundle,
   writeIssueSnapshot,
 } from "./herdr.ts";
 import { branchClaims, indexClaims, type PickedIssue, pickIssue } from "./issues.ts";
 import { run } from "./proc.ts";
-import { allocatePort, busyPorts, readRegistry, type WorktreeEntry, withRegistry } from "./registry.ts";
+import {
+  allocatePort,
+  busyPorts,
+  readRegistry,
+  validFindingIds,
+  type WorktreeEntry,
+  withRegistry,
+} from "./registry.ts";
 import {
   assertNoGitlinks,
   assertNoGitlinksInRef,
@@ -78,6 +87,7 @@ export interface SetupOptions {
   from?: string;
   /** A number is approved here; spawn supplies its freshly approved issue to share the same snapshot. */
   issue?: number | PickedIssue;
+  findings?: BundleFinding[];
   mode?: "github" | "local";
   /** Ports with a listener, from busyPorts(), taken before the lock. Default: none. */
   busy?: ReadonlySet<number>;
@@ -131,7 +141,14 @@ export function writeWtFiles(entry: WorktreeEntry, branch: string): string {
   ensureRealDir(recenseHome, 0o700);
   // .wt holds this checkout's private state; ignore it even where the repository's .gitignore does not.
   createNew(join(wt, ".gitignore"), "*\n", 0o600);
-  const info = { branch, port: entry.port, recenseHome, issue: entry.issue, mode: entry.mode };
+  const info = {
+    branch,
+    port: entry.port,
+    recenseHome,
+    issue: entry.issue,
+    mode: entry.mode,
+    findings: entry.findings,
+  };
   createNew(join(wt, "worktree.json"), `${JSON.stringify(info, null, 2)}\n`, 0o600);
   return recenseHome;
 }
@@ -274,14 +291,26 @@ function fromLinkedWorktree(repo: Repo): boolean {
   return repo.callerTop !== null && repo.callerTop !== repo.mainRoot;
 }
 
+export function originHasBranch(repo: Repo, branch: string): boolean {
+  const remote = gitTry(repo, ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`]);
+  if (remote.code === 0) return true;
+  if (remote.code === 2) return false;
+  throw new WtError(69, "Could not reach origin to check the branch.");
+}
+
 /** Creates a worktree for `branch` with a port and a private RECENSE_HOME. Exit 3 when the branch or directory is taken. */
 export function setup(repo: Repo, o: SetupOptions): SetupResult {
+  if (o.issue !== undefined && o.findings !== undefined)
+    throw new WtError(2, "Give either an issue or findings. Nothing was created.");
+  const ids = o.findings?.map((finding) => finding.id);
+  if (ids !== undefined && !validFindingIds(ids)) throw new WtError(2, "Invalid finding ids. Nothing was created.");
   const branch = branchName(o.branch);
   const from = o.from === undefined ? undefined : refName(o.from);
   const prepared = typeof o.issue === "object" && o.issue !== null ? o.issue : undefined;
   const issue = o.issue === undefined ? undefined : issueNumber(String(prepared?.number ?? o.issue));
   requireIssueBranch(branch, issue);
   const mode = o.mode ?? "github";
+  if (ids && mode !== "github") throw new WtError(2, "A fixer uses the github mode. Nothing was created.");
   if (issue !== undefined && mode === "local")
     throw new WtError(2, "A local landing does not close the issue; use the github mode.");
   if (mode !== "github" && mode !== "local") throw new WtError(2, "Invalid mode.");
@@ -293,8 +322,10 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
   let originExists = false;
   if (!localExists) {
     fetchOrigin(repo);
-    originExists = issue === undefined && refExists(repo, `refs/remotes/origin/${branch}`);
+    if (issue === undefined)
+      originExists = ids ? originHasBranch(repo, branch) : refExists(repo, `refs/remotes/origin/${branch}`);
   }
+  if (ids && (localExists || originExists)) throw new WtError(3, "The branch already exists. Nothing was created.");
   if ((localExists || originExists) && from !== undefined) {
     throw new WtError(2, "--from applies only to a new branch. Nothing was created.");
   }
@@ -363,10 +394,12 @@ export function setup(repo: Repo, o: SetupOptions): SetupResult {
     }
 
     const entry: WorktreeEntry = { path, port, issue, mode, createdAt: new Date().toISOString() };
+    if (ids) entry.findings = ids;
     r.worktrees[branch] = entry;
     try {
       const recenseHome = writeWtFiles(entry, branch);
       if (approved) writeIssueSnapshot(join(path, ".wt"), approved);
+      if (o.findings) writeFindingsBundle(join(path, ".wt"), o.findings);
       return { entry, recenseHome, failure: null as WtError | null };
     } catch (e) {
       const why = e instanceof Error ? e.message : "unknown error";
@@ -390,6 +423,7 @@ export interface ListRow {
   branch: string;
   path: string;
   issue?: number;
+  findings: string[] | null;
   port: number;
   mode: "github" | "local";
   /** Commits on the branch that its base lacks (local main for a local-mode entry, origin/main otherwise), or null when unknown. */
@@ -487,6 +521,7 @@ export function list(repo: Repo): ListRow[] {
       branch,
       path: entry.path,
       issue: entry.issue,
+      findings: entry.findings ?? null,
       port: entry.port,
       mode: entry.mode,
       ahead,
@@ -771,18 +806,19 @@ export function cleanup(repo: Repo, o: { target: string; closeWorkspace: boolean
 // gc
 
 export interface GcItem {
-  kind: "missing-directory" | "orphan-directory" | "merged-branch";
+  kind: "missing-directory" | "orphan-directory" | "merged-branch" | "orphaned-claim";
   name: string;
   /**
-   * found: reported only. removed/kept: after --prune. locked: a locked worktree, never touched.
+   * found: reported only. removed/released/kept: after --prune. locked: a locked worktree, never touched.
    * unregistered: a directory without a registry entry, never removed by gc.
    */
-  state: "found" | "removed" | "kept" | "locked" | "unregistered";
+  state: "found" | "removed" | "released" | "kept" | "locked" | "unregistered";
   why?: string;
 }
 
 export interface GcReport {
   items: GcItem[];
+  note?: string;
 }
 
 let beforeBranchDelete: ((branch: string) => void) | null = null;
@@ -794,10 +830,10 @@ export function setBeforeBranchDeleteHookForTests(hook: ((branch: string) => voi
 
 /**
  * Reports registry entries without a directory, directories under .claude/worktrees without an entry
- * (Claude Code's own `worktree-*` branches excluded), and local branches merged into origin/main. With `prune` it removes them, running the safety guard
- * first wherever a worktree directory is involved. A locked worktree is reported and never touched.
+ * (Claude Code's own `worktree-*` branches excluded), local branches merged into origin/main and orphaned
+ * finding claims. Pruning retains locked and unregistered worktrees and rechecks each claim before release.
  */
-export function gc(repo: Repo, prune: boolean): GcReport {
+export function gc(repo: Repo, prune: boolean, releaseClaim = releaseOrphanedClaim): GcReport {
   const items: GcItem[] = [];
   const reg = readRegistry(repo);
   const gitWts = listGitWorktrees(repo);
@@ -888,21 +924,55 @@ export function gc(repo: Repo, prune: boolean): GcReport {
       }
     }
   }
+  // 4. Findings whose claiming worktree has gone. Re-check ownership, the directory and its worktree lock.
+  const warnings: string[] = [];
+  let claimed: ReturnType<typeof listFindings>;
+  try {
+    claimed = listFindings(repo, { state: "claimed" }, (message) => warnings.push(message));
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Could not read findings.";
+    return { items, note: `Finding claims were not checked: ${message}` };
+  }
+  for (const finding of claimed) {
+    if (!finding.orphaned || !finding.claim) continue;
+    const item: GcItem = { kind: "orphaned-claim", name: finding.id, state: "found" };
+    items.push(item);
+    if (lockedPaths.has(resolve(finding.claim.worktree))) {
+      item.state = "locked";
+      continue;
+    }
+    if (!prune) continue;
+    let locked = false;
+    const released = releaseClaim(repo, finding.id, finding.claim, (path) => {
+      const worktree = resolve(path);
+      locked = listGitWorktrees(repo).some((w) => w.locked && w.path === worktree);
+      return locked;
+    });
+    if (released) item.state = "released";
+    else if (locked) item.state = "locked";
+    else {
+      item.state = "kept";
+      item.why = "claim changed";
+    }
+  }
+  if (warnings.length) return { items, note: `Some finding records were skipped: ${warnings.join(" ")}` };
   return { items };
 }
 
 export function formatGc(report: GcReport, prune: boolean): string {
-  if (report.items.length === 0) return "Nothing to clean up.";
   const show = (s: string) => s.replace(/[^\x20-\x7e]/g, "?");
   const lines = report.items.map(
     (i) => `${i.state.padEnd(8)} ${i.kind} ${show(i.name)}${i.why ? ` (${show(i.why)})` : ""}`,
   );
-  if (!prune && report.items.some((i) => i.state === "found")) lines.push("Run bin/wt gc --prune to remove them.");
+  if (!lines.length && !report.note) lines.push("Nothing to clean up.");
+  if (!prune && report.items.some((i) => i.state === "found"))
+    lines.push("Run bin/wt gc --prune to remove or release them.");
   if (report.items.some((i) => i.state === "unregistered")) {
     lines.push(
       "Directories without a registry entry are never removed by gc. Remove one by hand once you are sure no setup or spawn uses it.",
     );
   }
+  if (report.note) lines.push(show(report.note));
   return lines.join("\n");
 }
 

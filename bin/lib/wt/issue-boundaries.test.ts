@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mock, test } from "node:test";
 import { isDeepStrictEqual } from "node:util";
+import { findingsDir } from "./findings.ts";
 import { closingGuard, commands as githubCommands, prCreate, prEdit, prMerge } from "./github.ts";
 import { spawn, writeIssueSnapshot } from "./herdr.ts";
 import { commands as historyCommands } from "./history.ts";
@@ -1604,12 +1605,27 @@ for (const [failure, message] of [
     }));
 }
 
-test("issue PR merge accepts the same live snapshot as issue check", () =>
-  boundary(({ repo, state }) => {
+test("issue PR merge accepts the live snapshot and goes straight from the closing check to branch cleanup", () =>
+  boundary(({ repo, state, calls }) => {
     prepareMergeIssue(repo);
     state.closing = { stdout: closingResponse([ownClosingIssue]) };
     assert.equal(checkIssue(repo), 42);
+    const directory = findingsDir(repo);
+    mkdirSync(join(directory, ".."), { recursive: true });
+    writeFileSync(directory, "unreadable registry");
     assert.equal(prMerge(repo, { matchHead: "a".repeat(40), subject: "T", body: "Body" }), `MERGED ${"c".repeat(40)}`);
+    const cleanup = calls.slice(calls.findLastIndex(isClosingQuery) + 1);
+    assert.deepEqual(
+      cleanup.map(({ command, args }) => [
+        command,
+        ...args.slice(args.includes("remote") ? args.indexOf("remote") : GIT_BASE.length),
+      ]),
+      [
+        ["git", "remote", "get-url", "--push", "--all", "origin"],
+        ["git", "remote", "get-url", "origin"],
+        ["git", "ls-remote", "--quiet", "--", "origin", `refs/heads/${state.prBranch}`],
+      ],
+    );
   }));
 
 for (const metadata of [undefined, {}, { issue: null }, { task: "042" }]) {

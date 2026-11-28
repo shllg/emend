@@ -45,6 +45,7 @@ export interface WorktreeEntry {
   path: string;
   port: number;
   issue?: number;
+  findings?: string[];
   mode: "github" | "local";
   createdAt: string;
   /** Commit that landed this branch on local main (set by `land`). */
@@ -63,8 +64,8 @@ export function emptyRegistry(): Registry {
 }
 
 /**
- * The folder bin/wt keeps its registry, lock and findings in. On first use it takes over the folder of the
- * name before the rename (`emend-wt`) with one atomic rename, when the new one is missing. Nothing is deleted.
+ * The folder main.ts (bin/wt) and findings-main.ts (bin/findings) share for the registry, locks and findings.
+ * On first use it takes over the old folder (`emend-wt`) with one atomic rename when the new one is missing.
  */
 export function stateDir(repo: Repo): string {
   const current = join(repo.commonDir, "recense-wt");
@@ -84,7 +85,7 @@ export function stateDir(repo: Repo): string {
       try {
         renameSync(old, current);
       } catch (error) {
-        // Another bin/wt run moved it first: either way there is nothing left to do.
+        // Another process moved the folder first.
         if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
       }
     }
@@ -177,7 +178,7 @@ function acquireLock(path: string, name = "registry"): () => void {
       }
       if (reapIfStale(path)) continue;
       if (Date.now() >= deadline) {
-        throw new WtError(69, `Another bin/wt call holds the ${name} lock. Try again in a moment.`);
+        throw new WtError(69, `Another bin/wt or bin/findings call holds the ${name} lock. Try again in a moment.`);
       }
       sleepSync(25);
     }
@@ -194,6 +195,14 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+export function isFindingId(value: unknown): value is string {
+  return typeof value === "string" && /^f-[0-9a-f]{12}$/.test(value);
+}
+
+export function validFindingIds(ids: unknown): ids is string[] {
+  return Array.isArray(ids) && ids.length > 0 && ids.every(isFindingId) && new Set(ids).size === ids.length;
+}
+
 function parseRegistry(text: string): Registry {
   let data: unknown;
   try {
@@ -207,6 +216,8 @@ function parseRegistry(text: string): Registry {
   for (const entry of Object.values(data.worktrees)) {
     if (isRecord(entry) && Object.hasOwn(entry, "hcAddress") && hcAddress(entry.hcAddress) === null)
       throw new WtError(1, "The worktree registry has an invalid hc address. Nothing was changed.");
+    if (isRecord(entry) && Object.hasOwn(entry, "findings") && !validFindingIds(entry.findings))
+      throw new WtError(1, "The worktree registry has invalid finding ids. Nothing was changed.");
   }
   // Older registries may still carry `reservations` and per-entry `task` keys; they are ignored.
   return data as unknown as Registry;

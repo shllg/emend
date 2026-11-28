@@ -32,8 +32,9 @@ invent work.
 - `packages/core`: pure logic (Markdown to safe blocks, block ids, placing comments, topics). No
   Node-only and no browser-only API; WebCrypto is fine.
 - `bin/`: `bin/wt`, the worktree and pull-request lifecycle CLI (node only, no dependencies, tests
-  in `bin/lib/wt/`), and `.claude/skills/e-*`, its skills. Tests may borrow packages/core's installed
-  Markdown parser; bin/wt itself stays dependency-free.
+  in `bin/lib/wt/`), and `.claude/skills/e-*`, its skills. `bin/findings` records, lists and settles
+  local findings, runs the groom walk and spawns a fixer. Tests may borrow packages/core's installed
+  Markdown parser; bin/wt and bin/findings stay dependency-free.
 - `plugin/`: the Claude Code plugin. `plugin/skills/` holds the review skills, their only copy;
   `plugin/` holds nothing else but `.claude-plugin/plugin.json`. `docs/api.md`: the v1 contract.
   `sync/`: surfaces shared with hunk-review-skill, and synthetic fixtures.
@@ -95,7 +96,8 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
 
 - Feature work happens on a branch in a `bin/wt` worktree under `.claude/worktrees/`. Claude Code
   sessions start at the root of the main checkout or of such a worktree. Branch names start with
-  `recense-`: `recense-<n>-<slug>` for issue `<n>`.
+  `recense-`: `recense-<n>-<slug>` for issue `<n>` and `recense-fix-YYYYMMDD-<slug>` for a
+  findings bundle from `/e-fix`.
 - On its own feature branch an agent commits with plain `git commit` (the git config signs it) and
   pushes that branch. One logical change per commit; the body names the plan task.
 - A merge happens only through `/e-pr-merge` (squash, pinned to the head the owner approved in
@@ -105,12 +107,19 @@ Each line prevents a real failure. "Before you touch" names the rule file with t
   happen only when the owner asks. The Release workflow publishes to npm from `main`; agents never
   start or re-run it.
 - The lifecycle skills: `/e-spawn`, `/e-work`, `/e-pr`, `/e-pr-finalize`, `/e-pr-merge`, `/e-rebase`,
-  `/e-merge-local`, `/e-outside` (an outside contributor's issue and fork PR), `/e-groom` (the
-  groomer, started by the owner in main). Fork code never runs on this machine.
+  `/e-merge-local`, `/e-outside` (an outside contributor's issue and fork PR), `/e-triage`
+  (the owner triages findings before `/e-fix`), `/e-fix`
+  (a findings bundle as one PR), `/e-groom` (the groomer, started by the owner in main).
+  Fork code never runs on this machine.
 - `/e-issue` turns an idea, an improvement or a bug into a GitHub issue. Issues are public. Only the
   owner's command sets the `ready` label.
-- `/e-groom`, started by the owner in the main checkout, walks a few files per pass (`bin/wt groom`).
+- `/e-groom`, started by the owner in the main checkout, walks a few files per pass (`bin/findings groom`).
   Codex scans, the review manager confirms, and survivors enter the local findings registry. It fixes nothing.
+- `/e-triage`, started by the owner in the main checkout, shows the untriaged findings in recense and records the
+  owner's calls: fix with a priority, or skip. `bin/wt pr merge` records a fixer's findings as fixed.
+- The owner starts `/e-fix` in the main checkout. By default it takes up to five approved, small, non-security
+  findings from one area in the local registry, highest priority first. `bin/findings spawn` starts one worker for
+  them.
 - A hook guards Bash and Monitor: issue and label writes ask in main and are refused in worktrees;
   secret reads and guard, settings or git metadata edits are denied. It runs from main, so
   fast-forward main to a hook change before rebasing worktrees onto it.

@@ -120,7 +120,7 @@ export function requireGlobalIdentity(repo: Repo, top: string): void {
 const WORKTREE_ID_RE = /^[A-Za-z0-9._-]{1,100}$/;
 
 function refuseLayout(): never {
-  throw new WtError(69, "The repository layout is not the one bin/wt trusts. Nothing was changed.");
+  throw new WtError(69, "The repository layout is not trusted. Nothing was changed.");
 }
 
 function realpathOrNull(p: string): string | null {
@@ -325,7 +325,7 @@ export function gitBytes(repo: Repo, args: string[], opts: { cwd?: string; input
   });
 }
 
-const GITLINK_MESSAGE = "A gitlink (submodule) entry is in HEAD or the index; bin/wt refuses it.";
+const GITLINK_MESSAGE = "A gitlink (submodule) entry is in HEAD or the index. Both bin/wt and bin/findings refuse it.";
 
 function hasGitlink(output: string): boolean {
   return output.split("\n").some((l) => l.startsWith("160000 "));
@@ -351,7 +351,7 @@ export function assertNoLocalHooksPath(repo: Repo): void {
   for (const scope of ["--local", "--worktree"]) {
     const r = rawGit(["config", scope, "--get", "core.hooksPath"], repo.mainRoot);
     if (r.code === 0) {
-      throw new WtError(69, "core.hooksPath is set for this repository, so bin/wt will not run. Nothing was changed.");
+      throw new WtError(69, "core.hooksPath is set for this repository. Nothing was changed.");
     }
   }
 }
