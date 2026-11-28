@@ -2,6 +2,7 @@ import dns from "node:dns";
 import { isIP } from "node:net";
 import { configure, getConfig } from "@testing-library/react";
 import { afterAll, afterEach, beforeEach, expect, TestRunner, vi } from "vitest";
+import { resetHandoffNoticesForTests } from "../lib/handoff-notices.ts";
 import { Channel, Events, Locks } from "./events.ts";
 
 // A web test never reaches the network. The guard records every attempt it refuses, with the test
@@ -147,6 +148,7 @@ configure({ asyncWrapper: guardAsyncWrapper(getConfig().asyncWrapper) });
 // Testing Library's config is global, so this is wrong for concurrent tests; the polling guard bans them.
 // Waits keep the full test timeout; asyncWrapper prevents a late settlement from resuming an expired test body.
 beforeEach(({ task }) => configure({ asyncUtilTimeout: task.timeout || LONGEST_TIMER_DELAY }));
+beforeEach(resetHandoffNoticesForTests);
 beforeEach(() => {
   // Some web tests deliberately use the Node environment instead of happy-dom.
   if (typeof window === "undefined") return;

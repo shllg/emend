@@ -3197,8 +3197,8 @@ test.each([1280, 390])("Comments tab counts threads and updates before the Send 
   expect(reading.getAllByRole("article")).toHaveLength(9);
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
   if (size === 390) fireEvent.click(screen.getByRole("button", { name: "Send 2 comments on revision 1" }));
-  const dialog = await screen.findByRole(size === 390 ? "dialog" : "alertdialog", { name: "Sent" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  const notice = await screen.findByRole("region", { name: "Sent" });
+  fireEvent.click(within(notice).getByRole("button", { name: "Close" }));
   const afterName = "Comments 0 unsent, 5 not resolved, 9 threads in all";
   const updated = await screen.findByRole(role, { name: afterName });
   const neutral = within(updated).getByText("0 / 5 / 9");
@@ -4206,7 +4206,49 @@ test("viewed events update boxes without changing folds; focus alone does not re
   }
 });
 
-test("a confirmed live event refetches the review and the open Send window shows the pick-up", async () => {
+test.each([1280, 390])("the Sent notice stays with its review while the reader navigates at %s px", async (size) => {
+  width = size;
+  withInboxNavigation();
+  const fallback = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation(async (path, init) =>
+    path === `/api/v1/reviews/${id}/sends` && init?.method === "POST"
+      ? new Response(null, { status: 201 })
+      : (fallback?.(path, init) as Promise<Response>),
+  );
+  const { history } = mount(`/r/${id}`);
+  await screen.findByText("Overview");
+  const bar = within(screen.getByRole("region", { name: "Send and approve" }));
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  if (size === 390) fireEvent.click(screen.getByRole("button", { name: "Send 2 comments on revision 1" }));
+  const notice = await bar.findByRole("region", { name: "Sent" });
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.body.style.pointerEvents).not.toBe("none");
+  if (size === 390) {
+    const tabs = within(screen.getByRole("navigation", { name: "Review tabs" }));
+    fireEvent.click(tabs.getByRole("link", { name: /^Comments/ }));
+    await waitFor(() => expect(history.location.search).toContain("tab=comments"));
+    expect(bar.getByRole("region", { name: "Sent" })).toBe(notice);
+    const more = screen.getByRole("button", { name: "More" });
+    fireEvent.keyDown(more, { key: "ArrowDown" });
+    const menu = await screen.findByRole("menu", { name: "More" });
+    fireEvent.keyDown(menu, { key: "Escape" });
+    fireEvent.click(await screen.findByRole("link", { name: "Inbox" }));
+    await screen.findByRole("heading", { name: "Inbox", level: 1 });
+    expect(history.location.pathname).toBe("/");
+  } else {
+    const sidebar = within(screen.getByRole("complementary", { name: "Inbox" }));
+    fireEvent.click(sidebar.getByRole("link", { name: /Another proposal/ }), { button: 0 });
+    await screen.findByRole("heading", { name: secondItem.title, level: 1 });
+    expect(history.location.pathname).toBe(`/r/${secondItem.id}`);
+  }
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
+  fireEvent.click(await screen.findByRole("link", { name: /Synthetic review/ }), { button: 0 });
+  expect(await screen.findByRole("region", { name: "Sent" })).toBeTruthy();
+  expect(history.location.pathname).toBe(`/r/${id}`);
+});
+
+test("a confirmed live event refetches the review and the Sent notice shows the pick-up", async () => {
   let pickedUpAt: string | null = null;
   const fallback = fetchMock.getMockImplementation();
   fetchMock.mockImplementation(async (path, init) => {
@@ -4227,7 +4269,8 @@ test("a confirmed live event refetches the review and the open Send window shows
   await waitFor(() => expect(Events.opened).toHaveLength(1));
   fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), { target: { value: "Carry on" } });
   fireEvent.click(screen.getByRole("button", { name: "Send" }));
-  await screen.findByText("Waiting for the agent to pick this up…");
+  const notice = within(await screen.findByRole("region", { name: "Sent" }));
+  expect((await notice.findByText("Waiting for the agent to pick this up…")).getAttribute("role")).toBe("status");
   pickedUpAt = "2026-03-05T12:00:00.000Z";
   act(() => {
     Events.opened[0]?.emit("confirmed", {
@@ -4236,5 +4279,5 @@ test("a confirmed live event refetches the review and the open Send window shows
       deliveryId: "44444444-4444-4444-8444-444444444444",
     });
   });
-  await screen.findByText("The agent picked up your feedback.");
+  await notice.findByText("The agent picked up your feedback.");
 });

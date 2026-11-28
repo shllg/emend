@@ -1,11 +1,19 @@
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { onlineManager, QueryClient, QueryClientProvider, type QueryFunction, useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { ApiError } from "../../api/client.ts";
 import { reconnectReviewEvents } from "../../lib/event-stream.ts";
+import { getHandoffNotice } from "../../lib/handoff-notices.ts";
 import { shortDate } from "../../lib/time.ts";
 import { ToastProvider } from "../ui/Toast.tsx";
-import { HANDOFF_CLOSE_MS, HANDOFF_REFETCH_MS, HANDOFF_WAIT_MS, type SendAgent } from "./HandOver.tsx";
+import {
+  HANDOFF_ANNOUNCE_MS,
+  HANDOFF_CLOSE_MS,
+  HANDOFF_REFETCH_MS,
+  HANDOFF_WAIT_MS,
+  type SendAgent,
+} from "./HandOver.tsx";
 import type { ReviewLifecycle } from "./ReviewActions.tsx";
 import { SendBar } from "./SendBar.tsx";
 
@@ -242,10 +250,11 @@ test.each([
     }
     await act(async () => pending.resolve(new Response(null, { status: 201 })));
     await settle();
-    const sent = within(screen.getByRole("alertdialog", { name: "Sent" }));
-    fireEvent.click(sent.getByRole("button", { name: "Close" }));
+    const close = within(sentNotice()).getByRole("button", { name: "Close" });
+    act(() => close.focus());
+    fireEvent.click(close);
     await settle();
-    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Instructions" }));
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "How to resume" }).disabled).toBe(false);
     if (lifecycle) {
@@ -337,36 +346,85 @@ test("the phone puts the longer text in the Send sheet, not in the bar", () => {
   expect(screen.getByText(command)).toBeTruthy();
 });
 
-test("with an agent waiting, the window waits, then confirms the pick-up and closes by itself", async () => {
+const sentNotice = () => screen.getByRole("region", { name: "Sent" });
+
+test("the status line starts empty, then receives its text so a screen reader announces it", async () => {
+  mount({ agent: idle });
+  await send();
+  const region = sentNotice().querySelector<HTMLElement>("p[role=status]") as HTMLElement;
+  expect(region.textContent).toBe("");
+  await settle(HANDOFF_ANNOUNCE_MS);
+  expect(region.textContent).toBe(pickedUp);
+  expect(sentNotice().contains(region)).toBe(true);
+});
+
+test("a pick-up that removes the focused resume command moves focus to Close", async () => {
+  const { update } = mount({ agent: idle });
+  await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
+  const copy = within(sentNotice()).getByRole("button", { name: "Copy" });
+  act(() => copy.focus());
+  expect(document.activeElement).toBe(copy);
+  update({ agent: { ...idle, pickedUpAt: "2026-03-05T12:00:00.000Z" } });
+  await settle();
+  expect(within(sentNotice()).queryByRole("button", { name: "Copy" })).toBeNull();
+  expect(document.activeElement).toBe(within(sentNotice()).getByRole("button", { name: "Close" }));
+});
+
+test.each([
+  ["the instructions field", () => screen.getByRole("textbox", { name: "Instructions" })],
+  ["the page body", () => document.body],
+  ["the Send button", () => screen.getByRole("button", { name: "Send" })],
+] as const)("a pick-up leaves focus on %s after the reader leaves Copy", async (_name, destination) => {
+  const { update } = mount({ agent: idle });
+  await send();
+  const copy = within(sentNotice()).getByRole("button", { name: "Copy" });
+  act(() => copy.focus());
+  expect(document.activeElement).toBe(copy);
+  const target = destination();
+  act(() => {
+    // Leaving Copy can blur it without a related target before the reader focuses anything else.
+    copy.blur();
+    if (target !== document.body) target.focus();
+  });
+  expect(document.activeElement).toBe(target);
+  update({ agent: { ...idle, pickedUpAt: pickedAt } });
+  expect(within(sentNotice()).queryByRole("button", { name: "Copy" })).toBeNull();
+  expect(document.activeElement).toBe(target);
+});
+
+test("with an agent waiting, the notice waits, then confirms the pick-up and closes by itself", async () => {
   const { update } = mount({ agent: waiting });
   await send();
-  const dialog = screen.getByRole("alertdialog", { name: "Sent" });
-  expect(dialog.textContent).toContain("Waiting for the agent to pick this up…");
+  await settle(HANDOFF_ANNOUNCE_MS);
+  const notice = sentNotice();
+  expect(notice.textContent).toContain("Waiting for the agent to pick this up…");
   expect(screen.getByText("Waiting for the agent to pick this up…").closest('[role="status"]')).toBeTruthy();
   update({ agent: { ...waiting, pickedUpAt: "2026-03-05T12:00:00.000Z" } });
   expect(screen.getByText("The agent picked up your feedback.")).toBeTruthy();
   await settle(HANDOFF_CLOSE_MS - 1);
-  expect(screen.queryByRole("alertdialog")).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeTruthy();
   await settle(1);
-  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
   expect(fetchMock).toHaveBeenCalledOnce();
 });
 
-test("with no agent waiting, the window shows the fallback at once and asks the server once", async () => {
+test("with no agent waiting, the notice shows the fallback at once and asks the server once", async () => {
   mount({ agent: idle });
   await send();
-  const dialog = screen.getByRole("alertdialog", { name: "Sent" });
-  expect(dialog.textContent).toContain(pickedUp);
-  expect(dialog.textContent).toContain(command);
-  expect(dialog.textContent).toContain(`Run recense feedback ${reviewId} and handle the result`);
-  // The Send's own success refetches once; the window adds one more, and no further one.
+  await settle(HANDOFF_ANNOUNCE_MS);
+  const notice = sentNotice();
+  expect(notice.textContent).toContain(pickedUp);
+  expect(notice.textContent).toContain(command);
+  expect(notice.textContent).toContain(`Run recense feedback ${reviewId} and handle the result`);
+  // The Send's own success refetches once; the notice adds one more, and no further one.
   expect(reviewRefetches()).toBe(2);
   expect(inboxRefetches()).toBe(2);
   await settle(HANDOFF_WAIT_MS * 2);
   expect(reviewRefetches()).toBe(2);
 });
 
-test("after 15 seconds without a pick-up the window refetches once, then shows the fallback", async () => {
+test("after 15 seconds without a pick-up the notice refetches once, then shows the fallback", async () => {
   mount({ agent: waiting });
   await send();
   const review = reviewRefetches();
@@ -382,15 +440,16 @@ test("after 15 seconds without a pick-up the window refetches once, then shows t
   expect(reviewRefetches()).toBe(review + 1);
 });
 
-test("a late pick-up switches the open window and then closes it", async () => {
+test("a late pick-up switches the open notice and then closes it", async () => {
   const { update } = mount({ agent: idle });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   expect(screen.getByText(pickedUp)).toBeTruthy();
   update({ agent: { ...idle, pickedUpAt: "2026-03-05T12:00:00.000Z" } });
   expect(screen.getByText("The agent picked up your feedback.")).toBeTruthy();
-  expect(within(screen.getByRole("alertdialog")).queryByText(command)).toBeNull();
+  expect(within(sentNotice()).queryByText(command)).toBeNull();
   await settle(HANDOFF_CLOSE_MS);
-  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
 });
 
 test("a pickedUpAt from an earlier Send never counts as a pick-up", async () => {
@@ -411,33 +470,46 @@ function approve(name: string) {
   fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Approve" }));
 }
 
-test("Approve opens no window", async () => {
+test("Approve opens no Sent notice", async () => {
   mount({ agent: waiting, unsentCount: 0 });
   approve("Approve revision 3");
   await settle();
   expect(screen.getByText("Approved revision 3")).toBeTruthy();
   expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
   expect(screen.queryByText(/pick this up/)).toBeNull();
 });
 
-test("closing the window does not cancel the Send", async () => {
-  mount({ agent: waiting });
+test("closing the notice does not cancel the Send", async () => {
+  const view = mount({ agent: waiting });
   await send();
   const review = reviewRefetches();
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await settle(HANDOFF_WAIT_MS * 2);
-  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
   expect(fetchMock).toHaveBeenCalledOnce();
   expect(reviewRefetches()).toBe(review);
+  view.unmount();
+  mount({ agent: waiting });
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
 });
 
-test("the phone shows the window in the bottom sheet", async () => {
-  mount({ agent: idle, phone: true });
-  await send(true);
+test.each([
+  { layout: "desktop", phone: false },
+  { layout: "phone", phone: true },
+])("the $layout Sent notice occupies the first row of the Send bar", async ({ phone }) => {
+  mount({ agent: idle, phone });
+  await send(phone);
+  await settle(HANDOFF_ANNOUNCE_MS);
   expect(screen.queryByRole("alertdialog")).toBeNull();
-  const sheet = screen.getByRole("dialog", { name: "Sent" });
-  expect(sheet.textContent).toContain(pickedUp);
-  expect(sheet.textContent).toContain(command);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  const bar = screen.getByRole("region", { name: "Send and approve" });
+  const notice = sentNotice();
+  expect(bar.firstElementChild).toBe(notice);
+  expect(notice.classList.contains("absolute")).toBe(false);
+  expect(notice.classList.contains("fixed")).toBe(false);
+  expect(notice.textContent).toContain(pickedUp);
+  expect(notice.textContent).toContain(command);
 });
 
 test("Copy writes the command, reads Copied for 2 seconds and announces it", async () => {
@@ -491,22 +563,19 @@ const nextRevision = (pendingSend: boolean): SendAgent => ({ ...waiting, pending
 
 /** A registered review query: its fetch answers, never settles or fails, by `probe.mode`. */
 const probe: { mode: "ok" | "hang" | "fail" } = { mode: "ok" };
-function Probe() {
-  useQuery({
-    queryKey: ["review", reviewId],
-    queryFn: () =>
-      probe.mode === "hang"
-        ? new Promise<never>(() => {})
-        : probe.mode === "fail"
-          ? Promise.reject(new TypeError("Failed to fetch"))
-          : Promise.resolve(null),
-  });
+function fetchProbeReview(): Promise<null> {
+  if (probe.mode === "hang") return new Promise<never>(() => {});
+  if (probe.mode === "fail") return Promise.reject(new TypeError("Failed to fetch"));
+  return Promise.resolve(null);
+}
+function Probe({ queryFn }: { queryFn: QueryFunction<unknown> }) {
+  useQuery({ queryKey: ["review", reviewId], queryFn });
   return null;
 }
-function mountProbe() {
-  render(
+function mountProbe(queryFn: QueryFunction<unknown> = fetchProbeReview) {
+  return render(
     <QueryClientProvider client={client}>
-      <Probe />
+      <Probe queryFn={queryFn} />
     </QueryClientProvider>,
   );
 }
@@ -519,12 +588,13 @@ test("the fallback shows at 15 seconds even when the refetch never settles", asy
   probe.mode = "hang";
   await settle(HANDOFF_WAIT_MS);
   expect(screen.getByText(pickedUp)).toBeTruthy();
-  expect(within(screen.getByRole("alertdialog")).getByText(command)).toBeTruthy();
+  expect(within(sentNotice()).getByText(command)).toBeTruthy();
 });
 
-test("a pick-up is latched: later data never switches the window back", async () => {
+test("a pick-up is latched: later data never switches the notice back", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: { ...waiting, pickedUpAt: pickedAt } });
   expect(screen.getByText(pickedText)).toBeTruthy();
   // The agent publishes: the revision is newer, pickedUpAt is cleared, a Send is pending again.
@@ -537,6 +607,7 @@ test("a pick-up is latched: later data never switches the window back", async ()
 test("a newer revision with nothing pending counts as picked up", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: nextRevision(false) });
   expect(screen.getByText(pickedText)).toBeTruthy();
 });
@@ -544,20 +615,22 @@ test("a newer revision with nothing pending counts as picked up", async () => {
 test("a newer revision with the Send still pending does not count as picked up", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: nextRevision(true) });
   expect(screen.queryByText(pickedText)).toBeNull();
   expect(screen.getByText("Waiting for the agent to pick this up…")).toBeTruthy();
 });
 
-test("the review changing revision while the window is open leaves it waiting", async () => {
+test("the review changing revision while the notice is open leaves it waiting", async () => {
   const { update } = mount({ agent: waiting });
   await send();
+  await settle(HANDOFF_ANNOUNCE_MS);
   update({ agent: nextRevision(true), revision: 4, newestRevision: 4 });
-  expect(screen.getByRole("alertdialog", { name: "Sent" })).toBeTruthy();
+  expect(sentNotice()).toBeTruthy();
   expect(screen.getByText("Waiting for the agent to pick this up…")).toBeTruthy();
 });
 
-test("a refetch that lands before the Send response opens the window already picked up", async () => {
+test("a refetch that lands before the Send response opens the notice already picked up", async () => {
   const pending = Promise.withResolvers<Response>();
   fetchMock.mockReturnValueOnce(pending.promise);
   const { update } = mount({ agent: waiting });
@@ -566,27 +639,28 @@ test("a refetch that lands before the Send response opens the window already pic
   // The baseline was read at click time: this snapshot differs from it.
   update({ agent: { ...waiting, pickedUpAt: pickedAt } });
   await act(async () => pending.resolve(new Response(null, { status: 201 })));
-  await settle();
-  expect(screen.getByRole("alertdialog", { name: "Sent" })).toBeTruthy();
+  await settle(HANDOFF_ANNOUNCE_MS);
+  expect(sentNotice()).toBeTruthy();
   expect(screen.getByText(pickedText)).toBeTruthy();
 });
 
-async function pickedWindow() {
+async function pickedNotice() {
   const view = mount({ agent: waiting });
   await send();
   view.update({ agent: { ...waiting, pickedUpAt: pickedAt } });
   return view;
 }
 
-test("auto-close runs 3 seconds after a pick-up when the reader has not touched the window", async () => {
-  await pickedWindow();
+test("auto-close runs 3 seconds after a pick-up when the reader has not touched the notice", async () => {
+  await pickedNotice();
   await settle(HANDOFF_CLOSE_MS);
-  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
 });
 
 test.each([
-  ["a pointer event", () => fireEvent.pointerDown(screen.getByRole("alertdialog"))],
-  ["a key event", () => fireEvent.keyDown(screen.getByRole("alertdialog"), { key: "Tab" })],
+  ["a pointer event", () => fireEvent.pointerDown(sentNotice())],
+  ["focus", () => within(sentNotice()).getByRole("button", { name: "Close" }).focus()],
+  ["a key event", () => fireEvent.keyDown(sentNotice(), { key: "Tab" })],
   [
     "a text selection",
     () => {
@@ -598,17 +672,17 @@ test.each([
       document.dispatchEvent(new Event("selectionchange"));
     },
   ],
-])("%s inside the window cancels the auto-close", async (_name, touch) => {
-  await pickedWindow();
+])("%s inside the notice cancels the auto-close", async (_name, touch) => {
+  await pickedNotice();
   await settle(HANDOFF_CLOSE_MS - 1);
   act(() => {
     touch();
   });
   await settle(HANDOFF_CLOSE_MS * 3);
-  expect(screen.getByRole("alertdialog", { name: "Sent" })).toBeTruthy();
+  expect(sentNotice()).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   await settle();
-  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
 });
 
 test("unmounting during the 15 second wait leaves no timer and no refetch", async () => {
@@ -620,34 +694,138 @@ test("unmounting during the 15 second wait leaves no timer and no refetch", asyn
   await settle(HANDOFF_WAIT_MS * 2);
   expect(reviewRefetches()).toBe(review);
   expect(errors).not.toHaveBeenCalled();
+  mount({ agent: waiting });
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  await settle();
+  expect(reviewRefetches()).toBe(review + 1);
+  await settle(HANDOFF_WAIT_MS);
+  expect(reviewRefetches()).toBe(review + 1);
+});
+
+test("returning before the fallback deadline waits only the time left since Send", async () => {
+  const view = mount({ agent: waiting });
+  await send();
+  view.unmount();
+  await settle(HANDOFF_WAIT_MS - 1000);
+  mount({ agent: waiting });
+  await settle(999);
+  expect(within(sentNotice()).getByText("Waiting for the agent to pick this up…")).toBeTruthy();
+  expect(reconnectReviewEvents).not.toHaveBeenCalled();
+  await settle(1);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+});
+
+test("returning after the fallback asked keeps the notice without reconnecting or invalidating queries", async () => {
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  first.unmount();
+  invalidate.mockClear();
+  mount({ agent: waiting });
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  expect(invalidate).not.toHaveBeenCalled();
+});
+
+test("leaving before the fallback ask starts lets the next visit ask once", async () => {
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  first.unmount();
+  await settle(HANDOFF_WAIT_MS);
+  mount({ agent: waiting }).unmount();
+  await settle();
+  expect(getHandoffNotice(reviewId)?.asked).toBe(false);
+  expect(reconnectReviewEvents).not.toHaveBeenCalled();
+  render(tree({ agent: waiting }), { reactStrictMode: true });
+  await settle();
+  expect(getHandoffNotice(reviewId)?.asked).toBe(true);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+});
+
+test("a pick-up while away shows on return for three seconds, then stays closed", async () => {
+  const view = mount({ agent: waiting });
+  await send();
+  view.unmount();
+  await settle(HANDOFF_WAIT_MS);
+  const agent = { ...waiting, pickedUpAt: pickedAt };
+  const returned = mount({ agent });
+  await settle(HANDOFF_CLOSE_MS - 1);
+  expect(within(sentNotice()).getByText(pickedText)).toBeTruthy();
+  expect(reconnectReviewEvents).not.toHaveBeenCalled();
+  await settle(1);
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
+  returned.unmount();
+  mount({ agent });
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
+});
+
+test("a held notice keeps its pick-up across visits until the reader closes it", async () => {
+  const view = mount({ agent: waiting });
+  await send();
+  fireEvent.pointerDown(sentNotice());
+  view.unmount();
+  const returned = mount({ agent: { ...waiting, pickedUpAt: pickedAt } });
+  await settle(HANDOFF_CLOSE_MS);
+  expect(within(sentNotice()).getByText(pickedText)).toBeTruthy();
+  returned.unmount();
+  mount({ agent: nextRevision(true) });
+  await settle(HANDOFF_CLOSE_MS);
+  expect(within(sentNotice()).getByText(pickedText)).toBeTruthy();
+  fireEvent.click(within(sentNotice()).getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
+});
+
+test("a second Send replaces the picked-up notice and starts a fresh wait", async () => {
+  const view = mount({ agent: waiting });
+  await send();
+  await settle(HANDOFF_WAIT_MS - 1);
+  view.update({ agent: { ...waiting, pickedUpAt: pickedAt } });
+  const first = sentNotice();
+  expect(within(first).getByText(pickedText)).toBeTruthy();
+  await send();
+  expect(sentNotice()).not.toBe(first);
+  await settle(HANDOFF_WAIT_MS - 1);
+  expect(within(sentNotice()).getByText("Waiting for the agent to pick this up…")).toBeTruthy();
+  await settle(1);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
 });
 
 test("unmounting during the 3 second auto-close leaves no timer", async () => {
-  const view = await pickedWindow();
+  const view = await pickedNotice();
   const errors = vi.spyOn(console, "error");
   view.unmount();
   await settle(HANDOFF_CLOSE_MS * 2);
   expect(errors).not.toHaveBeenCalled();
-  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
 });
 
-test("on the desktop, closing the window returns focus to the instructions field", async () => {
+test.each(["Close", "Escape"])("on desktop, %s inside Sent returns focus to the instructions field", async (key) => {
   mount({ agent: waiting });
   await send();
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  await settle();
+  expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Instructions" }));
+  const close = within(sentNotice()).getByRole("button", { name: "Close" });
+  act(() => close.focus());
+  if (key === "Escape") fireEvent.keyDown(close, { key });
+  else fireEvent.click(close);
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Instructions" }));
 });
 
-test("on the phone, the window opens after the Send sheet closed, has a Close button and returns focus to Send", async () => {
+test("on the phone, the notice opens after the Send sheet closed, has a Close button and returns focus to Send", async () => {
   mount({ agent: idle, phone: true });
   await send(true);
   await settle();
   expect(screen.queryByRole("dialog", { name: "Send feedback" })).toBeNull();
-  expect(screen.getByRole("dialog", { name: "Sent" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  const close = within(sentNotice()).getByRole("button", { name: "Close" });
+  act(() => close.focus());
+  fireEvent.click(close);
   await settle();
-  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Sent" })).toBeNull();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Send" }));
 });
 
@@ -702,7 +880,7 @@ test("a repeated failure changes the announcement text so it is announced again"
   Reflect.deleteProperty(document, "execCommand");
 });
 
-test("on the phone, the window waits for the Send sheet's exit animation to end", async () => {
+test("on the phone, the notice mounts in the Send bar during the Send sheet's exit animation", async () => {
   // Happy DOM runs no animations: report one on the Send sheet, with a different name once closed, so
   // the name changes on close and the sheet stays mounted until its animationend.
   let lastName = "";
@@ -725,24 +903,296 @@ test("on the phone, the window waits for the Send sheet's exit animation to end"
   await send(true);
   await settle();
   const sheet = screen.getByRole("dialog", { name: "Send feedback", hidden: true });
-  expect(screen.queryByRole("dialog", { name: "Sent" })).toBeNull();
+  expect(within(screen.getByLabelText("Send and approve")).getByLabelText("Sent")).toBeTruthy();
   fireEvent.animationEnd(sheet, { animationName: lastName });
   await settle();
   expect(screen.queryByRole("dialog", { name: "Send feedback" })).toBeNull();
-  expect(screen.getByRole("dialog", { name: "Sent" })).toBeTruthy();
+  expect(sentNotice()).toBeTruthy();
 });
 
 const lostText =
   "recense cannot reach its server right now, so a pick-up may not show here. If no agent has it yet, hand it over with the command below.";
 
-test("a Send answered by the server opens the window and frees the button while the refetch never settles", async () => {
+test("returning while the server is unreachable keeps the warning through one retry until the review fetch succeeds", async () => {
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "fail";
+  await settle(HANDOFF_WAIT_MS);
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  first.unmount();
+
+  const retry = Promise.withResolvers<boolean>();
+  vi.mocked(reconnectReviewEvents).mockReturnValueOnce(retry.promise);
+  invalidate.mockClear();
+  render(tree({ agent: waiting }), { reactStrictMode: true });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  await settle();
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  expect(getHandoffNotice(reviewId)?.lost).toBe(true);
+
+  probe.mode = "ok";
+  await act(async () => retry.resolve(false));
+  await settle();
+  expect(reviewRefetches()).toBe(1);
+  expect(inboxRefetches()).toBe(1);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+});
+
+test("an offline retry keeps the warning until the paused review fetch succeeds", async () => {
+  const fetchReview = vi.fn(fetchProbeReview);
+  mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "fail";
+  await settle(HANDOFF_WAIT_MS);
+  expect(getHandoffNotice(reviewId)?.lost).toBe(true);
+  first.unmount();
+
+  const wasOnline = onlineManager.isOnline();
+  try {
+    onlineManager.setOnline(false);
+    probe.mode = "ok";
+    fetchReview.mockClear();
+    mount({ agent: waiting });
+    await settle();
+    expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+    expect(client.getQueryState(["review", reviewId])?.fetchStatus).toBe("paused");
+    expect(fetchReview).not.toHaveBeenCalled();
+    expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+    expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+
+    await act(async () => onlineManager.setOnline(true));
+    expect(fetchReview).toHaveBeenCalledOnce();
+    expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+    expect(getHandoffNotice(reviewId)?.lost).toBe(false);
+  } finally {
+    onlineManager.setOnline(wasOnline);
+  }
+});
+
+test("leaving during the first review fetch cancels it and lets the next visit ask again", async () => {
+  const fetchReview = vi.fn<QueryFunction<null>>().mockResolvedValue(null);
+  const observer = mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await send();
+  fetchReview.mockClear();
+  fetchReview.mockImplementationOnce(
+    ({ signal }) => new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))),
+  );
+  await settle(HANDOFF_WAIT_MS);
+  expect(fetchReview).toHaveBeenCalledOnce();
+  expect(getHandoffNotice(reviewId)?.asked).toBe(true);
+  first.unmount();
+  observer.unmount();
+  await settle();
+  expect(fetchReview.mock.calls[0]?.[0].signal.aborted).toBe(true);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: false, lost: false });
+
+  invalidate.mockClear();
+  mount({ agent: waiting });
+  await settle();
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(reviewRefetches()).toBe(1);
+  expect(fetchReview).toHaveBeenCalledTimes(2);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
+});
+
+test("a Send fetch failure during reconnect lets the next visit retry a cancelled first ask", async () => {
+  const queryKey = ["review", reviewId];
+  const fetchReview = vi.fn<QueryFunction<null>>().mockResolvedValue(null);
+  const observer = mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await settle();
+
+  const background = Promise.withResolvers<null>();
+  const reconnect = Promise.withResolvers<boolean>();
+  vi.mocked(reconnectReviewEvents).mockReturnValueOnce(reconnect.promise);
+  fetchReview
+    .mockClear()
+    .mockReturnValueOnce(background.promise)
+    .mockImplementationOnce(
+      ({ signal }) => new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))),
+    );
+  await send();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  expect(fetchReview).toHaveBeenCalledOnce();
+  const error = new TypeError("Failed to fetch");
+  await act(async () => background.reject(error));
+  expect(client.getQueryState(queryKey)?.error).toBe(error);
+
+  await act(async () => reconnect.resolve(false));
+  expect(fetchReview).toHaveBeenCalledTimes(2);
+  first.unmount();
+  observer.unmount();
+  await settle();
+  expect(fetchReview.mock.calls[1]?.[0].signal.aborted).toBe(true);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: false, lost: false });
+
+  fetchReview.mockRejectedValueOnce(error);
+  mount({ agent: waiting });
+  await settle();
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+});
+
+test.each(["new data", "HTTP 500"])(
+  "a Send fetch returning %s during reconnect still counts after leaving cancels the first ask's refetch",
+  async (answer) => {
+    const queryKey = ["review", reviewId];
+    const fetchReview = vi.fn<QueryFunction<SendAgent | null>>().mockResolvedValue(null);
+    const observer = mountProbe(fetchReview);
+    const first = mount({ agent: waiting });
+    await settle();
+
+    const background = Promise.withResolvers<SendAgent>();
+    const reconnect = Promise.withResolvers<boolean>();
+    vi.mocked(reconnectReviewEvents).mockReturnValueOnce(reconnect.promise);
+    fetchReview
+      .mockClear()
+      .mockReturnValueOnce(background.promise)
+      .mockImplementationOnce(({ signal }) => {
+        return new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
+      });
+    await send();
+    await settle(HANDOFF_WAIT_MS);
+    expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+    expect(fetchReview).toHaveBeenCalledOnce();
+    if (answer === "new data") {
+      await act(async () => background.resolve(waiting));
+      expect(client.getQueryData(queryKey)).toEqual(waiting);
+    } else {
+      const error = new ApiError(500, "internal_error", "Internal server error");
+      await act(async () => background.reject(error));
+      expect(client.getQueryState(queryKey)?.error).toBe(error);
+    }
+
+    await act(async () => reconnect.resolve(false));
+    expect(fetchReview).toHaveBeenCalledTimes(2);
+    first.unmount();
+    observer.unmount();
+    await settle();
+    expect(fetchReview.mock.calls[1]?.[0].signal.aborted).toBe(true);
+    expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
+
+    invalidate.mockClear();
+    mount({ agent: waiting });
+    await settle();
+    expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+    expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+    expect(reviewRefetches()).toBe(0);
+    expect(fetchReview).toHaveBeenCalledTimes(2);
+  },
+);
+
+test("a newer cached TypeError alone keeps the warning when the retry resolves", async () => {
+  const queryKey = ["review", reviewId];
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "fail";
+  await settle(HANDOFF_WAIT_MS);
+  expect(getHandoffNotice(reviewId)?.lost).toBe(true);
+  first.unmount();
+
+  // Let the retry resolve normally while a separate review fetch updates only the cached error.
+  const retry = Promise.withResolvers<void>();
+  invalidate.mockClear().mockReturnValue(retry.promise);
+  mount({ agent: waiting });
+  await settle();
+  expect(reviewRefetches()).toBe(1);
+  const before = client.getQueryState(queryKey);
+  await act(async () => {
+    await client.refetchQueries({ queryKey });
+    retry.resolve();
+  });
+  expect(client.getQueryState(queryKey)).toMatchObject({
+    dataUpdateCount: before?.dataUpdateCount,
+    errorUpdateCount: (before?.errorUpdateCount ?? 0) + 1,
+    error: expect.any(TypeError),
+  });
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+});
+
+test("a fallback refetch that times out while the reader is away records the failure for the next visit", async () => {
+  mountProbe();
+  const first = mount({ agent: waiting });
+  await send();
+  probe.mode = "hang";
+  await settle(HANDOFF_WAIT_MS);
+  first.unmount();
+  await settle(HANDOFF_REFETCH_MS);
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+  mount({ agent: waiting });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+});
+
+async function leaveBeforeFirstReviewRefetch() {
+  const fetchReview = vi.fn<typeof fetchProbeReview>().mockResolvedValue(null);
+  const observer = mountProbe(fetchReview);
+  const first = mount({ agent: waiting });
+  await send();
+  const reconnect = Promise.withResolvers<boolean>();
+  vi.mocked(reconnectReviewEvents).mockReturnValueOnce(reconnect.promise);
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  first.unmount();
+  observer.unmount();
+  expect(
+    client
+      .getQueryCache()
+      .find({ queryKey: ["review", reviewId] })
+      ?.getObserversCount(),
+  ).toBe(0);
+  fetchReview.mockClear();
+  return { fetchReview, reconnect };
+}
+
+test("a review that answers the first ask while unobserved shows the plain fallback without asking again", async () => {
+  const { fetchReview, reconnect } = await leaveBeforeFirstReviewRefetch();
+  await act(async () => reconnect.resolve(false));
+  expect(fetchReview).toHaveBeenCalledOnce();
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
+  invalidate.mockClear();
+  mount({ agent: waiting });
+  await settle(HANDOFF_WAIT_MS);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+  expect(reviewRefetches()).toBe(0);
+  expect(fetchReview).toHaveBeenCalledOnce();
+});
+
+test("a network failure while away shows the warning on return until the retry receives an HTTP error", async () => {
+  const { fetchReview, reconnect } = await leaveBeforeFirstReviewRefetch();
+  fetchReview.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  await act(async () => reconnect.resolve(false));
+  expect(fetchReview).toHaveBeenCalledOnce();
+  expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: true });
+
+  fetchReview.mockRejectedValueOnce(new ApiError(500, "internal_error", "Internal server error"));
+  mount({ agent: waiting });
+  expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
+  await settle(HANDOFF_WAIT_MS);
+  expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
+  expect(fetchReview).toHaveBeenCalledTimes(2);
+  expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+  expect(getHandoffNotice(reviewId)?.lost).toBe(false);
+});
+
+test("a Send answered by the server opens the notice and frees the button while the refetch never settles", async () => {
   mountProbe();
   await settle();
   probe.mode = "hang";
   mount({ agent: idle });
   await send();
-  expect(screen.getByRole("alertdialog", { name: "Sent" })).toBeTruthy();
-  const sendButton = screen.getByRole("button", { name: "Send", hidden: true });
+  expect(sentNotice()).toBeTruthy();
+  const sendButton = screen.getByRole("button", { name: "Send" });
   expect(sendButton.getAttribute("aria-busy")).not.toBe("true");
   expect((sendButton as HTMLButtonElement).disabled).toBe(false);
 });
@@ -762,7 +1212,7 @@ test("an Approve answered by the server shows its toast and frees the button whi
 });
 
 test.each(["hang", "fail"] as const)(
-  "the window says the server cannot be reached when the stream stays closed and the refetch %ss",
+  "the notice says the server cannot be reached when the stream stays closed and the refetch %ss",
   async (mode) => {
     mountProbe();
     await settle();
@@ -775,14 +1225,14 @@ test.each(["hang", "fail"] as const)(
     if (mode === "hang") expect(screen.getByText(pickedUp)).toBeTruthy();
     await settle(HANDOFF_REFETCH_MS);
     expect(screen.getByText(lostText)).toBeTruthy();
-    const dialog = screen.getByRole("alertdialog");
-    expect(within(dialog).getByText(command)).toBeTruthy();
-    expect(within(dialog).getByRole("button", { name: "Copy" })).toBeTruthy();
-    expect(within(dialog).getByText(/and handle the result with the recense-feedback skill\.$/)).toBeTruthy();
+    const notice = sentNotice();
+    expect(within(notice).getByText(command)).toBeTruthy();
+    expect(within(notice).getByRole("button", { name: "Copy" })).toBeTruthy();
+    expect(within(notice).getByText(/and handle the result with the recense-feedback skill\.$/)).toBeTruthy();
   },
 );
 
-test("the window keeps the normal wording when the stream reopens", async () => {
+test("the notice keeps the normal wording when the stream reopens", async () => {
   vi.mocked(reconnectReviewEvents).mockResolvedValue(true);
   mountProbe();
   await settle();
@@ -793,11 +1243,11 @@ test("the window keeps the normal wording when the stream reopens", async () => 
   await settle(HANDOFF_WAIT_MS + HANDOFF_REFETCH_MS * 2);
   expect(screen.getByText(pickedUp)).toBeTruthy();
   expect(screen.queryByText(lostText)).toBeNull();
-  // A reopened stream refetches by itself: the window adds no refetch of its own.
+  // A reopened stream refetches by itself: the notice adds no refetch of its own.
   expect(reviewRefetches()).toBe(review);
 });
 
-test("a late pick-up after the connection-lost wording switches the window to picked up", async () => {
+test("a late pick-up after the connection-lost wording switches the notice to picked up", async () => {
   mountProbe();
   await settle();
   probe.mode = "fail";

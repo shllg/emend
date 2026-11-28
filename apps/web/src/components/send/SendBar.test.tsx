@@ -40,9 +40,9 @@ function description(node: HTMLElement) {
     .map((id) => document.getElementById(id)?.textContent)
     .join(" ");
 }
-/** The text of the window after a Send, while an agent has not picked up. */
+/** The status of a Sent notice awaiting pick-up. */
 const sentText = /No agent has picked this up yet|Waiting for the agent to pick this up/;
-/** Waits for the window after a Send and closes it, so the page behind it is reachable again. */
+/** Waits for the Sent notice and closes it. */
 async function closeSent() {
   await screen.findByText(sentText);
   fireEvent.click(button("Close"));
@@ -281,7 +281,7 @@ test.each([0, 1, 2])(
     fireEvent.click(send);
     await screen.findByText(sentText);
     expect(screen.queryByRole("dialog", { name: "Send feedback" })).toBeNull();
-    expect(screen.getByRole("dialog", { name: "Sent" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Sent" })).toBeTruthy();
     expectSend({ revision: 3, kind: "go", mode: "fix-all", instruction: unsentCount ? "" : "Explain" });
     await closeSent();
     fireEvent.click(button("Send"));
@@ -629,7 +629,7 @@ test.each([
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(instructions.value).toBe(""));
-    expect(screen.getByText(sentText)).toBeTruthy();
+    expect(await screen.findByText(sentText)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(fetchMock).toHaveBeenLastCalledWith(
       `/api/v1/reviews/${reviewId}/sends`,
@@ -705,11 +705,9 @@ test.each([
       ),
     );
     await waitFor(() => expect(instructions.disabled).toBe(false));
-    // A success opens the window after the Send, which takes focus; only a failure returns it.
-    if (outcome === "failure")
-      await waitFor(() => expect(document.activeElement).toBe(movedFocus ? keepFocus : instructions));
+    await waitFor(() => expect(document.activeElement).toBe(movedFocus ? keepFocus : instructions));
     if (outcome === "success") {
-      expect(screen.getByText(sentText)).toBeTruthy();
+      expect(await screen.findByText(sentText)).toBeTruthy();
       expect(instructions.value).toBe("");
     } else {
       expect(screen.getByRole("alert").textContent).toBe("Synthetic failure");
@@ -724,7 +722,7 @@ test.each([
   { action: "Send", ownToast: true },
   { action: "Approve", ownToast: true },
 ])(
-  "leaving review A suppresses its pending $action completion and preserves review B's toast ($ownToast)",
+  "leaving review A keeps its pending $action result on A and preserves review B's toast ($ownToast)",
   async ({ action, ownToast }) => {
     const pending = Promise.withResolvers<Response>();
     fetchMock.mockReturnValueOnce(pending.promise);
@@ -768,6 +766,8 @@ test.each([
     else expect(screen.getByRole("status").textContent).toBe("");
     expect(input().value).toBe("Keep review B's draft");
     expect(fetchMock).toHaveBeenCalledTimes(ownToast ? 2 : 1);
+    rerender(<SendBar key={reviewId} reviewId={reviewId} revision={3} newestRevision={3} unsentCount={0} />);
+    expect(!!screen.queryByRole("region", { name: "Sent" })).toBe(action === "Send");
   },
 );
 

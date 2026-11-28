@@ -4,7 +4,17 @@ import { Button } from "../ui/Button.tsx";
 import { cn } from "../ui/utils.ts";
 
 /** The command that resumes a review's feedback loop, a Copy button, and the line for other agents. */
-export function ResumeCommand({ reviewId, compact = false }: { reviewId: string; compact?: boolean }) {
+export function ResumeCommand({
+  reviewId,
+  compact = false,
+  buttonSize = "sm",
+  buttonClassName,
+}: {
+  reviewId: string;
+  compact?: boolean;
+  buttonSize?: "sm" | "lg";
+  buttonClassName?: string;
+}) {
   const command = `/recense:recense-feedback ${reviewId}`;
   const { text, copy, result, status } = useCopyText(command, "command");
   return (
@@ -16,7 +26,7 @@ export function ResumeCommand({ reviewId, compact = false }: { reviewId: string;
         >
           {command}
         </code>
-        <Button size="sm" icon={Copy} onClick={copy}>
+        <Button size={buttonSize} icon={Copy} className={buttonClassName} onClick={copy}>
           {result === "copied" ? "Copied" : "Copy"}
         </Button>
         <span role="status" className={cn("text-fg-3 [font:var(--type-meta)]", result !== "failed" && "sr-only")}>

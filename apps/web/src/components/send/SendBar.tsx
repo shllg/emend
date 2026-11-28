@@ -16,6 +16,7 @@ import {
   saveDraft,
   subscribeDrafts,
 } from "../../lib/drafts.ts";
+import { openHandoffNotice, type SendBaseline, useHandoffNotice } from "../../lib/handoff-notices.ts";
 import { useReadOnlyReview } from "../../lib/read-only-review.ts";
 import { useShortcut } from "../../lib/use-shortcut.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -26,15 +27,7 @@ import { Sheet } from "../ui/Sheet.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { useToast } from "../ui/Toast.tsx";
 import { cn, focusRing } from "../ui/utils.ts";
-import {
-  agentStatusText,
-  HandOverNote,
-  HandoffWindow,
-  ResumeDialog,
-  type SendAgent,
-  type SendBaseline,
-  showsHandOver,
-} from "./HandOver.tsx";
+import { agentStatusText, HandOverNote, ResumeDialog, type SendAgent, SentNotice, showsHandOver } from "./HandOver.tsx";
 import { ModePicker } from "./ModePicker.tsx";
 import { ReviewActions, type ReviewLifecycle } from "./ReviewActions.tsx";
 
@@ -85,18 +78,8 @@ export function SendBar({
   useLayoutEffect(() => {
     agentNow.current = agent;
   });
-  const sheetOpenNow = useRef(false);
   const sendTrigger = useRef<HTMLButtonElement>(null);
-  const [handoff, setHandoff] = useState<SendBaseline | null>(null);
-  // On the phone the window waits until the Send sheet has closed: a dialog opened while another
-  // one closes would start under its modal layer and could leave the page unclickable.
-  const deferred = useRef<SendBaseline | null>(null);
-  const closeHandoff = useCallback(() => setHandoff(null), []);
-  const openDeferred = useCallback(() => {
-    const baseline = deferred.current;
-    deferred.current = null;
-    if (baseline) setHandoff(baseline);
-  }, []);
+  const notice = useHandoffNotice(reviewId);
   const desktopInstructions = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
     const field = desktopInstructions.current;
@@ -119,11 +102,6 @@ export function SendBar({
   }, []);
   const mutation = useReviewMutation(reviewId);
   const sending = mutation.isPending || reviewSending;
-  sheetOpenNow.current = sheetOpen;
-  // Without the phone sheet there is nothing to wait for.
-  useEffect(() => {
-    if (!phone) openDeferred();
-  }, [phone, openDeferred]);
   useEffect(() => {
     if (phone) {
       focusDesktop.current = false;
@@ -198,6 +176,10 @@ export function SendBar({
     setConfirmApprove(false);
   }, [confirmApprove, cannotApprove, sending, approved]);
   const statusRef = useRef<HTMLDivElement>(null);
+  const noticeReturnFocus = useCallback(() => {
+    const control = desktopInstructions.current ?? sendTrigger.current;
+    return control && !control.disabled ? control : statusRef.current;
+  }, []);
   // After this dialog's approval the trigger is disabled: focus goes to the bar's status, not to the
   // page. Set in the same update that closes the dialog, because the cached `approved` arrives later.
   const [approvedHere, setApprovedHere] = useState(false);
@@ -254,11 +236,12 @@ export function SendBar({
         refresh: "background",
         accepted: { kind: kind === "approve" ? "approve" : "send", revision },
       });
-      if (kind === "go") clearDraftIfUnchanged(storageKey, instruction);
+      if (kind === "go") {
+        clearDraftIfUnchanged(storageKey, instruction);
+        openHandoffNotice(reviewId, atSend);
+      }
       if (!mounted.current) return;
       if (kind === "go") {
-        if (phone && sheetOpenNow.current) deferred.current = atSend;
-        else setHandoff(atSend);
         setSheetOpen(false);
       } else {
         setApprovedHere(true);
@@ -268,6 +251,7 @@ export function SendBar({
     } catch {
       // The mutation retains the error for the inline alert.
     } finally {
+      if (kind === "go" && desktopInstructions.current) focusDesktop.current = true;
       submitting.current = false;
       finishReviewSend(reviewId);
     }
@@ -393,6 +377,18 @@ export function SendBar({
   );
   return (
     <section aria-label="Send and approve" className="shrink-0 border-t border-line-1 bg-surface">
+      {notice && (
+        <SentNotice
+          key={notice.id}
+          reviewId={reviewId}
+          entry={notice}
+          agent={
+            agent ?? { agentWaiting: false, pendingSend: true, pickedUpAt: null, releasedAt: null, newestRevision: 0 }
+          }
+          phone={phone}
+          returnFocus={noticeReturnFocus}
+        />
+      )}
       {readOnly && <p className="px-4 pt-2 text-13 text-fg-3">This is a sample. Nothing is sent.</p>}
       {phone ? (
         <div className="flex min-h-13 flex-nowrap items-center gap-[0.625rem] py-1.5 pr-[0.625rem] pl-[0.875rem]">
@@ -405,7 +401,6 @@ export function SendBar({
               side="bottom"
               title="Send feedback"
               open={sheetOpen}
-              onClosed={openDeferred}
               onOpenChange={(open) => {
                 if (open && !submitting.current) mutation.reset();
                 setSheetOpen(open);
@@ -598,19 +593,6 @@ export function SendBar({
       >
         {feedback && <div className="mt-2">{feedback}</div>}
       </Dialog>
-      {handoff && (
-        <HandoffWindow
-          reviewId={reviewId}
-          baseline={handoff}
-          agent={
-            agent ?? { agentWaiting: false, pendingSend: true, pickedUpAt: null, releasedAt: null, newestRevision: 0 }
-          }
-          phone={phone}
-          onClose={closeHandoff}
-          returnFocus={desktopInstructions}
-          returnFocusPhone={() => sendTrigger.current}
-        />
-      )}
       {(!phone || !sheetOpen) &&
         (unavailable ||
           (phone && (approveBlocked || olderReason || unsavedReason || retiredReason)) ||
