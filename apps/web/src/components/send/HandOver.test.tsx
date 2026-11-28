@@ -568,11 +568,11 @@ function fetchProbeReview(): Promise<null> {
   if (probe.mode === "fail") return Promise.reject(new TypeError("Failed to fetch"));
   return Promise.resolve(null);
 }
-function Probe({ queryFn }: { queryFn: QueryFunction<null> }) {
+function Probe({ queryFn }: { queryFn: QueryFunction<unknown> }) {
   useQuery({ queryKey: ["review", reviewId], queryFn });
   return null;
 }
-function mountProbe(queryFn: QueryFunction<null> = fetchProbeReview) {
+function mountProbe(queryFn: QueryFunction<unknown> = fetchProbeReview) {
   return render(
     <QueryClientProvider client={client}>
       <Probe queryFn={queryFn} />
@@ -1040,6 +1040,55 @@ test("a Send fetch failure during reconnect lets the next visit retry a cancelle
   expect(reconnectReviewEvents).toHaveBeenCalledTimes(2);
   expect(within(sentNotice()).getByText(lostText)).toBeTruthy();
 });
+
+test.each(["new data", "HTTP 500"])(
+  "a Send fetch returning %s during reconnect still counts after leaving cancels the first ask's refetch",
+  async (answer) => {
+    const queryKey = ["review", reviewId];
+    const fetchReview = vi.fn<QueryFunction<SendAgent | null>>().mockResolvedValue(null);
+    const observer = mountProbe(fetchReview);
+    const first = mount({ agent: waiting });
+    await settle();
+
+    const background = Promise.withResolvers<SendAgent>();
+    const reconnect = Promise.withResolvers<boolean>();
+    vi.mocked(reconnectReviewEvents).mockReturnValueOnce(reconnect.promise);
+    fetchReview
+      .mockClear()
+      .mockReturnValueOnce(background.promise)
+      .mockImplementationOnce(({ signal }) => {
+        return new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
+      });
+    await send();
+    await settle(HANDOFF_WAIT_MS);
+    expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+    expect(fetchReview).toHaveBeenCalledOnce();
+    if (answer === "new data") {
+      await act(async () => background.resolve(waiting));
+      expect(client.getQueryData(queryKey)).toEqual(waiting);
+    } else {
+      const error = new ApiError(500, "internal_error", "Internal server error");
+      await act(async () => background.reject(error));
+      expect(client.getQueryState(queryKey)?.error).toBe(error);
+    }
+
+    await act(async () => reconnect.resolve(false));
+    expect(fetchReview).toHaveBeenCalledTimes(2);
+    first.unmount();
+    observer.unmount();
+    await settle();
+    expect(fetchReview.mock.calls[1]?.[0].signal.aborted).toBe(true);
+    expect(getHandoffNotice(reviewId)).toMatchObject({ asked: true, lost: false });
+
+    invalidate.mockClear();
+    mount({ agent: waiting });
+    await settle();
+    expect(within(sentNotice()).getByText(pickedUp)).toBeTruthy();
+    expect(reconnectReviewEvents).toHaveBeenCalledOnce();
+    expect(reviewRefetches()).toBe(0);
+    expect(fetchReview).toHaveBeenCalledTimes(2);
+  },
+);
 
 test("a newer cached TypeError alone keeps the warning when the retry resolves", async () => {
   const queryKey = ["review", reviewId];

@@ -176,6 +176,7 @@ export function SentNotice({
       const current = getHandoffNotice(reviewId);
       if (!live || current?.id !== id || current.pickedUp || (current.asked && !current.lost)) return;
       const queryKey = ["review", reviewId];
+      const before = client.getQueryState(queryKey);
       markHandoffNotice(reviewId, id, { asked: true });
       // The first ask can finish across visits. A retry belongs to this visit because the next can retry too.
       const stillPending = () => {
@@ -198,7 +199,6 @@ export function SentNotice({
       void client.invalidateQueries({ queryKey: ["inbox"] }, options).catch(() => undefined);
       let slow: number | undefined;
       let connectionLost = false;
-      const before = client.getQueryState(queryKey);
       try {
         // Only the review decides "cannot reach": a slow inbox says nothing about the server.
         await Promise.race([
